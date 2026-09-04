@@ -1,0 +1,165 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "daqing/moonkafka"
+
+import {
+  "moonbitlang/async/socket",
+}
+
+// Values
+pub const API_API_VERSIONS : Int = 18
+
+pub const API_FETCH : Int = 1
+
+pub const API_LIST_OFFSETS : Int = 2
+
+pub const API_METADATA : Int = 3
+
+pub fn crc32c(Bytes, start? : Int, end? : Int) -> UInt
+
+pub fn decode_api_versions_response(Decoder) -> Unit raise
+
+pub fn decode_fetch_response(Decoder) -> Array[FetchPartitionResult] raise
+
+pub fn decode_list_offsets_response(Decoder) -> Map[Int, Int64] raise
+
+pub fn decode_metadata_response(Decoder) -> Metadata raise
+
+pub fn decode_record_batches(Bytes) -> Array[Record] raise DecodeError
+
+pub fn encode_api_versions_request() -> Bytes
+
+pub fn encode_fetch_request(String, Array[(PartitionInfo, Int64)], Int, Int) -> Bytes
+
+pub fn encode_list_offsets_request(String, Array[PartitionInfo], Int64) -> Bytes
+
+pub fn encode_metadata_request(String) -> Bytes
+
+pub fn encode_request(Int, Int, Int, String, Bytes) -> Bytes
+
+pub fn error_name(Int) -> String
+
+// Errors
+pub(all) suberror DecodeError {
+  UnexpectedEof
+  Malformed(String)
+}
+
+pub(all) suberror ProtocolError {
+  ProtocolError(String)
+}
+
+// Types and methods
+pub struct BrokerInfo {
+  node_id : Int
+  host : String
+  port : Int
+}
+
+pub struct Connection {
+  tcp : @socket.Tcp
+  mut correlation_id : Int
+}
+pub async fn Connection::check_api_versions(Self) -> Unit
+pub fn Connection::close(Self) -> Unit
+pub async fn Connection::connect(String, Int) -> Self
+pub async fn Connection::fetch(Self, String, Array[(PartitionInfo, Int64)], max_wait_ms~ : Int, max_bytes~ : Int) -> Array[FetchPartitionResult]
+pub async fn Connection::fetch_metadata(Self, String) -> Metadata
+pub async fn Connection::list_offsets(Self, String, Array[PartitionInfo], Int64) -> Map[Int, Int64]
+pub async fn Connection::request(Self, Int, Int, Bytes) -> Decoder
+
+pub struct Consumer {
+  topic : String
+  start_from : StartFrom
+  meta_conn : Connection
+  mut brokers : Map[Int, BrokerInfo]
+  leader_conns : Map[Int, Connection]
+  partitions : Array[PartitionState]
+  mut closed : Bool
+}
+pub fn Consumer::close(Self) -> Unit
+pub async fn Consumer::connect(host~ : String, port~ : Int, topic~ : String, start_from? : StartFrom) -> Self
+pub async fn Consumer::poll(Self, max_wait_ms? : Int, max_bytes? : Int) -> Array[Record]
+
+pub struct Decoder {
+  data : Bytes
+  mut pos : Int
+}
+pub fn Decoder::new(Bytes, start? : Int) -> Self
+pub fn Decoder::read_bool(Self) -> Bool raise DecodeError
+pub fn Decoder::read_byte(Self) -> Byte raise DecodeError
+pub fn Decoder::read_bytes(Self, Int) -> Bytes raise DecodeError
+pub fn Decoder::read_compact_len(Self) -> Int raise DecodeError
+pub fn Decoder::read_compact_nullable_string(Self) -> String? raise DecodeError
+pub fn Decoder::read_compact_string(Self) -> String raise DecodeError
+pub fn Decoder::read_i16(Self) -> Int raise DecodeError
+pub fn Decoder::read_i32(Self) -> Int raise DecodeError
+pub fn Decoder::read_i64(Self) -> Int64 raise DecodeError
+pub fn Decoder::read_i8(Self) -> Int raise DecodeError
+pub fn Decoder::read_uvarint(Self) -> Int raise DecodeError
+pub fn Decoder::read_varint(Self) -> Int raise DecodeError
+pub fn Decoder::read_varlong(Self) -> Int64 raise DecodeError
+pub fn Decoder::remaining(Self) -> Int
+pub fn Decoder::skip(Self, Int) -> Unit raise DecodeError
+pub fn Decoder::skip_tag_buffer(Self) -> Unit raise DecodeError
+
+pub struct Encoder {
+  buf : Array[Byte]
+}
+pub fn Encoder::new() -> Self
+pub fn Encoder::to_bytes(Self) -> Bytes
+pub fn Encoder::write_bool(Self, Bool) -> Unit
+pub fn Encoder::write_byte(Self, Byte) -> Unit
+pub fn Encoder::write_bytes(Self, Bytes) -> Unit
+pub fn Encoder::write_compact_len(Self, Int) -> Unit
+pub fn Encoder::write_compact_nullable_string(Self, String?) -> Unit
+pub fn Encoder::write_compact_string(Self, String) -> Unit
+pub fn Encoder::write_i16(Self, Int) -> Unit
+pub fn Encoder::write_i32(Self, Int) -> Unit
+pub fn Encoder::write_i64(Self, Int64) -> Unit
+pub fn Encoder::write_i8(Self, Int) -> Unit
+pub fn Encoder::write_nullable_string(Self, String?) -> Unit
+pub fn Encoder::write_tag_buffer(Self) -> Unit
+pub fn Encoder::write_uvarint(Self, UInt) -> Unit
+pub fn Encoder::write_varint(Self, Int) -> Unit
+pub fn Encoder::write_varlong(Self, Int64) -> Unit
+
+pub struct FetchPartitionResult {
+  partition : Int
+  error_code : Int
+  high_watermark : Int64
+  records : Array[Record]
+}
+
+pub struct Metadata {
+  brokers : Map[Int, BrokerInfo]
+  topics : Array[TopicMetadata]
+}
+
+pub struct PartitionInfo {
+  index : Int
+  leader : Int
+  leader_epoch : Int
+}
+
+type PartitionState
+
+pub struct Record {
+  offset : Int64
+  timestamp : Int64
+  key : Bytes?
+  value : Bytes?
+}
+
+pub(all) enum StartFrom {
+  Earliest
+  Latest
+}
+
+pub struct TopicMetadata {
+  name : String
+  partitions : Array[PartitionInfo]
+}
+
+// Type aliases
+
+// Traits
