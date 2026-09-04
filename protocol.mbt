@@ -2,6 +2,9 @@
 // consumer. Targets Kafka 4.x brokers (flexible message versions only).
 
 ///|
+pub const API_PRODUCE : Int = 0
+
+///|
 pub const API_FETCH : Int = 1
 
 ///|
@@ -15,6 +18,9 @@ pub const API_API_VERSIONS : Int = 18
 
 ///|
 const API_VERSIONS_VERSION : Int = 3
+
+///|
+const PRODUCE_VERSION : Int = 11
 
 ///|
 const METADATA_VERSION : Int = 12
@@ -82,6 +88,7 @@ pub fn decode_api_versions_response(d : Decoder) -> Unit raise {
     let max_version = d.read_i16()
     d.skip_tag_buffer()
     let required = match key {
+      API_PRODUCE => PRODUCE_VERSION
       API_FETCH => FETCH_VERSION
       API_METADATA => METADATA_VERSION
       API_LIST_OFFSETS => LIST_OFFSETS_VERSION
@@ -245,6 +252,73 @@ pub fn decode_list_offsets_response(d : Decoder) -> Map[Int, Int64] raise {
 }
 
 ///|
+/// Encode a Produce v11 request: one topic, one record batch per partition.
+pub fn encode_produce_request(
+  topic : String,
+  partitions : Array[(Int, Bytes)],
+  acks : Int,
+  timeout_ms : Int,
+) -> Bytes {
+  let body = Encoder::new()
+  body.write_compact_nullable_string(None) // transactional_id
+  body.write_i16(acks)
+  body.write_i32(timeout_ms)
+  body.write_compact_len(1) // one topic
+  body.write_compact_string(topic)
+  body.write_compact_len(partitions.length())
+  for entry in partitions {
+    let (index, batch) = entry
+    body.write_i32(index)
+    body.write_compact_len(batch.length()) // records: COMPACT_BYTES
+    body.write_bytes(batch)
+    body.write_tag_buffer()
+  }
+  body.write_tag_buffer()
+  body.write_tag_buffer()
+  body.to_bytes()
+}
+
+///|
+pub struct ProducePartitionResult {
+  partition : Int
+  error_code : Int
+  base_offset : Int64
+}
+
+///|
+/// Decode a Produce v11 response (after the v1 response header).
+pub fn decode_produce_response(
+  d : Decoder,
+) -> Array[ProducePartitionResult] raise {
+  let results : Array[ProducePartitionResult] = []
+  let topic_count = d.read_compact_len()
+  for _ in 0..<topic_count {
+    let _name = d.read_compact_string()
+    let partition_count = d.read_compact_len()
+    for _ in 0..<partition_count {
+      let partition = d.read_i32()
+      let error_code = d.read_i16()
+      let base_offset = d.read_i64()
+      let _log_append_time = d.read_i64()
+      let _log_start_offset = d.read_i64()
+      let record_error_count = d.read_compact_len()
+      for _ in 0..<record_error_count {
+        let _batch_index = d.read_i32()
+        let _message = d.read_compact_nullable_string()
+        d.skip_tag_buffer()
+      }
+      let _error_message = d.read_compact_nullable_string()
+      d.skip_tag_buffer()
+      results.push({ partition, error_code, base_offset, })
+    }
+    d.skip_tag_buffer()
+  }
+  d.skip(4) // throttle_time_ms
+  d.skip_tag_buffer()
+  results
+}
+
+///|
 pub fn encode_fetch_request(
   topic : String,
   partitions : Array[(PartitionInfo, Int64)],
@@ -346,8 +420,14 @@ pub fn error_name(code : Int) -> String {
     3 => "UNKNOWN_TOPIC_OR_PARTITION"
     5 => "LEADER_NOT_AVAILABLE"
     6 => "NOT_LEADER_OR_FOLLOWER"
+    17 => "INVALID_TOPIC_EXCEPTION"
+    18 => "RECORD_LIST_TOO_LARGE"
+    19 => "NOT_ENOUGH_REPLICAS"
+    20 => "NOT_ENOUGH_REPLICAS_AFTER_APPEND"
+    22 => "INVALID_REQUIRED_ACKS"
     29 => "TOPIC_AUTHORIZATION_FAILED"
     35 => "UNSUPPORTED_VERSION"
+    87 => "INVALID_RECORD"
     _ => "error code \{code}"
   }
 }
