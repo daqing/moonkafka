@@ -276,17 +276,21 @@ and flags come from the guide at implementation time.
 Small, safe refactors that later phases stand on. Keep the existing simple
 producer/consumer working at every step.
 
-- [ ] **Error taxonomy.** Add `protocol/errors.mbt`: full error-code table
-      (0–133) as a `KafkaError` suberror with `code`, `name`, `retriable`,
-      `message`; replace ad-hoc `error_name` uses. Keep `DecodeError` as is.
-- [ ] **Primitives.** `Uuid` (16-byte, ordered/hex formatting); murmur2
-      (`internal/murmur2.mbt`) port of `Utils.murmur2` with the known test
-      vectors (empty, `"21".getBytes`, `"foobar"`, `a2931906`… vectors from
-      the Java test suite) — fix `Producer::pick_partition` to use it so key
-      placement matches other clients.
-- [ ] **Tagged-field encode.** Extend `Encoder` with
-      `write_tag_buffer(tags : Array[(Int, Bytes)])` (sorted by tag, varint
-      sizes); keep `write_tag_buffer()` (empty) as the common case.
+- [x] **Error taxonomy.** DONE (commit 8ca9b85): `errors.mbt` with the full
+      published 4.3 table (codes -1–133) generated mechanically from the
+      protocol page + `Errors.java`; `BrokerError(code, context)` suberror
+      with `name()`/`is_retriable()`; broker-error raise sites converted;
+      `DecodeError` unchanged.
+- [x] **Primitives.** DONE (commits 47aebad, 105e3bf): murmur2 port of
+      `Utils.murmur2` verified against all six `UtilsTest` vectors, producer
+      now partitions by `(murmur2(key) & 0x7fffffff) % n`; `Uuid` with
+      Java-canonical 22-char base64url formatting, parse roundtrip, and
+      validation. Random uuid generation deferred — needs a CSPRNG decision
+      (see risks).
+- [x] **Tagged-field encode.** DONE (commit 01827aa):
+      `Encoder::write_tagged_fields(Array[(Int, Bytes)])` writes ascending,
+      plain-uvarint tag buffers; `write_tag_buffer()` stays for the empty
+      case. Roundtrip + skip tests in place.
 - [ ] **Config structs.** `config/` package: `CommonConfig` (bootstrap
       servers list, client_id, request_timeout_ms, connections_max_idle_ms,
       retries/backoff knobs, security_protocol: plaintext|ssl|sasl_plaintext|
@@ -575,6 +579,11 @@ concurrently; acks release records for redelivery after timeout.
   server-side regex; document differences rather than force-unify.
 - **SCRAM pure-MoonBit crypto**: verify HMAC-SHA256/512 + PBKDF2
   availability in core/x early (Phase 1 spike); C FFI fallback otherwise.
+- **Client-side CSPRNG for member ids**: KIP-848 membership needs
+  client-generated random member ids; `moonbitlang/async`'s `rand_bytes`
+  lives in the tls package and is marked internal-use. Pick a randomness
+  source (moonbitlang/x, FFI getrandom, or an async API change) before
+  Phase 4.
 - **Kafka 4.3.x point releases** may bump max API versions; the negotiation
   matrix (D1) makes that a non-event, but golden files should be regenerated
   per minor release.
