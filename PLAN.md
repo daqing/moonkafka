@@ -314,12 +314,16 @@ lands on the same partitions as the Java/librdkafka clients on the same topic.
 
 ### Phase 1 — Transport hardening
 
-- [ ] **BrokerConnection v2** (`net/`): keep-alive connection to one broker
-      with (a) request **pipelining** — in-flight map `correlation_id →
-      pending task`, responses matched by correlation id; (b) per-request
-      timeout; (c) graceful close + half-close handling; (d) max in-flight
-      cap. Do not break the current `Connection` API for the simple clients
-      until they migrate.
+- [~] **BrokerConnection v2** — DONE at root scope (commit aee0edc; the
+      `net/` package move folds into the later protocol/ split): pipelining
+      via write-lock + frame-level read-lock + pooled out-of-order responses
+      (proven by a fake-broker test that answers request 2 first);
+      per-request `with_timeout` that closes the connection on timeout;
+      EOF/corrupt-frame failures raise `TransportError` and close; max
+      in-flight via semaphore. Design notes: cancellation errors must pass
+      through untranslated inside frame reads, and the write lock's scope
+      must end before awaiting responses (defer-in-helper pattern) — both
+      caught by tests. TODO: migrate producer/consumer onto it.
 - [ ] **Reconnect & bootstrap set.** Connect to any of `bootstrap_servers`
       (round-robin); automatic reconnect with jittered backoff; surface
       `REBOOTSTRAP_REQUIRED` up to the cluster layer which re-bootstraps.
