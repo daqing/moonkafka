@@ -93,6 +93,22 @@ pub async fn Connection::list_offsets(
 }
 
 ///|
+pub async fn Connection::produce(
+  self : Connection,
+  topic : String,
+  partitions : Array[(Int, Bytes)],
+  acks~ : Int,
+  timeout_ms~ : Int,
+) -> Array[ProducePartitionResult] {
+  let d = self.request(
+    API_PRODUCE,
+    PRODUCE_VERSION,
+    encode_produce_request(topic, partitions, acks, timeout_ms),
+  )
+  decode_produce_response(d)
+}
+
+///|
 pub async fn Connection::fetch(
   self : Connection,
   topic : String,
