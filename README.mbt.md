@@ -85,7 +85,7 @@ A runnable example lives in `cmd/main` — it consumes all partitions of a
 topic and prints records until interrupted:
 
 ```sh
-moon run cmd/main -- events [host] [port]
+moon run cmd/main -- consume events [host] [port]
 ```
 
 It can also produce a single message:

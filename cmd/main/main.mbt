@@ -1,6 +1,6 @@
 ///|
 /// Simple consumer example:
-///   moon run --target native cmd/main -- <topic> [host] [port]
+///   moon run --target native cmd/main -- consume <topic> [host] [port]
 /// Consumes all partitions of <topic> and prints records until interrupted.
 ///
 /// Simple producer example:
@@ -11,7 +11,12 @@ async fn main {
   match args.get(1) {
     Some("-h") | Some("--help") => print_help()
     Some("produce") => produce(args)
-    _ => consume(args)
+    Some("consume") => consume(args)
+    _ => {
+      println("unknown command: \{args.get(1).unwrap_or("<none>")}\n")
+      print_help()
+      abort("")
+    }
   }
 }
 
@@ -22,7 +27,7 @@ fn print_help() -> Unit {
       $|moonkafka - a simple Kafka 4.x client
       $|
       $|Usage:
-      $|  main [topic] [host] [port]                        consume a topic (default)
+      $|  main consume [topic] [host] [port]                consume a topic
       $|  main produce <topic> <value> [key] [host] [port]  produce one message
       $|  main -h | --help                                  show this help
       $|
@@ -42,7 +47,7 @@ fn print_help() -> Unit {
       $|    port    bootstrap broker port (default 9092)
       $|
       $|Examples:
-      $|  moon run cmd/main -- events
+      $|  moon run cmd/main -- consume events
       $|  moon run cmd/main -- produce events "hello"
       $|  moon run cmd/main -- produce events "hello" my-key broker.example.com 9093
     ),
@@ -85,9 +90,9 @@ async fn produce(args : Array[String]) -> Unit {
 
 ///|
 async fn consume(args : Array[String]) -> Unit {
-  let topic = args.get(1).unwrap_or("events")
-  let host = args.get(2).unwrap_or("127.0.0.1")
-  let port = match args.get(3) {
+  let topic = args.get(2).unwrap_or("events")
+  let host = args.get(3).unwrap_or("127.0.0.1")
+  let port = match args.get(4) {
     Some(s) =>
       @string.parse_int(s) catch {
         _ => {
