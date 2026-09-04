@@ -5,7 +5,7 @@
 pub(all) enum StartFrom {
   Earliest
   Latest
-}
+} derive(@debug.Debug)
 
 ///|
 struct PartitionState {
@@ -33,11 +33,26 @@ pub async fn Consumer::connect(
   topic~ : String,
   start_from? : StartFrom = Earliest,
 ) -> Consumer {
-  let meta_conn = Connection::connect(host, port)
+  let config = ConsumerConfig::new(["\{host}:\{port}"], topic, start_from~)
+  Consumer::connect_with_config(config)
+}
+
+///|
+/// Connect using explicit configuration, which is validated first. Until
+/// Phase 1 adds the bootstrap set, only the first bootstrap server is dialed.
+pub async fn Consumer::connect_with_config(config : ConsumerConfig) -> Consumer {
+  guard config.common.bootstrap_addresses().get(0) is Some(addr) else {
+    raise ProtocolError::ProtocolError("bootstrap_servers must not be empty")
+  }
+  let meta_conn = Connection::connect(
+    addr.host,
+    addr.port,
+    client_id=config.common.client_id,
+  )
   meta_conn.check_api_versions()
   let consumer = {
-    topic,
-    start_from,
+    topic: config.topic,
+    start_from: config.start_from,
     meta_conn,
     brokers: Map([]),
     leader_conns: Map([]),

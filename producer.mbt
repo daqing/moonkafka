@@ -27,17 +27,32 @@ pub async fn Producer::connect(
   acks? : Int = 1,
   timeout_ms? : Int = 30000,
 ) -> Producer {
-  if acks != 1 && acks != -1 {
-    raise ProtocolError::ProtocolError(
-      "acks must be 1 (leader) or -1 (all), got \{acks}",
-    )
+  let config = ProducerConfig::new(
+    ["\{host}:\{port}"],
+    topic,
+    acks~,
+    request_timeout_ms=timeout_ms,
+  )
+  Producer::connect_with_config(config)
+}
+
+///|
+/// Connect using explicit configuration, which is validated first. Until
+/// Phase 1 adds the bootstrap set, only the first bootstrap server is dialed.
+pub async fn Producer::connect_with_config(config : ProducerConfig) -> Producer {
+  guard config.common.bootstrap_addresses().get(0) is Some(addr) else {
+    raise ProtocolError::ProtocolError("bootstrap_servers must not be empty")
   }
-  let meta_conn = Connection::connect(host, port)
+  let meta_conn = Connection::connect(
+    addr.host,
+    addr.port,
+    client_id=config.common.client_id,
+  )
   meta_conn.check_api_versions()
   let producer = {
-    topic,
-    acks,
-    timeout_ms,
+    topic: config.topic,
+    acks: config.acks,
+    timeout_ms: config.common.request_timeout_ms,
     meta_conn,
     brokers: Map([]),
     leader_conns: Map([]),
