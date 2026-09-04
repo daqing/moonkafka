@@ -24,8 +24,9 @@ Working today:
 - Kafka wire protocol codecs (compact types, zig-zag varints, tagged fields)
 - RecordBatch v2 decoding with CRC32C verification, and encoding for producing
 - ApiVersions v3, Produce v11, Metadata v12, ListOffsets v7, Fetch v12
-- Simple producer: per-leader connections, key-hash/round-robin partitioning,
-  metadata refresh on leadership changes
+- Simple producer: per-leader connections, Kafka-compatible murmur2
+  key-partitioning (round-robin for keyless messages), metadata refresh on
+  leadership changes
 - Simple consumer: per-leader connections, all partitions, in-memory offsets,
   earliest/latest start, metadata refresh on leadership changes
 

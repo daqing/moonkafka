@@ -97,13 +97,14 @@ async fn Producer::refresh_metadata(self : Producer) -> Unit {
 }
 
 ///|
-/// Route a message to a partition: crc32c hash of the key when present
-/// (note: not the Kafka-standard murmur2, so key placement differs from
-/// other clients), round-robin otherwise.
+/// Route a message to a partition: murmur2 hash of the key when present
+/// (Kafka-compatible — same placement as the Java client and librdkafka's
+/// default partitioner), round-robin otherwise. murmur2 is masked to 31 bits
+/// before the modulo, like Utils.toPositive in the Java client.
 fn Producer::pick_partition(self : Producer, key : Bytes?) -> PartitionInfo {
   let n = self.partitions.length()
   let index = match key {
-    Some(k) => (crc32c(k) % n.reinterpret_as_uint()).reinterpret_as_int()
+    Some(k) => (murmur2(k) & 0x7fffffff) % n
     None => {
       let i = self.round_robin % n
       self.round_robin += 1

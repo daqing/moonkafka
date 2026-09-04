@@ -46,6 +46,8 @@ pub fn encode_request(Int, Int, Int, String, Bytes) -> Bytes
 
 pub fn error_name(Int) -> String
 
+pub fn murmur2(Bytes) -> Int
+
 // Errors
 pub(all) suberror DecodeError {
   UnexpectedEof
