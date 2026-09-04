@@ -1,0 +1,5 @@
+// import {
+//   "daqing/moonkafka" @lib,
+// }
+
+pkgtype(kind: "executable")
