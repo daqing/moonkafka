@@ -3,13 +3,18 @@
 ///|
 pub struct Connection {
   tcp : @socket.Tcp
+  client_id : String
   mut correlation_id : Int
 }
 
 ///|
-pub async fn Connection::connect(host : String, port : Int) -> Connection {
+pub async fn Connection::connect(
+  host : String,
+  port : Int,
+  client_id? : String = "moonkafka",
+) -> Connection {
   let tcp = @socket.Tcp::connect_to_host(host, port~)
-  { tcp, correlation_id: 0, }
+  { tcp, client_id, correlation_id: 0, }
 }
 
 ///|
@@ -32,7 +37,7 @@ pub async fn Connection::request(
     api_key,
     api_version,
     self.correlation_id,
-    "moonkafka",
+    self.client_id,
     body,
   )
   self.tcp.write(frame)

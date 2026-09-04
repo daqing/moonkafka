@@ -74,13 +74,29 @@ pub struct BrokerInfo {
   port : Int
 }
 
+pub struct CommonConfig {
+  bootstrap_servers : Array[String]
+  client_id : String
+  request_timeout_ms : Int
+  connection_max_idle_ms : Int
+  retries : Int
+  retry_backoff_ms : Int
+  retry_backoff_max_ms : Int
+  security_protocol : SecurityProtocol
+  sasl : SaslConfig?
+} derive(@debug.Debug)
+pub fn CommonConfig::bootstrap_addresses(Self) -> Array[HostPort] raise ProtocolError
+pub fn CommonConfig::new(Array[String], request_timeout_ms? : Int) -> Self raise
+pub fn CommonConfig::validate(Self) -> Unit raise ProtocolError
+
 pub struct Connection {
   tcp : @socket.Tcp
+  client_id : String
   mut correlation_id : Int
 }
 pub async fn Connection::check_api_versions(Self) -> Unit
 pub fn Connection::close(Self) -> Unit
-pub async fn Connection::connect(String, Int) -> Self
+pub async fn Connection::connect(String, Int, client_id? : String) -> Self
 pub async fn Connection::fetch(Self, String, Array[(PartitionInfo, Int64)], max_wait_ms~ : Int, max_bytes~ : Int) -> Array[FetchPartitionResult]
 pub async fn Connection::fetch_metadata(Self, String) -> Metadata
 pub async fn Connection::list_offsets(Self, String, Array[PartitionInfo], Int64) -> Map[Int, Int64]
@@ -98,7 +114,15 @@ pub struct Consumer {
 }
 pub fn Consumer::close(Self) -> Unit
 pub async fn Consumer::connect(host~ : String, port~ : Int, topic~ : String, start_from? : StartFrom) -> Self
+pub async fn Consumer::connect_with_config(ConsumerConfig) -> Self
 pub async fn Consumer::poll(Self, max_wait_ms? : Int, max_bytes? : Int) -> Array[Record]
+
+pub struct ConsumerConfig {
+  common : CommonConfig
+  topic : String
+  start_from : StartFrom
+} derive(@debug.Debug)
+pub fn ConsumerConfig::new(Array[String], String, start_from? : StartFrom, request_timeout_ms? : Int) -> Self raise
 
 pub struct Decoder {
   data : Bytes
@@ -151,6 +175,12 @@ pub struct FetchPartitionResult {
   records : Array[Record]
 }
 
+pub(all) struct HostPort {
+  host : String
+  port : Int
+} derive(Compare, Eq, Hash, @debug.Debug)
+pub fn HostPort::parse(String) -> Self raise ProtocolError
+
 pub struct Metadata {
   brokers : Map[Int, BrokerInfo]
   topics : Array[TopicMetadata]
@@ -183,7 +213,15 @@ pub struct Producer {
 }
 pub fn Producer::close(Self) -> Unit
 pub async fn Producer::connect(host~ : String, port~ : Int, topic~ : String, acks? : Int, timeout_ms? : Int) -> Self
+pub async fn Producer::connect_with_config(ProducerConfig) -> Self
 pub async fn Producer::send(Self, key? : Bytes, value? : Bytes, timestamp? : Int64) -> Int64
+
+pub struct ProducerConfig {
+  common : CommonConfig
+  topic : String
+  acks : Int
+} derive(@debug.Debug)
+pub fn ProducerConfig::new(Array[String], String, acks? : Int, request_timeout_ms? : Int) -> Self raise
 
 pub(all) struct Record {
   offset : Int64
@@ -192,10 +230,29 @@ pub(all) struct Record {
   value : Bytes?
 }
 
+pub(all) struct SaslConfig {
+  mechanism : SaslMechanism
+  username : String
+  password : String
+} derive(@debug.Debug)
+
+pub(all) enum SaslMechanism {
+  Plain
+  ScramSha256
+  ScramSha512
+} derive(@debug.Debug)
+
+pub(all) enum SecurityProtocol {
+  Plaintext
+  Ssl
+  SaslPlaintext
+  SaslSsl
+} derive(@debug.Debug)
+
 pub(all) enum StartFrom {
   Earliest
   Latest
-}
+} derive(@debug.Debug)
 
 pub struct TopicMetadata {
   name : String
