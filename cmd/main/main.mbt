@@ -73,6 +73,10 @@ async fn produce(args : Array[String]) -> Unit {
     None => 9092
   }
   let producer = @lib.Producer::connect(host~, port~, topic~) catch {
+    @lib.BrokerError(code, msg) => {
+      println("broker refused: \{@lib.error_name(code)}: \{msg}")
+      abort("")
+    }
     e => {
       println("failed to connect: \{e}")
       abort("")
@@ -105,6 +109,10 @@ async fn consume(args : Array[String]) -> Unit {
   let consumer = @lib.Consumer::connect(host~, port~, topic~, start_from=Latest) catch {
     @lib.ProtocolError(msg) => {
       println("failed to connect: \{msg}")
+      abort("")
+    }
+    @lib.BrokerError(code, msg) => {
+      println("broker error: \{@lib.error_name(code)}: \{msg}")
       abort("")
     }
     @lib.Malformed(msg) => {
