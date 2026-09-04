@@ -3,6 +3,7 @@ package "daqing/moonkafka"
 
 import {
   "moonbitlang/async/socket",
+  "moonbitlang/core/debug",
 }
 
 // Values
@@ -199,6 +200,15 @@ pub struct TopicMetadata {
   name : String
   partitions : Array[PartitionInfo]
 }
+
+pub struct Uuid {
+  bytes : Bytes
+} derive(Compare, Eq, Hash, @debug.Debug)
+pub fn Uuid::from_bytes(Bytes) -> Self raise DecodeError
+pub fn Uuid::parse(String) -> Self raise DecodeError
+pub fn Uuid::to_bytes(Self) -> Bytes
+pub fn Uuid::zero() -> Self
+pub impl Show for Uuid
 
 // Type aliases
 
