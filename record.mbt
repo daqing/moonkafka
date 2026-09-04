@@ -42,11 +42,13 @@ const ATTR_CONTROL : Int = 0x20
 /// response's records field). Compressed and control batches are skipped.
 /// A truncated trailing batch (possible when max_bytes splits a batch) is
 /// silently dropped; the caller refetches from the last good offset + 1.
-pub fn decode_record_batches(data : Bytes) -> Array[Record] raise DecodeError {
+pub fn decode_record_batches(
+  data : Bytes,
+) -> Array[Record] raise @buf.DecodeError {
   let records : Array[Record] = []
   let mut pos = 0
   while pos + 12 <= data.length() {
-    let batch_length = Decoder::new(data, start=pos + 8).read_i32() catch {
+    let batch_length = @buf.Decoder::new(data, start=pos + 8).read_i32() catch {
       _ => break
     }
     let batch_end = pos + 12 + batch_length
@@ -65,7 +67,7 @@ fn decode_one_batch(
   start : Int,
   end : Int,
   out : Array[Record],
-) -> Unit raise DecodeError {
+) -> Unit raise @buf.DecodeError {
   let magic = {
     let v = data[start + 16].to_int()
     if v >= 128 {
@@ -77,14 +79,14 @@ fn decode_one_batch(
   if magic != 2 {
     return
   }
-  let stored_crc = Decoder::new(data, start=start + 17).read_i32() catch {
-    _ => raise DecodeError::Malformed("short batch header")
+  let stored_crc = @buf.Decoder::new(data, start=start + 17).read_i32() catch {
+    _ => raise @buf.Malformed("short batch header")
   }
-  let crc = crc32c(data, start=start + 21, end~)
+  let crc = @internal.crc32c(data, start=start + 21, end~)
   if crc != stored_crc.reinterpret_as_uint() {
-    raise DecodeError::Malformed("record batch CRC32C mismatch")
+    raise @buf.Malformed("record batch CRC32C mismatch")
   }
-  let header = Decoder::new(data, start~)
+  let header = @buf.Decoder::new(data, start~)
   let base_offset = header.read_i64()
   header.skip(4 + 4 + 1 + 4) // batchLength, leaderEpoch, magic, crc
   let attributes = header.read_i16()
@@ -119,7 +121,7 @@ fn decode_one_batch(
 ///|
 /// Decode one record: fields relative to the batch (offset/timestamp deltas).
 /// All varints here are zig-zag encoded.
-fn decode_record(d : Decoder) -> Record raise DecodeError {
+fn decode_record(d : @buf.Decoder) -> Record raise @buf.DecodeError {
   let _length = d.read_varint()
   let _attributes = d.read_i8()
   let timestamp_delta = d.read_varlong()
@@ -128,12 +130,12 @@ fn decode_record(d : Decoder) -> Record raise DecodeError {
   let value = read_nullable_varint_bytes(d)
   let header_count = d.read_varint()
   if header_count < 0 {
-    raise DecodeError::Malformed("negative record header count")
+    raise @buf.Malformed("negative record header count")
   }
   for _ in 0..<header_count {
     let key_len = d.read_varint()
     if key_len < 0 {
-      raise DecodeError::Malformed("null record header key")
+      raise @buf.Malformed("null record header key")
     }
     d.skip(key_len)
     let value_len = d.read_varint()
@@ -154,7 +156,7 @@ fn decode_record(d : Decoder) -> Record raise DecodeError {
 /// base offset 0, create-time timestamps. Record timestamps are absolute ms
 /// since epoch; offset deltas are assigned sequentially from 0.
 pub fn encode_record_batch(records : Array[Record]) -> Bytes {
-  let batch = Encoder::new()
+  let batch = @buf.Encoder::new()
   batch.write_i64(0L) // baseOffset
   batch.write_i32(0) // batchLength: patched below
   batch.write_i32(-1) // partitionLeaderEpoch: unknown to the producer
@@ -179,7 +181,7 @@ pub fn encode_record_batch(records : Array[Record]) -> Bytes {
   batch.write_i32(-1) // baseSequence
   batch.write_i32(records.length())
   for i, record in records {
-    let body = Encoder::new()
+    let body = @buf.Encoder::new()
     body.write_i8(0) // attributes
     body.write_varlong(record.timestamp - base_timestamp)
     body.write_varint(i) // offsetDelta
@@ -194,7 +196,7 @@ pub fn encode_record_batch(records : Array[Record]) -> Bytes {
   for i in 0..<4 {
     batch.buf[8 + i] = (batch_length >> (24 - 8 * i)).to_byte()
   }
-  let crc = crc32c(batch.to_bytes(), start=21)
+  let crc = @internal.crc32c(batch.to_bytes(), start=21)
   for i in 0..<4 {
     batch.buf[17 + i] = ((crc >> (24 - 8 * i)) & 0xFFU).to_byte()
   }
@@ -202,7 +204,7 @@ pub fn encode_record_batch(records : Array[Record]) -> Bytes {
 }
 
 ///|
-fn write_nullable_varint_bytes(e : Encoder, b : Bytes?) -> Unit {
+fn write_nullable_varint_bytes(e : @buf.Encoder, b : Bytes?) -> Unit {
   match b {
     None => e.write_varint(-1)
     Some(b) => {
@@ -213,10 +215,12 @@ fn write_nullable_varint_bytes(e : Encoder, b : Bytes?) -> Unit {
 }
 
 ///|
-fn read_nullable_varint_bytes(d : Decoder) -> Bytes? raise DecodeError {
+fn read_nullable_varint_bytes(
+  d : @buf.Decoder,
+) -> Bytes? raise @buf.DecodeError {
   let len = d.read_varint()
   if len < -1 {
-    raise DecodeError::Malformed("invalid negative bytes length")
+    raise @buf.Malformed("invalid negative bytes length")
   }
   if len == -1 {
     None

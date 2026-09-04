@@ -112,14 +112,14 @@ async fn Producer::refresh_metadata(self : Producer) -> Unit {
 }
 
 ///|
-/// Route a message to a partition: murmur2 hash of the key when present
+/// Route a message to a partition: @internal.murmur2 hash of the key when present
 /// (Kafka-compatible — same placement as the Java client and librdkafka's
-/// default partitioner), round-robin otherwise. murmur2 is masked to 31 bits
+/// default partitioner), round-robin otherwise. @internal.murmur2 is masked to 31 bits
 /// before the modulo, like Utils.toPositive in the Java client.
 fn Producer::pick_partition(self : Producer, key : Bytes?) -> PartitionInfo {
   let n = self.partitions.length()
   let index = match key {
-    Some(k) => (murmur2(k) & 0x7fffffff) % n
+    Some(k) => (@internal.murmur2(k) & 0x7fffffff) % n
     None => {
       let i = self.round_robin % n
       self.round_robin += 1

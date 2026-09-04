@@ -1,4 +1,6 @@
 import {
+  "daqing/moonkafka/buf",
+  "daqing/moonkafka/internal",
   "moonbitlang/async",
   "moonbitlang/async/socket",
   "moonbitlang/core/debug",

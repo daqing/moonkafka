@@ -23,7 +23,7 @@ pub fn Connection::close(self : Connection) -> Unit {
 }
 
 ///|
-/// Send a request (flexible version, header v2) and return a Decoder
+/// Send a request (flexible version, header v2) and return a @buf.Decoder
 /// positioned at the response body. ApiVersions is special: its response
 /// header is v0 (no tag buffer) even for flexible versions.
 pub async fn Connection::request(
@@ -31,7 +31,7 @@ pub async fn Connection::request(
   api_key : Int,
   api_version : Int,
   body : Bytes,
-) -> Decoder {
+) -> @buf.Decoder {
   self.correlation_id += 1
   let frame = encode_request(
     api_key,
@@ -42,11 +42,11 @@ pub async fn Connection::request(
   )
   self.tcp.write(frame)
   let size_bytes = self.tcp.read_exactly(4)
-  let size = Decoder::new(size_bytes).read_i32() catch {
-    _ => raise DecodeError::Malformed("bad frame size")
+  let size = @buf.Decoder::new(size_bytes).read_i32() catch {
+    _ => raise @buf.Malformed("bad frame size")
   }
   let data = self.tcp.read_exactly(size)
-  let d = Decoder::new(data)
+  let d = @buf.Decoder::new(data)
   let correlation_id = d.read_i32()
   if correlation_id != self.correlation_id {
     raise ProtocolError::ProtocolError(

@@ -49,13 +49,13 @@ pub fn encode_request(
   client_id : String,
   body : Bytes,
 ) -> Bytes {
-  let header = Encoder::new()
+  let header = @buf.Encoder::new()
   header.write_i16(api_key)
   header.write_i16(api_version)
   header.write_i32(correlation_id)
   header.write_nullable_string(Some(client_id))
   header.write_tag_buffer()
-  let frame = Encoder::new()
+  let frame = @buf.Encoder::new()
   frame.write_i32(header.buf.length() + body.length())
   frame.write_bytes(header.to_bytes())
   frame.write_bytes(body)
@@ -64,7 +64,7 @@ pub fn encode_request(
 
 ///|
 pub fn encode_api_versions_request() -> Bytes {
-  let body = Encoder::new()
+  let body = @buf.Encoder::new()
   body.write_compact_string("moonkafka")
   body.write_compact_string("0.1.0")
   body.write_tag_buffer()
@@ -74,7 +74,7 @@ pub fn encode_api_versions_request() -> Bytes {
 ///|
 /// Check the ApiVersions v3 response; response header is v0 (no tag buffer).
 /// Raises unless the broker supports the API versions this client uses.
-pub fn decode_api_versions_response(d : Decoder) -> Unit raise {
+pub fn decode_api_versions_response(d : @buf.Decoder) -> Unit raise {
   let error_code = d.read_i16()
   if error_code != 0 {
     raise BrokerError(error_code, "ApiVersions failed")
@@ -131,7 +131,7 @@ pub struct Metadata {
 
 ///|
 pub fn encode_metadata_request(topic : String) -> Bytes {
-  let body = Encoder::new()
+  let body = @buf.Encoder::new()
   body.write_compact_len(1) // one topic
   body.write_bytes(Bytes::make(16, b'\x00')) // topic_id: unused
   body.write_compact_nullable_string(Some(topic))
@@ -144,7 +144,7 @@ pub fn encode_metadata_request(topic : String) -> Bytes {
 
 ///|
 /// Decode a Metadata v12 response (after the v1 response header).
-pub fn decode_metadata_response(d : Decoder) -> Metadata raise {
+pub fn decode_metadata_response(d : @buf.Decoder) -> Metadata raise {
   d.skip(4) // throttle_time_ms
   let broker_count = d.read_compact_len()
   let brokers : Map[Int, BrokerInfo] = Map([])
@@ -164,7 +164,7 @@ pub fn decode_metadata_response(d : Decoder) -> Metadata raise {
     let error_code = d.read_i16()
     let name = match d.read_compact_nullable_string() {
       Some(name) => name
-      None => raise DecodeError::Malformed("metadata topic name is null")
+      None => raise @buf.Malformed("metadata topic name is null")
     }
     d.skip(16) // topic_id
     let _is_internal = d.read_bool()
@@ -201,7 +201,7 @@ pub fn encode_list_offsets_request(
   partitions : Array[PartitionInfo],
   timestamp : Int64,
 ) -> Bytes {
-  let body = Encoder::new()
+  let body = @buf.Encoder::new()
   body.write_i32(-1) // replica_id: consumer
   body.write_i8(0) // isolation_level: READ_UNCOMMITTED
   body.write_compact_len(1) // one topic
@@ -220,7 +220,7 @@ pub fn encode_list_offsets_request(
 
 ///|
 /// Decode a ListOffsets v7 response; returns partition index -> offset.
-pub fn decode_list_offsets_response(d : Decoder) -> Map[Int, Int64] raise {
+pub fn decode_list_offsets_response(d : @buf.Decoder) -> Map[Int, Int64] raise {
   d.skip(4) // throttle_time_ms
   let offsets : Map[Int, Int64] = Map([])
   let topic_count = d.read_compact_len()
@@ -256,7 +256,7 @@ pub fn encode_produce_request(
   acks : Int,
   timeout_ms : Int,
 ) -> Bytes {
-  let body = Encoder::new()
+  let body = @buf.Encoder::new()
   body.write_compact_nullable_string(None) // transactional_id
   body.write_i16(acks)
   body.write_i32(timeout_ms)
@@ -285,7 +285,7 @@ pub struct ProducePartitionResult {
 ///|
 /// Decode a Produce v11 response (after the v1 response header).
 pub fn decode_produce_response(
-  d : Decoder,
+  d : @buf.Decoder,
 ) -> Array[ProducePartitionResult] raise {
   let results : Array[ProducePartitionResult] = []
   let topic_count = d.read_compact_len()
@@ -322,7 +322,7 @@ pub fn encode_fetch_request(
   max_wait_ms : Int,
   max_bytes : Int,
 ) -> Bytes {
-  let body = Encoder::new()
+  let body = @buf.Encoder::new()
   body.write_i32(-1) // replica_id: consumer
   body.write_i32(max_wait_ms)
   body.write_i32(1) // min_bytes
@@ -360,7 +360,9 @@ pub struct FetchPartitionResult {
 
 ///|
 /// Decode a Fetch v12 response (after the v1 response header).
-pub fn decode_fetch_response(d : Decoder) -> Array[FetchPartitionResult] raise {
+pub fn decode_fetch_response(
+  d : @buf.Decoder,
+) -> Array[FetchPartitionResult] raise {
   d.skip(4) // throttle_time_ms
   let error_code = d.read_i16()
   if error_code != 0 {

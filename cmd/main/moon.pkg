@@ -1,5 +1,6 @@
 import {
   "daqing/moonkafka" @lib,
+  "daqing/moonkafka/buf",
   "moonbitlang/async",
   "moonbitlang/core/encoding/utf8",
   "moonbitlang/core/env",
