@@ -12,6 +12,14 @@ pub(all) suberror BrokerError {
 }
 
 ///|
+/// Transport-level failure. The affected connection has been closed when
+/// either variant is raised; callers reconnect rather than retry in place.
+pub(all) suberror TransportError {
+  ConnectionClosed(String)
+  RequestTimeout(String)
+}
+
+///|
 /// Protocol name for the error code, e.g. "OFFSET_OUT_OF_RANGE".
 pub fn BrokerError::name(self : BrokerError) -> String {
   let BrokerError(code, _) = self

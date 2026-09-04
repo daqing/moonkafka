@@ -3,6 +3,8 @@ package "daqing/moonkafka"
 
 import {
   "daqing/moonkafka/buf",
+  "moonbitlang/async",
+  "moonbitlang/async/semaphore",
   "moonbitlang/async/socket",
   "moonbitlang/core/debug",
 }
@@ -61,6 +63,11 @@ pub(all) suberror ProtocolError {
   ProtocolError(String)
 }
 
+pub(all) suberror TransportError {
+  ConnectionClosed(String)
+  RequestTimeout(String)
+}
+
 // Types and methods
 pub struct Backoff {
   base_ms : Int
@@ -70,6 +77,20 @@ pub struct Backoff {
 pub fn Backoff::new(base_ms? : Int, max_ms? : Int) -> Self raise
 pub fn Backoff::next_ms(Self) -> Int
 pub fn Backoff::reset(Self) -> Unit
+
+pub struct BrokerConnection {
+  tcp : @socket.Tcp
+  client_id : String
+  write_lock : @async.Mutex
+  read_lock : @async.Mutex
+  responses : Map[Int, Bytes]
+  mut correlation_id : Int
+  mut closed : Bool
+  in_flight : @semaphore.Semaphore
+}
+pub fn BrokerConnection::close(Self) -> Unit
+pub async fn BrokerConnection::connect(String, Int, client_id? : String, max_in_flight? : Int) -> Self
+pub async fn BrokerConnection::request(Self, Int, Int, Bytes, timeout_ms? : Int) -> @buf.Decoder
 
 pub struct BrokerInfo {
   node_id : Int
