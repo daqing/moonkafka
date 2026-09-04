@@ -17,12 +17,21 @@ the API surface below reflects the intended design and may change before the fir
 - MoonBit compiles to small, fast WebAssembly (and native) targets, making it a good fit for lightweight producers/consumers in edge, serverless, and embedded environments.
 - Kafka 4.x is a clean protocol baseline: by dropping ZooKeeper-era and pre-4.x compatibility, the driver stays small and easy to reason about.
 
-## Features (planned)
+## Features
 
-- Kafka wire protocol encoding/decoding, generated against the Kafka 4.x protocol definitions
-- Producer: send records to topics with partitioning support
-- Consumer: fetch records, consumer groups with the new KIP-848 consumer rebalance protocol
-- Metadata & admin operations against KRaft clusters
+Working today:
+
+- Kafka wire protocol codecs (compact types, zig-zag varints, tagged fields)
+- RecordBatch v2 decoding with CRC32C verification
+- ApiVersions v3, Metadata v12, ListOffsets v7, Fetch v12
+- Simple consumer: per-leader connections, all partitions, in-memory offsets,
+  earliest/latest start, metadata refresh on leadership changes
+
+Planned:
+
+- Producer
+- Consumer groups with the new KIP-848 consumer rebalance protocol
+- Compressed batches (gzip/snappy/lz4/zstd)
 - TLS and SASL authentication
 
 ## Requirements
@@ -36,19 +45,35 @@ the API surface below reflects the intended design and may change before the fir
 moon add daqing/moonkafka
 ```
 
-## Quick start (API sketch)
+## Quick start
 
-```moonbit
-// Produce a record
-let producer = @moonkafka.Producer::connect("localhost:9092")
-producer.send(topic="events", key="user-1", value="hello kafka")
-
-// Consume records
-let consumer = @moonkafka.Consumer::connect("localhost:9092", group="my-app")
-for record in consumer.poll("events") {
-  println(record.value)
+```moonbit nocheck
+///|
+async fn main {
+  let consumer = @moonkafka.Consumer::connect(
+    host="127.0.0.1",
+    port=9092,
+    topic="events",
+    start_from=@moonkafka.StartFrom::Earliest,
+  )
+  defer consumer.close()
+  for ;; {
+    for record in consumer.poll() {
+      println("offset=\{record.offset} value=\{record.value}")
+    }
+  }
 }
 ```
+
+A runnable example lives in `cmd/main` — it consumes all partitions of a
+topic and prints records until interrupted:
+
+```sh
+moon run cmd/main -- events [host] [port]
+```
+
+Note: the socket layer is native-backend only (`moonbitlang/async`), so the
+module targets `native`.
 
 ## Development
 
