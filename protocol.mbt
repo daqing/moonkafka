@@ -77,9 +77,7 @@ pub fn encode_api_versions_request() -> Bytes {
 pub fn decode_api_versions_response(d : Decoder) -> Unit raise {
   let error_code = d.read_i16()
   if error_code != 0 {
-    raise ProtocolError::ProtocolError(
-      "ApiVersions failed: \{error_name(error_code)}",
-    )
+    raise BrokerError(error_code, "ApiVersions failed")
   }
   let count = d.read_compact_len()
   for _ in 0..<count {
@@ -189,9 +187,7 @@ pub fn decode_metadata_response(d : Decoder) -> Metadata raise {
     d.skip(4) // topic_authorized_operations
     d.skip_tag_buffer()
     if error_code != 0 {
-      raise ProtocolError::ProtocolError(
-        "Metadata failed for topic \{name}: \{error_name(error_code)}",
-      )
+      raise BrokerError(error_code, "Metadata failed for topic \{name}")
     }
     topics.push({ name, partitions, })
   }
@@ -239,8 +235,9 @@ pub fn decode_list_offsets_response(d : Decoder) -> Map[Int, Int64] raise {
       let _leader_epoch = d.read_i32()
       d.skip_tag_buffer()
       if error_code != 0 {
-        raise ProtocolError::ProtocolError(
-          "ListOffsets failed for partition \{index}: \{error_name(error_code)}",
+        raise BrokerError(
+          error_code,
+          "ListOffsets failed for partition \{index}",
         )
       }
       offsets[index] = offset
@@ -367,9 +364,7 @@ pub fn decode_fetch_response(d : Decoder) -> Array[FetchPartitionResult] raise {
   d.skip(4) // throttle_time_ms
   let error_code = d.read_i16()
   if error_code != 0 {
-    raise ProtocolError::ProtocolError(
-      "Fetch failed: \{error_name(error_code)}",
-    )
+    raise BrokerError(error_code, "Fetch failed")
   }
   let _session_id = d.read_i32()
   let results : Array[FetchPartitionResult] = []
@@ -409,27 +404,6 @@ pub fn decode_fetch_response(d : Decoder) -> Array[FetchPartitionResult] raise {
   }
   d.skip_tag_buffer()
   results
-}
-
-///|
-/// Names for the error codes a simple consumer can plausibly hit.
-pub fn error_name(code : Int) -> String {
-  match code {
-    0 => "NONE"
-    1 => "OFFSET_OUT_OF_RANGE"
-    3 => "UNKNOWN_TOPIC_OR_PARTITION"
-    5 => "LEADER_NOT_AVAILABLE"
-    6 => "NOT_LEADER_OR_FOLLOWER"
-    17 => "INVALID_TOPIC_EXCEPTION"
-    18 => "RECORD_LIST_TOO_LARGE"
-    19 => "NOT_ENOUGH_REPLICAS"
-    20 => "NOT_ENOUGH_REPLICAS_AFTER_APPEND"
-    22 => "INVALID_REQUIRED_ACKS"
-    29 => "TOPIC_AUTHORIZATION_FAILED"
-    35 => "UNSUPPORTED_VERSION"
-    87 => "INVALID_RECORD"
-    _ => "error code \{code}"
-  }
 }
 
 ///|

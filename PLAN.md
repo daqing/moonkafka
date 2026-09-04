@@ -134,11 +134,13 @@ member, background autocommit task, metadata refresher task. Shared state via
 `@async.Mutex`/condvars where needed; user-facing calls stay async and
 cancellation-aware (respect `moonbitlang/async` cancellation semantics).
 
-**D7 — Error taxonomy.** Full error-code table (codes 0–133 as of 4.3) as a
-single `suberror KafkaError` family carrying `retriable`/`fatal`/
-`dont_overwrite` metadata from the protocol docs, plus decode/transport errors
-kept separate (`DecodeError`, IO). Public APIs surface typed errors; retry
-policy lives in the client, not the caller.
+**D7 — Error taxonomy.** Broker-reported failures are
+`BrokerError(code, context)` (a suberror) with the full 4.3 error-code table
+(codes -1–133) backing `error_name`/`error_retriable` lookups (the table is
+generated mechanically from the protocol docs + `Errors.java`). Client-side
+violations stay `ProtocolError(String)`; wire decoding stays `DecodeError`.
+Public APIs surface typed errors; retry policy lives in the client, not the
+caller.
 
 **D8 — Config.** One `Config` struct per client surface (producer/consumer/
 admin) with librdkafka-style snake_case fields (`bootstrap_servers`,
