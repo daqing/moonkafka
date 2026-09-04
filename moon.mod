@@ -17,10 +17,14 @@ readme = "README.mbt.md"
 
 repository = ""
 
-license = "Apache-2.0"
+license = "MIT"
 
-keywords = []
+keywords = [ ]
 
-preferred_target = "wasm"
+preferred_target = "native"
 
 description = ""
+
+import {
+  "moonbitlang/async@0.21.2",
+}
