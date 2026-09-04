@@ -115,11 +115,11 @@ async fn consume(args : Array[String]) -> Unit {
       println("broker error: \{@lib.error_name(code)}: \{msg}")
       abort("")
     }
-    @lib.Malformed(msg) => {
+    @buf.Malformed(msg) => {
       println("protocol decode error: \{msg}")
       abort("")
     }
-    @lib.UnexpectedEof => {
+    @buf.UnexpectedEof => {
       println("protocol decode error: unexpected end of response")
       abort("")
     }

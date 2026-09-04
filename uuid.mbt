@@ -15,9 +15,9 @@ pub fn Uuid::zero() -> Uuid {
 
 ///|
 /// Wrap exactly 16 bytes; anything else is a wire-level violation.
-pub fn Uuid::from_bytes(bytes : Bytes) -> Uuid raise DecodeError {
+pub fn Uuid::from_bytes(bytes : Bytes) -> Uuid raise @buf.DecodeError {
   if bytes.length() != 16 {
-    raise DecodeError::Malformed("uuid must be 16 bytes, got \{bytes.length()}")
+    raise @buf.Malformed("uuid must be 16 bytes, got \{bytes.length()}")
   }
   { bytes, }
 }
@@ -61,7 +61,7 @@ let b64url_chars : Array[String] = [
 ]
 
 ///|
-fn uuid_char_value(c : Char) -> Int raise DecodeError {
+fn uuid_char_value(c : Char) -> Int raise @buf.DecodeError {
   let v : Int = c.to_int()
   if v >= 65 && v <= 90 {
     v - 65 // A-Z
@@ -74,18 +74,16 @@ fn uuid_char_value(c : Char) -> Int raise DecodeError {
   } else if v == 95 {
     63 // _
   } else {
-    raise DecodeError::Malformed("invalid base64url character code \{v}")
+    raise @buf.Malformed("invalid base64url character code \{v}")
   }
 }
 
 ///|
 /// Parse the canonical 22-char form (as produced by Show). The zero padding
 /// in the trailing character's low bits is ignored, like Java's decoder.
-pub fn Uuid::parse(s : String) -> Uuid raise DecodeError {
+pub fn Uuid::parse(s : String) -> Uuid raise @buf.DecodeError {
   if s.length() != 22 {
-    raise DecodeError::Malformed(
-      "uuid string must be 22 chars, got \{s.length()}",
-    )
+    raise @buf.Malformed("uuid string must be 22 chars, got \{s.length()}")
   }
   let out : Array[Byte] = Array::new(capacity=16)
   let mut acc : Int = 0

@@ -2,6 +2,7 @@
 package "daqing/moonkafka"
 
 import {
+  "daqing/moonkafka/buf",
   "moonbitlang/async/socket",
   "moonbitlang/core/debug",
 }
@@ -19,19 +20,17 @@ pub const API_PRODUCE : Int = 0
 
 pub fn backoff_ms(Int, Int, Int) -> Int
 
-pub fn crc32c(Bytes, start? : Int, end? : Int) -> UInt
+pub fn decode_api_versions_response(@buf.Decoder) -> Unit raise
 
-pub fn decode_api_versions_response(Decoder) -> Unit raise
+pub fn decode_fetch_response(@buf.Decoder) -> Array[FetchPartitionResult] raise
 
-pub fn decode_fetch_response(Decoder) -> Array[FetchPartitionResult] raise
+pub fn decode_list_offsets_response(@buf.Decoder) -> Map[Int, Int64] raise
 
-pub fn decode_list_offsets_response(Decoder) -> Map[Int, Int64] raise
+pub fn decode_metadata_response(@buf.Decoder) -> Metadata raise
 
-pub fn decode_metadata_response(Decoder) -> Metadata raise
+pub fn decode_produce_response(@buf.Decoder) -> Array[ProducePartitionResult] raise
 
-pub fn decode_produce_response(Decoder) -> Array[ProducePartitionResult] raise
-
-pub fn decode_record_batches(Bytes) -> Array[Record] raise DecodeError
+pub fn decode_record_batches(Bytes) -> Array[Record] raise @buf.DecodeError
 
 pub fn encode_api_versions_request() -> Bytes
 
@@ -51,19 +50,12 @@ pub fn error_name(Int) -> String
 
 pub fn error_retriable(Int) -> Bool
 
-pub fn murmur2(Bytes) -> Int
-
 // Errors
 pub(all) suberror BrokerError {
   BrokerError(Int, String)
 }
 pub fn BrokerError::is_retriable(Self) -> Bool
 pub fn BrokerError::name(Self) -> String
-
-pub(all) suberror DecodeError {
-  UnexpectedEof
-  Malformed(String)
-}
 
 pub(all) suberror ProtocolError {
   ProtocolError(String)
@@ -112,7 +104,7 @@ pub async fn Connection::fetch(Self, String, Array[(PartitionInfo, Int64)], max_
 pub async fn Connection::fetch_metadata(Self, String) -> Metadata
 pub async fn Connection::list_offsets(Self, String, Array[PartitionInfo], Int64) -> Map[Int, Int64]
 pub async fn Connection::produce(Self, String, Array[(Int, Bytes)], acks~ : Int, timeout_ms~ : Int) -> Array[ProducePartitionResult]
-pub async fn Connection::request(Self, Int, Int, Bytes) -> Decoder
+pub async fn Connection::request(Self, Int, Int, Bytes) -> @buf.Decoder
 
 pub struct Consumer {
   topic : String
@@ -141,50 +133,6 @@ pub struct Deadline {
 pub fn Deadline::after_ms(Int64) -> Self
 pub fn Deadline::expired(Self) -> Bool
 pub fn Deadline::remaining_ms(Self) -> Int64
-
-pub struct Decoder {
-  data : Bytes
-  mut pos : Int
-}
-pub fn Decoder::new(Bytes, start? : Int) -> Self
-pub fn Decoder::read_bool(Self) -> Bool raise DecodeError
-pub fn Decoder::read_byte(Self) -> Byte raise DecodeError
-pub fn Decoder::read_bytes(Self, Int) -> Bytes raise DecodeError
-pub fn Decoder::read_compact_len(Self) -> Int raise DecodeError
-pub fn Decoder::read_compact_nullable_string(Self) -> String? raise DecodeError
-pub fn Decoder::read_compact_string(Self) -> String raise DecodeError
-pub fn Decoder::read_i16(Self) -> Int raise DecodeError
-pub fn Decoder::read_i32(Self) -> Int raise DecodeError
-pub fn Decoder::read_i64(Self) -> Int64 raise DecodeError
-pub fn Decoder::read_i8(Self) -> Int raise DecodeError
-pub fn Decoder::read_uvarint(Self) -> Int raise DecodeError
-pub fn Decoder::read_varint(Self) -> Int raise DecodeError
-pub fn Decoder::read_varlong(Self) -> Int64 raise DecodeError
-pub fn Decoder::remaining(Self) -> Int
-pub fn Decoder::skip(Self, Int) -> Unit raise DecodeError
-pub fn Decoder::skip_tag_buffer(Self) -> Unit raise DecodeError
-
-pub struct Encoder {
-  buf : Array[Byte]
-}
-pub fn Encoder::new() -> Self
-pub fn Encoder::to_bytes(Self) -> Bytes
-pub fn Encoder::write_bool(Self, Bool) -> Unit
-pub fn Encoder::write_byte(Self, Byte) -> Unit
-pub fn Encoder::write_bytes(Self, Bytes) -> Unit
-pub fn Encoder::write_compact_len(Self, Int) -> Unit
-pub fn Encoder::write_compact_nullable_string(Self, String?) -> Unit
-pub fn Encoder::write_compact_string(Self, String) -> Unit
-pub fn Encoder::write_i16(Self, Int) -> Unit
-pub fn Encoder::write_i32(Self, Int) -> Unit
-pub fn Encoder::write_i64(Self, Int64) -> Unit
-pub fn Encoder::write_i8(Self, Int) -> Unit
-pub fn Encoder::write_nullable_string(Self, String?) -> Unit
-pub fn Encoder::write_tag_buffer(Self) -> Unit
-pub fn Encoder::write_tagged_fields(Self, Array[(Int, Bytes)]) -> Unit
-pub fn Encoder::write_uvarint(Self, UInt) -> Unit
-pub fn Encoder::write_varint(Self, Int) -> Unit
-pub fn Encoder::write_varlong(Self, Int64) -> Unit
 
 pub struct FetchPartitionResult {
   partition : Int
@@ -280,8 +228,8 @@ pub struct TopicMetadata {
 pub struct Uuid {
   bytes : Bytes
 } derive(Compare, Eq, Hash, @debug.Debug)
-pub fn Uuid::from_bytes(Bytes) -> Self raise DecodeError
-pub fn Uuid::parse(String) -> Self raise DecodeError
+pub fn Uuid::from_bytes(Bytes) -> Self raise @buf.DecodeError
+pub fn Uuid::parse(String) -> Self raise @buf.DecodeError
 pub fn Uuid::to_bytes(Self) -> Bytes
 pub fn Uuid::zero() -> Self
 pub impl Show for Uuid
