@@ -86,3 +86,35 @@ test "compact string roundtrip" {
   assert_eq(d.read_compact_nullable_string(), None)
   assert_eq(d.read_compact_nullable_string(), Some(""))
 }
+
+///|
+test "tagged fields roundtrip in ascending order" {
+  let enc = @moonkafka.Encoder::new()
+  enc.write_tagged_fields([(5, b"five"), (1, b"one"), (300, b"big-tag")])
+  let d = @moonkafka.Decoder::new(enc.to_bytes())
+  assert_eq(d.read_uvarint(), 3)
+  assert_eq(d.read_uvarint(), 1)
+  assert_eq(d.read_bytes(d.read_uvarint()), b"one")
+  assert_eq(d.read_uvarint(), 5)
+  assert_eq(d.read_bytes(d.read_uvarint()), b"five")
+  assert_eq(d.read_uvarint(), 300)
+  assert_eq(d.read_bytes(d.read_uvarint()), b"big-tag")
+}
+
+///|
+test "empty tag forms both read as zero count" {
+  let enc = @moonkafka.Encoder::new()
+  enc.write_tag_buffer()
+  enc.write_tagged_fields([])
+  let d = @moonkafka.Decoder::new(enc.to_bytes())
+  assert_eq(d.read_uvarint(), 0)
+  assert_eq(d.read_uvarint(), 0)
+  // and skip_tag_buffer consumes a populated buffer in one go
+  let enc2 = @moonkafka.Encoder::new()
+  enc2.write_tagged_fields([(7, b"\x00\xff")])
+  enc2.write_tag_buffer()
+  let d2 = @moonkafka.Decoder::new(enc2.to_bytes())
+  d2.skip_tag_buffer()
+  d2.skip_tag_buffer()
+  assert_eq(d2.remaining(), 0)
+}

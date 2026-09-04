@@ -139,6 +139,25 @@ pub fn Encoder::write_tag_buffer(self : Encoder) -> Unit {
 }
 
 ///|
+/// Tag buffer with the given tagged fields. Count, tag numbers, and payload
+/// sizes are plain unsigned varints (not compact +1). Fields are written in
+/// ascending tag order as the protocol requires; tag numbers must be unique.
+pub fn Encoder::write_tagged_fields(
+  self : Encoder,
+  tags : Array[(Int, Bytes)],
+) -> Unit {
+  let sorted = tags.copy()
+  sorted.sort_by(fn(a, b) { a.0.compare(b.0) })
+  self.write_uvarint(sorted.length().reinterpret_as_uint())
+  for pair in sorted {
+    let (tag, data) = pair
+    self.write_uvarint(tag.reinterpret_as_uint())
+    self.write_uvarint(data.length().reinterpret_as_uint())
+    self.write_bytes(data)
+  }
+}
+
+///|
 pub struct Decoder {
   data : Bytes
   mut pos : Int

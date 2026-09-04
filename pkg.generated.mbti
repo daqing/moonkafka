@@ -139,6 +139,7 @@ pub fn Encoder::write_i64(Self, Int64) -> Unit
 pub fn Encoder::write_i8(Self, Int) -> Unit
 pub fn Encoder::write_nullable_string(Self, String?) -> Unit
 pub fn Encoder::write_tag_buffer(Self) -> Unit
+pub fn Encoder::write_tagged_fields(Self, Array[(Int, Bytes)]) -> Unit
 pub fn Encoder::write_uvarint(Self, UInt) -> Unit
 pub fn Encoder::write_varint(Self, Int) -> Unit
 pub fn Encoder::write_varlong(Self, Int64) -> Unit
