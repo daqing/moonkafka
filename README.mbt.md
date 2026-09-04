@@ -22,14 +22,16 @@ the API surface below reflects the intended design and may change before the fir
 Working today:
 
 - Kafka wire protocol codecs (compact types, zig-zag varints, tagged fields)
-- RecordBatch v2 decoding with CRC32C verification
-- ApiVersions v3, Metadata v12, ListOffsets v7, Fetch v12
+- RecordBatch v2 decoding with CRC32C verification, and encoding for producing
+- ApiVersions v3, Produce v11, Metadata v12, ListOffsets v7, Fetch v12
+- Simple producer: per-leader connections, key-hash/round-robin partitioning,
+  metadata refresh on leadership changes
 - Simple consumer: per-leader connections, all partitions, in-memory offsets,
   earliest/latest start, metadata refresh on leadership changes
 
 Planned:
 
-- Producer
+- Batched/async producer
 - Consumer groups with the new KIP-848 consumer rebalance protocol
 - Compressed batches (gzip/snappy/lz4/zstd)
 - TLS and SASL authentication
@@ -50,6 +52,20 @@ moon add daqing/moonkafka
 ```moonbit nocheck
 ///|
 async fn main {
+  // Produce
+  let producer = @moonkafka.Producer::connect(
+    host="127.0.0.1",
+    port=9092,
+    topic="events",
+  )
+  defer producer.close()
+  let offset = producer.send(
+    key=@utf8.encode("k1"),
+    value=@utf8.encode("hello"),
+  )
+  println("produced at offset \{offset}")
+
+  // Consume
   let consumer = @moonkafka.Consumer::connect(
     host="127.0.0.1",
     port=9092,
@@ -70,6 +86,12 @@ topic and prints records until interrupted:
 
 ```sh
 moon run cmd/main -- events [host] [port]
+```
+
+It can also produce a single message:
+
+```sh
+moon run cmd/main -- produce events "hello" [key] [host] [port]
 ```
 
 Note: the socket layer is native-backend only (`moonbitlang/async`), so the

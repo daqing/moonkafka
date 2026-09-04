@@ -18,7 +18,7 @@
 //   61  records...
 
 ///|
-pub struct Record {
+pub(all) struct Record {
   offset : Int64
   timestamp : Int64
   key : Bytes?
@@ -146,6 +146,69 @@ fn decode_record(d : Decoder) -> Record raise DecodeError {
     timestamp: timestamp_delta,
     key,
     value,
+  }
+}
+
+///|
+/// Encode records into a single RecordBatch v2 (magic = 2), uncompressed,
+/// base offset 0, create-time timestamps. Record timestamps are absolute ms
+/// since epoch; offset deltas are assigned sequentially from 0.
+pub fn encode_record_batch(records : Array[Record]) -> Bytes {
+  let batch = Encoder::new()
+  batch.write_i64(0L) // baseOffset
+  batch.write_i32(0) // batchLength: patched below
+  batch.write_i32(-1) // partitionLeaderEpoch: unknown to the producer
+  batch.write_i8(2) // magic
+  batch.write_i32(0) // crc: patched below
+  batch.write_i16(0) // attributes: no compression, create-time
+  batch.write_i32(records.length() - 1) // lastOffsetDelta (-1 when empty)
+  let base_timestamp = match records.get(0) {
+    Some(r) => r.timestamp
+    None => 0L
+  }
+  let mut max_timestamp = base_timestamp
+  for r in records {
+    if r.timestamp > max_timestamp {
+      max_timestamp = r.timestamp
+    }
+  }
+  batch.write_i64(base_timestamp)
+  batch.write_i64(max_timestamp)
+  batch.write_i64(-1L) // producerId: none (no idempotence)
+  batch.write_i16(-1) // producerEpoch
+  batch.write_i32(-1) // baseSequence
+  batch.write_i32(records.length())
+  for i, record in records {
+    let body = Encoder::new()
+    body.write_i8(0) // attributes
+    body.write_varlong(record.timestamp - base_timestamp)
+    body.write_varint(i) // offsetDelta
+    write_nullable_varint_bytes(body, record.key)
+    write_nullable_varint_bytes(body, record.value)
+    body.write_varint(0) // header count
+    batch.write_varint(body.buf.length())
+    batch.write_bytes(body.to_bytes())
+  }
+  // Patch batchLength and the CRC32C over the bytes after the crc field.
+  let batch_length = batch.buf.length() - 12
+  for i in 0..<4 {
+    batch.buf[8 + i] = (batch_length >> (24 - 8 * i)).to_byte()
+  }
+  let crc = crc32c(batch.to_bytes(), start=21)
+  for i in 0..<4 {
+    batch.buf[17 + i] = ((crc >> (24 - 8 * i)) & 0xFFU).to_byte()
+  }
+  batch.to_bytes()
+}
+
+///|
+fn write_nullable_varint_bytes(e : Encoder, b : Bytes?) -> Unit {
+  match b {
+    None => e.write_varint(-1)
+    Some(b) => {
+      e.write_varint(b.length())
+      e.write_bytes(b)
+    }
   }
 }
 
