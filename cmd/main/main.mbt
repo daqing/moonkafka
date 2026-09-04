@@ -8,11 +8,45 @@
 /// Sends one message and prints the assigned partition offset.
 async fn main {
   let args = @env.args()
-  if args.get(1) is Some("produce") {
-    produce(args)
-  } else {
-    consume(args)
+  match args.get(1) {
+    Some("-h") | Some("--help") => print_help()
+    Some("produce") => produce(args)
+    _ => consume(args)
   }
+}
+
+///|
+fn print_help() -> Unit {
+  println(
+    (
+      $|moonkafka - a simple Kafka 4.x client
+      $|
+      $|Usage:
+      $|  main [topic] [host] [port]                        consume a topic (default)
+      $|  main produce <topic> <value> [key] [host] [port]  produce one message
+      $|  main -h | --help                                  show this help
+      $|
+      $|Consume mode:
+      $|  Consumes all partitions of <topic> from the latest offset and prints
+      $|  records until interrupted (Ctrl-C).
+      $|    topic   topic name (default "events")
+      $|    host    bootstrap broker host (default 127.0.0.1)
+      $|    port    bootstrap broker port (default 9092)
+      $|
+      $|Produce mode:
+      $|  Sends one message to <topic> and prints the assigned offset.
+      $|    value   message value (required)
+      $|    key     optional message key; same key always lands on the same
+      $|            partition, no key spreads messages round-robin
+      $|    host    bootstrap broker host (default 127.0.0.1)
+      $|    port    bootstrap broker port (default 9092)
+      $|
+      $|Examples:
+      $|  moon run cmd/main -- events
+      $|  moon run cmd/main -- produce events "hello"
+      $|  moon run cmd/main -- produce events "hello" my-key broker.example.com 9093
+    ),
+  )
 }
 
 ///|
