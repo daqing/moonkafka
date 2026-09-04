@@ -155,9 +155,8 @@ Flat single-package code has served well so far; split as it grows (each dir
 gets a `moon.pkg`):
 
 ```
-src/
-  buf/          Encoder/Decoder (move buf.mbt)
-  internal/     crc32c, murmur2, uuid, timing/backoff, logging hooks
+  buf/          Encoder/Decoder/DecodeError (moved)
+  internal/     crc32c, murmur2 (+ timing/logging hooks later)
   compression/  gzip/snappy/lz4/zstd en+decoders behind one Codec iface
   protocol/     primitives (Uuid, error codes, header framing) +
                 one file per API group: produce.mbt, fetch.mbt, metadata.mbt,
@@ -301,11 +300,14 @@ producer/consumer working at every step.
 - [x] **Time/backoff helpers.** DONE (commit bfa6a86): pure `backoff_ms`
       growth function, jittered `Backoff` schedule (±20% wall-clock jitter),
       `Deadline` type on `@async.now()`; unit tests.
-- [ ] Split `buf.mbt`/`crc32c.mbt` into subpackages (`src/buf`, `src/internal`)
-      and re-export; verify `moon info` diffs are re-exports only.
-      Feasibility confirmed: `pub type X = @pkg.Y` aliases re-export
-      `pub(all)` types cross-package; root re-export aliases keep the
-      `@moonkafka.*` surface stable.
+- [x] **Package split.** DONE (commit c898663): `buf/` (Encoder/Decoder/
+      DecodeError) and `internal/` (crc32c, murmur2) are now subpackages;
+      codec/hash tests moved with their code. Deviation from the original
+      wording: instead of wrapper re-exports, the root surface was
+      deliberately shrunk — Encoder/Decoder/crc32c/murmur2 are no longer
+      public API, and `DecodeError` lives in `@buf` (cmd/main and user code
+      match `@buf.Malformed` etc.). `pub type X = @pkg.Y` aliases remain
+      available for future public cross-package types.
 
 **Acceptance:** `moon test` green; murmur2 vectors pass; producing with keys
 lands on the same partitions as the Java/librdkafka clients on the same topic.
