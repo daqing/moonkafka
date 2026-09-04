@@ -17,6 +17,8 @@ pub const API_METADATA : Int = 3
 
 pub const API_PRODUCE : Int = 0
 
+pub fn backoff_ms(Int, Int, Int) -> Int
+
 pub fn crc32c(Bytes, start? : Int, end? : Int) -> UInt
 
 pub fn decode_api_versions_response(Decoder) -> Unit raise
@@ -68,6 +70,15 @@ pub(all) suberror ProtocolError {
 }
 
 // Types and methods
+pub struct Backoff {
+  base_ms : Int
+  max_ms : Int
+  mut attempt : Int
+} derive(@debug.Debug)
+pub fn Backoff::new(base_ms? : Int, max_ms? : Int) -> Self raise
+pub fn Backoff::next_ms(Self) -> Int
+pub fn Backoff::reset(Self) -> Unit
+
 pub struct BrokerInfo {
   node_id : Int
   host : String
@@ -123,6 +134,13 @@ pub struct ConsumerConfig {
   start_from : StartFrom
 } derive(@debug.Debug)
 pub fn ConsumerConfig::new(Array[String], String, start_from? : StartFrom, request_timeout_ms? : Int) -> Self raise
+
+pub struct Deadline {
+  at_ms : Int64
+} derive(@debug.Debug)
+pub fn Deadline::after_ms(Int64) -> Self
+pub fn Deadline::expired(Self) -> Bool
+pub fn Deadline::remaining_ms(Self) -> Int64
 
 pub struct Decoder {
   data : Bytes
