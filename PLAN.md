@@ -291,16 +291,21 @@ producer/consumer working at every step.
       `Encoder::write_tagged_fields(Array[(Int, Bytes)])` writes ascending,
       plain-uvarint tag buffers; `write_tag_buffer()` stays for the empty
       case. Roundtrip + skip tests in place.
-- [ ] **Config structs.** `config/` package: `CommonConfig` (bootstrap
-      servers list, client_id, request_timeout_ms, connections_max_idle_ms,
-      retries/backoff knobs, security_protocol: plaintext|ssl|sasl_plaintext|
-      sasl_ssl, sasl_mechanism + credentials), `ProducerConfig`, `ConsumerConfig`
-      shells; thread through `Producer::connect`/`Consumer::connect` while
-      keeping current named args as sugar.
-- [ ] **Time/backoff helpers.** jittered exponential backoff, deadline type
-      built on `@async.now()`; unit tests.
+- [x] **Config structs.** DONE (commit 94b749a, root package for now):
+      `CommonConfig` (bootstrap server list with host:port/[ipv6]:port
+      parsing, client_id, request_timeout_ms, idle/retry knobs,
+      `SecurityProtocol` + `SaslConfig` shells), `ProducerConfig`,
+      `ConsumerConfig`, all validated at construction; producer and consumer
+      gained `connect_with_config`, old named-arg connect kept as sugar;
+      `Connection` sends the configured client_id.
+- [x] **Time/backoff helpers.** DONE (commit bfa6a86): pure `backoff_ms`
+      growth function, jittered `Backoff` schedule (±20% wall-clock jitter),
+      `Deadline` type on `@async.now()`; unit tests.
 - [ ] Split `buf.mbt`/`crc32c.mbt` into subpackages (`src/buf`, `src/internal`)
       and re-export; verify `moon info` diffs are re-exports only.
+      Feasibility confirmed: `pub type X = @pkg.Y` aliases re-export
+      `pub(all)` types cross-package; root re-export aliases keep the
+      `@moonkafka.*` surface stable.
 
 **Acceptance:** `moon test` green; murmur2 vectors pass; producing with keys
 lands on the same partitions as the Java/librdkafka clients on the same topic.
