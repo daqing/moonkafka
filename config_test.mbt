@@ -58,7 +58,7 @@ test "common config defaults validate and parse bootstrap list" {
 test "common config rejects invalid values" {
   assert_true(raises(fn() raise { ignore(@moonkafka.CommonConfig::new([])) }))
   assert_true(
-    raises(fn() {
+    raises(fn() raise {
       ignore(@moonkafka.CommonConfig::new(["host:9092"], request_timeout_ms=0))
     }),
   )
@@ -74,7 +74,7 @@ test "producer config validates acks and topic" {
   let config = @moonkafka.ProducerConfig::new(["b:9092"], "events")
   assert_eq(config.acks, 1)
   assert_true(
-    raises(fn() {
+    raises(fn() raise {
       ignore(@moonkafka.ProducerConfig::new(["b:9092"], "events", acks=0))
     }),
   )
