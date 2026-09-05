@@ -88,46 +88,45 @@ pub async fn BrokerConnection::connect(
   port : Int,
   client_id? : String = "moonkafka",
   max_in_flight? : Int = 5,
-  sasl? : SaslConfig? = None,
   timeout_ms? : Int = 30000,
   tls? : TlsClientOptions? = None,
 ) -> BrokerConnection {
-  let tcp = @socket.Tcp::connect_to_host(host, port~)
-  let stream : BrokerStream = match tls {
-    Some(opts) => {
-      let trust = match opts.ca_pem_file {
-        Some(file) => @tls.CustomPemFile(file)
-        None =>
-          if opts.verify_certificates {
-            @tls.SystemRoot
-          } else {
-            @tls.NoVerification
-          }
+  // The whole dial (TCP connect + optional TLS handshake) is bounded by
+  // timeout_ms; a cancelled TLS handshake leaves the socket unusable, so
+  // this connection is simply closed on failure.
+  @async.with_timeout(timeout_ms, () => {
+    let tcp = @socket.Tcp::connect_to_host(host, port~)
+    let stream : BrokerStream = match tls {
+      Some(opts) => {
+        let trust = match opts.ca_pem_file {
+          Some(file) => @tls.CustomPemFile(file)
+          None =>
+            if opts.verify_certificates {
+              @tls.SystemRoot
+            } else {
+              @tls.NoVerification
+            }
+        }
+        // Verification is expressed entirely through the trust root:
+        // NoVerification when the user disabled certificate checks.
+        Secure(@tls.Tls::client(tcp, host=opts.server_name, sni=true, trust~))
       }
-      // Verification is expressed entirely through the trust root:
-      // NoVerification when the user disabled certificate checks.
-      Secure(@tls.Tls::client(tcp, host=opts.server_name, sni=true, trust~))
+      None => Plain(tcp)
     }
-    None => Plain(tcp)
-  }
-  let conn : BrokerConnection = {
-    tcp,
-    stream,
-    client_id,
-    write_lock: @async.Mutex(),
-    read_lock: @async.Mutex(),
-    responses: Map([]),
-    correlation_id: 0,
-    closed: false,
-    in_flight: @async.Semaphore(max_in_flight, initial_value=max_in_flight),
-    throttled_until_ms: 0L,
-  }
-  // SASL runs before any other API on the connection.
-  match sasl {
-    Some(sasl) => conn.authenticate(sasl, timeout_ms~)
-    None => ()
-  }
-  conn
+    let conn : BrokerConnection = {
+      tcp,
+      stream,
+      client_id,
+      write_lock: @async.Mutex(),
+      read_lock: @async.Mutex(),
+      responses: Map([]),
+      correlation_id: 0,
+      closed: false,
+      in_flight: @async.Semaphore(max_in_flight, initial_value=max_in_flight),
+      throttled_until_ms: 0L,
+    }
+    conn
+  })
 }
 
 ///|

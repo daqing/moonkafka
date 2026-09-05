@@ -136,7 +136,7 @@ pub async fn BrokerConnection::authenticate(
     Plain => self.authenticate_plain(sasl, timeout_ms)
     ScramSha256 => self.authenticate_scram(sasl, false, timeout_ms)
     ScramSha512 => self.authenticate_scram(sasl, true, timeout_ms)
-    OAuthBearer => raise SaslError("mechanism OAUTHBEARER not implemented yet")
+    OAuthBearer => self.authenticate_oauth(sasl, timeout_ms)
   }
 }
 
@@ -201,6 +201,32 @@ async fn BrokerConnection::authenticate_scram(
   let expected = scram_server_signature_b64(sha512, salted, auth_message)
   if server_final != "v=\{expected}" {
     raise SaslError("broker server signature mismatch")
+  }
+}
+
+///|
+/// OAUTHBEARER (RFC 7628 voucher over the Kafka SASL exchange): the token
+/// provider supplies the current bearer token, sent as a single voucher;
+/// the broker's success/error response decides the outcome.
+async fn BrokerConnection::authenticate_oauth(
+  self : BrokerConnection,
+  sasl : SaslConfig,
+  timeout_ms : Int,
+) -> Unit {
+  let provider = match sasl.oauth_token_provider {
+    Some(provider) => provider
+    None => raise SaslError("OAUTHBEARER requires a token provider")
+  }
+  let token = provider() catch {
+    e => raise SaslError("token provider failed: \{e}")
+  }
+  if token.length() == 0 {
+    raise SaslError("OAUTHBEARER token is empty")
+  }
+  let voucher = "n,\u{1}auth=Bearer \{token}\u{1}\u{1}"
+  let result = self.sasl_authenticate(@utf8.encode(voucher), timeout_ms)
+  if result.error_code != 0 {
+    raise sasl_auth_error("OAUTHBEARER", result)
   }
 }
 

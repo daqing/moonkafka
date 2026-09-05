@@ -23,7 +23,7 @@ keywords = [ "Kafka", "streaming" ]
 
 preferred_target = "native"
 
-description = "Open-source Apache Kafka client driver"
+description = "Open-source Apache Kafka client driver written in pure MoonBit"
 
 import {
   "moonbitlang/async@0.21.2",

@@ -27,7 +27,19 @@ pub(all) struct SaslConfig {
   mechanism : SaslMechanism
   username : String
   password : String
-} derive(@debug.Debug)
+  /// OAUTHBEARER only: returns the current bearer token (raw token, without
+  /// the "Bearer " prefix); called at each authentication.
+  oauth_token_provider : (() -> String raise)?
+}
+
+///|
+/// Manual Debug: the token-provider function field cannot be derived, and
+/// credentials are never rendered.
+pub impl @debug.Debug for SaslConfig with fn to_repr(self : SaslConfig) -> Repr {
+  Repr::literal(
+    "SaslConfig(mechanism: \{sasl_mechanism_name(self.mechanism)}, username: \{self.username})",
+  )
+}
 
 ///|
 /// One "host:port" (or "[ipv6]:port") entry of the bootstrap list.
@@ -223,7 +235,9 @@ pub fn CommonConfig::validate(self : CommonConfig) -> Unit raise ProtocolError {
         "SASL security protocols require sasl credentials",
       )
     (_, Some(sasl)) =>
-      if sasl.username.length() == 0 {
+      if sasl.mechanism is OAuthBearer {
+        // the token provider carries the credential
+      } else if sasl.username.length() == 0 {
         raise ProtocolError::ProtocolError("sasl username must not be empty")
       }
     _ => ()
