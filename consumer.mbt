@@ -18,7 +18,8 @@ pub struct Consumer {
   topic : String
   start_from : StartFrom
   request_timeout_ms : Int
-  meta_conn : BrokerConnection
+  bootstrap : BootstrapServers
+  mut meta_conn : BrokerConnection
   mut brokers : Map[Int, BrokerInfo]
   leader_conns : Map[Int, BrokerConnection]
   partitions : Array[PartitionState]
@@ -39,22 +40,21 @@ pub async fn Consumer::connect(
 }
 
 ///|
-/// Connect using explicit configuration, which is validated first. Until
-/// Phase 1 adds the bootstrap set, only the first bootstrap server is dialed.
+/// Connect using explicit configuration, which is validated first. The
+/// meta connection lands on the first bootstrap server that accepts.
 pub async fn Consumer::connect_with_config(config : ConsumerConfig) -> Consumer {
-  guard config.common.bootstrap_addresses().get(0) is Some(addr) else {
-    raise ProtocolError::ProtocolError("bootstrap_servers must not be empty")
-  }
-  let meta_conn = BrokerConnection::connect(
-    addr.host,
-    addr.port,
-    client_id=config.common.client_id,
+  let bootstrap = BootstrapServers::new(config.common.bootstrap_addresses())
+  let meta_conn = connect_bootstrap(
+    bootstrap,
+    config.common.client_id,
+    timeout_ms=config.common.request_timeout_ms,
   )
   meta_conn.check_api_versions(timeout_ms=config.common.request_timeout_ms)
   let consumer = {
     topic: config.topic,
     start_from: config.start_from,
     request_timeout_ms: config.common.request_timeout_ms,
+    bootstrap,
     meta_conn,
     brokers: Map([]),
     leader_conns: Map([]),
@@ -78,8 +78,29 @@ pub fn Consumer::close(self : Consumer) -> Unit {
 }
 
 ///|
+/// Rebuild every connection after a transport failure: dial a bootstrap
+/// server (rotating), then refresh metadata and leader connections. Read
+/// positions survive the refresh.
+async fn Consumer::recover(self : Consumer) -> Unit {
+  self.meta_conn.close()
+  for _, conn in self.leader_conns {
+    conn.close()
+  }
+  self.leader_conns.clear()
+  self.meta_conn = connect_bootstrap(
+    self.bootstrap,
+    self.meta_conn.client_id,
+    timeout_ms=self.request_timeout_ms,
+  )
+  self.refresh_metadata()
+}
+
+///|
 async fn Consumer::refresh_metadata(self : Consumer) -> Unit {
-  let metadata = self.meta_conn.fetch_metadata(self.topic)
+  let metadata = self.meta_conn.fetch_metadata(
+    self.topic,
+    timeout_ms=self.request_timeout_ms,
+  )
   self.brokers = metadata.brokers
   let topic_meta = match metadata.topics.get(0) {
     Some(t) => t
@@ -90,9 +111,16 @@ async fn Consumer::refresh_metadata(self : Consumer) -> Unit {
       "topic \{self.topic} has no partitions with a leader",
     )
   }
+  // A refresh after a reconnect must keep read positions; fresh connects
+  // start from zero and are overwritten by reset_offsets anyway.
+  let old : Map[Int, Int64] = Map([])
+  for p in self.partitions {
+    old[p.info.index] = p.next_offset
+  }
   self.partitions.clear()
   for p in topic_meta.partitions {
-    self.partitions.push({ info: p, next_offset: 0L, })
+    let next_offset = old.get(p.index).unwrap_or(0L)
+    self.partitions.push({ info: p, next_offset, })
   }
   // Open a connection per distinct partition leader.
   for _, conn in self.leader_conns {
@@ -126,7 +154,12 @@ async fn Consumer::reset_offsets(self : Consumer) -> Unit {
     Latest => OFFSET_LATEST
   }
   let infos = self.partitions.map(fn(p) { p.info })
-  let offsets = self.meta_conn.list_offsets(self.topic, infos, timestamp)
+  let offsets = self.meta_conn.list_offsets(
+    self.topic,
+    infos,
+    timestamp,
+    timeout_ms=self.request_timeout_ms,
+  )
   for p in self.partitions {
     match offsets.get(p.info.index) {
       Some(offset) => p.next_offset = offset
@@ -157,14 +190,30 @@ pub async fn Consumer::poll(
   let out : Array[Record] = []
   let mut refresh = false
   for leader, request_partitions in by_leader {
-    guard self.leader_conns.get(leader) is Some(conn) else { continue }
-    let results = conn.fetch(
-      self.topic,
-      request_partitions,
-      max_wait_ms~,
-      max_bytes~,
-      timeout_ms=self.request_timeout_ms,
-    )
+    guard self.leader_conns.get(leader) is Some(conn) else {
+      refresh = true
+      continue
+    }
+    let results : Array[FetchPartitionResult]? = Some(
+      conn.fetch(
+        self.topic,
+        request_partitions,
+        max_wait_ms~,
+        max_bytes~,
+        timeout_ms=self.request_timeout_ms,
+      ),
+    ) catch {
+      e =>
+        match e {
+          TransportError::ConnectionClosed(_)
+          | TransportError::RequestTimeout(_) => {
+            refresh = true
+            None
+          }
+          _ => raise e
+        }
+    }
+    guard results is Some(results) else { continue }
     for result in results {
       match result.error_code {
         0 =>
@@ -181,7 +230,7 @@ pub async fn Consumer::poll(
     }
   }
   if refresh {
-    self.refresh_metadata()
+    self.recover()
   }
   out
 }
@@ -210,7 +259,12 @@ async fn Consumer::reset_partition_offset(
   }
   for p in self.partitions {
     if p.info.index == partition {
-      let offsets = self.meta_conn.list_offsets(self.topic, [p.info], timestamp)
+      let offsets = self.meta_conn.list_offsets(
+        self.topic,
+        [p.info],
+        timestamp,
+        timeout_ms=self.request_timeout_ms,
+      )
       match offsets.get(partition) {
         Some(offset) => p.next_offset = offset
         None => ()

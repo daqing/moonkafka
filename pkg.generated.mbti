@@ -22,6 +22,8 @@ pub const API_PRODUCE : Int = 0
 
 pub fn backoff_ms(Int, Int, Int) -> Int
 
+pub async fn connect_bootstrap(BootstrapServers, String, timeout_ms? : Int) -> BrokerConnection
+
 pub fn decode_api_versions_response(@buf.Decoder) -> Unit raise
 
 pub fn decode_fetch_response(@buf.Decoder) -> Array[FetchPartitionResult] raise
@@ -78,6 +80,13 @@ pub fn Backoff::new(base_ms? : Int, max_ms? : Int) -> Self raise
 pub fn Backoff::next_ms(Self) -> Int
 pub fn Backoff::reset(Self) -> Unit
 
+pub struct BootstrapServers {
+  addrs : Array[HostPort]
+  mut cursor : Int
+} derive(@debug.Debug)
+pub fn BootstrapServers::new(Array[HostPort]) -> Self raise
+pub fn BootstrapServers::next(Self) -> HostPort
+
 pub struct BrokerConnection {
   tcp : @socket.Tcp
   client_id : String
@@ -88,8 +97,13 @@ pub struct BrokerConnection {
   mut closed : Bool
   in_flight : @semaphore.Semaphore
 }
+pub async fn BrokerConnection::check_api_versions(Self, timeout_ms? : Int) -> Unit
 pub fn BrokerConnection::close(Self) -> Unit
 pub async fn BrokerConnection::connect(String, Int, client_id? : String, max_in_flight? : Int) -> Self
+pub async fn BrokerConnection::fetch(Self, String, Array[(PartitionInfo, Int64)], max_wait_ms~ : Int, max_bytes~ : Int, timeout_ms? : Int) -> Array[FetchPartitionResult]
+pub async fn BrokerConnection::fetch_metadata(Self, String, timeout_ms? : Int) -> Metadata
+pub async fn BrokerConnection::list_offsets(Self, String, Array[PartitionInfo], Int64, timeout_ms? : Int) -> Map[Int, Int64]
+pub async fn BrokerConnection::produce(Self, String, Array[(Int, Bytes)], acks~ : Int, timeout_ms~ : Int) -> Array[ProducePartitionResult]
 pub async fn BrokerConnection::request(Self, Int, Int, Bytes, timeout_ms? : Int) -> @buf.Decoder
 
 pub struct BrokerInfo {
@@ -113,26 +127,14 @@ pub fn CommonConfig::bootstrap_addresses(Self) -> Array[HostPort] raise Protocol
 pub fn CommonConfig::new(Array[String], request_timeout_ms? : Int) -> Self raise
 pub fn CommonConfig::validate(Self) -> Unit raise ProtocolError
 
-pub struct Connection {
-  tcp : @socket.Tcp
-  client_id : String
-  mut correlation_id : Int
-}
-pub async fn Connection::check_api_versions(Self) -> Unit
-pub fn Connection::close(Self) -> Unit
-pub async fn Connection::connect(String, Int, client_id? : String) -> Self
-pub async fn Connection::fetch(Self, String, Array[(PartitionInfo, Int64)], max_wait_ms~ : Int, max_bytes~ : Int) -> Array[FetchPartitionResult]
-pub async fn Connection::fetch_metadata(Self, String) -> Metadata
-pub async fn Connection::list_offsets(Self, String, Array[PartitionInfo], Int64) -> Map[Int, Int64]
-pub async fn Connection::produce(Self, String, Array[(Int, Bytes)], acks~ : Int, timeout_ms~ : Int) -> Array[ProducePartitionResult]
-pub async fn Connection::request(Self, Int, Int, Bytes) -> @buf.Decoder
-
 pub struct Consumer {
   topic : String
   start_from : StartFrom
-  meta_conn : Connection
+  request_timeout_ms : Int
+  bootstrap : BootstrapServers
+  mut meta_conn : BrokerConnection
   mut brokers : Map[Int, BrokerInfo]
-  leader_conns : Map[Int, Connection]
+  leader_conns : Map[Int, BrokerConnection]
   partitions : Array[PartitionState]
   mut closed : Bool
 }
@@ -191,9 +193,13 @@ pub struct Producer {
   topic : String
   acks : Int
   timeout_ms : Int
-  meta_conn : Connection
+  retries : Int
+  retry_backoff_ms : Int
+  retry_backoff_max_ms : Int
+  bootstrap : BootstrapServers
+  mut meta_conn : BrokerConnection
   mut brokers : Map[Int, BrokerInfo]
-  leader_conns : Map[Int, Connection]
+  leader_conns : Map[Int, BrokerConnection]
   mut partitions : Array[PartitionInfo]
   mut round_robin : Int
   mut closed : Bool

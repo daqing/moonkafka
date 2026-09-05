@@ -69,7 +69,7 @@ async test "request times out and the connection is closed" {
       // client timeout; the group cancels this sleep on exit.
       let (tcp, _) = server.accept()
       ignore(fake_read_request(tcp))
-      @async.sleep(10_000)
+      @async.sleep(2_000)
       tcp.close()
     }
     let conn = @moonkafka.BrokerConnection::connect("127.0.0.1", port)
