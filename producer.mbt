@@ -7,9 +7,9 @@ pub struct Producer {
   topic : String
   acks : Int
   timeout_ms : Int
-  meta_conn : Connection
+  meta_conn : BrokerConnection
   mut brokers : Map[Int, BrokerInfo]
-  leader_conns : Map[Int, Connection]
+  leader_conns : Map[Int, BrokerConnection]
   mut partitions : Array[PartitionInfo]
   mut round_robin : Int
   mut closed : Bool
@@ -43,12 +43,12 @@ pub async fn Producer::connect_with_config(config : ProducerConfig) -> Producer 
   guard config.common.bootstrap_addresses().get(0) is Some(addr) else {
     raise ProtocolError::ProtocolError("bootstrap_servers must not be empty")
   }
-  let meta_conn = Connection::connect(
+  let meta_conn = BrokerConnection::connect(
     addr.host,
     addr.port,
     client_id=config.common.client_id,
   )
-  meta_conn.check_api_versions()
+  meta_conn.check_api_versions(timeout_ms=config.common.request_timeout_ms)
   let producer = {
     topic: config.topic,
     acks: config.acks,
@@ -98,9 +98,10 @@ async fn Producer::refresh_metadata(self : Producer) -> Unit {
     if !self.leader_conns.contains(p.leader) {
       match self.brokers.get(p.leader) {
         Some(broker) =>
-          self.leader_conns[p.leader] = Connection::connect(
+          self.leader_conns[p.leader] = BrokerConnection::connect(
             broker.host,
             broker.port,
+            client_id=self.meta_conn.client_id,
           )
         None =>
           raise ProtocolError::ProtocolError(

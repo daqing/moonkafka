@@ -17,9 +17,10 @@ struct PartitionState {
 pub struct Consumer {
   topic : String
   start_from : StartFrom
-  meta_conn : Connection
+  request_timeout_ms : Int
+  meta_conn : BrokerConnection
   mut brokers : Map[Int, BrokerInfo]
-  leader_conns : Map[Int, Connection]
+  leader_conns : Map[Int, BrokerConnection]
   partitions : Array[PartitionState]
   mut closed : Bool
 }
@@ -44,15 +45,16 @@ pub async fn Consumer::connect_with_config(config : ConsumerConfig) -> Consumer 
   guard config.common.bootstrap_addresses().get(0) is Some(addr) else {
     raise ProtocolError::ProtocolError("bootstrap_servers must not be empty")
   }
-  let meta_conn = Connection::connect(
+  let meta_conn = BrokerConnection::connect(
     addr.host,
     addr.port,
     client_id=config.common.client_id,
   )
-  meta_conn.check_api_versions()
+  meta_conn.check_api_versions(timeout_ms=config.common.request_timeout_ms)
   let consumer = {
     topic: config.topic,
     start_from: config.start_from,
+    request_timeout_ms: config.common.request_timeout_ms,
     meta_conn,
     brokers: Map([]),
     leader_conns: Map([]),
@@ -102,9 +104,10 @@ async fn Consumer::refresh_metadata(self : Consumer) -> Unit {
     if !self.leader_conns.contains(leader) {
       match self.brokers.get(leader) {
         Some(broker) =>
-          self.leader_conns[leader] = Connection::connect(
+          self.leader_conns[leader] = BrokerConnection::connect(
             broker.host,
             broker.port,
+            client_id=self.meta_conn.client_id,
           )
         None =>
           raise ProtocolError::ProtocolError(
@@ -160,6 +163,7 @@ pub async fn Consumer::poll(
       request_partitions,
       max_wait_ms~,
       max_bytes~,
+      timeout_ms=self.request_timeout_ms,
     )
     for result in results {
       match result.error_code {
