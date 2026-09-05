@@ -443,15 +443,36 @@ callback path unit-tested against a mock broker.
       primitive (drop control batches + records of aborted transactions by
       producerId/firstOffset); `RecordBatchBuilder` does incremental append,
       size accounting, and CRC finalizing for the Phase 3 accumulator.
-- [ ] **Compression** (`compression/`): interface
-      `Codec { compress(Bytes) -> Bytes; decompress(Bytes) -> Bytes raise }` +
-      attr-bit mapping; implementations gzip (async/gzip wrapper), snappy
-      (xerial framing), lz4 (LZ4 frame format with magic number, block
-      checksums optional-off as Kafka writes them), zstd (C FFI). Cross-check
-      every codec against batches produced by the Java client (golden files
-      committed under `test/golden/`).
-- [ ] **Decoder robustness.** Property/fuzz-ish tests: random and truncated
-      inputs must raise, never panic/index-OOB, on every codec.
+- [x] **Compression** (`compression/`) DONE (commit 6b59a10): one
+      `Codec` interface (`compress`/`decompress`, raising
+      `@buf.DecodeError`) mapped to the RecordBatch attribute bits
+      0-4. Snappy (raw block codec + xerial chunk framing) and LZ4
+      (block codec with greedy matcher, Kafka's frame framing with
+      XXH32 descriptor checksum) are pure MoonBit. Gzip wraps the
+      system zlib through native FFI — deviation from D4: the
+      async/gzip package is `@io`-async while batch decoding is
+      synchronous, so the buffer-to-buffer wrapper was not usable;
+      native-only module made FFI the pragmatic choice. Zstd decodes
+      via the vendored zstd single-file decompressor
+      (`compression/zstddeclib.c`); zstd *compression* is deferred to
+      the Phase 3 producer codec config (the vendored tree is
+      decode-only). Batch decode unwraps the whole-batch records
+      region per the attribute bits, so consumers read whatever
+      producers wrote. Golden fixtures under `test/golden/` (with
+      `generate.py`) come from independent implementations — cramjam's
+      Rust snappy/lz4/zstd and Python gzip — as raw streams and as
+      whole batches with foreign-compressed record regions spliced in
+      (the Java-client golden capture itself remains deferred to the
+      Docker integration phase).
+- [x] **Decoder robustness** DONE (commit 6b59a10,
+      `robustness_test.mbt`): deterministic-xorshift fuzz over the four
+      compressed streams (truncation at every 17th offset plus random
+      blobs), the record-batch decoder (every truncation offset of a
+      valid batch plus 200 random blobs), and five wire decoders
+      (ApiVersions/Metadata/Produce/ListOffsets/DescribeTopicPartitions)
+      — everything must raise a decode error or succeed, never panic.
+      Backed by the subtraction-based bounds checks hardened earlier in
+      this phase.
 
 **Acceptance:** codec round-trip tests for all implemented APIs at both
 implemented versions (encode → decode equality via `debug_inspect`
@@ -640,9 +661,11 @@ concurrently; acks release records for redelivery after timeout.
 - **AddPartitionsToTxn v4/v5 shape**: KIP-890 reshaped this API;
   confirm which version a *producer* (vs broker) negotiates on 4.3 before
   implementing (small spike, Phase 3).
-- **zstd via C FFI**: adds a native build dependency (libzstd); decide
-  between vendoring, dlopen-style binding, or pure-MoonBit decoder (largest
-  effort, only worth it if wasm-gc support ever lands for the socket layer).
+- ~~**zstd via C FFI**~~ RESOLVED (Phase 2): the zstd single-file
+  DECOMPRESSOR is vendored (`compression/zstddeclib.c`) — no external
+  libzstd dependency. Gzip links the universally present system zlib
+  (`-lz` from the root and cmd/main moon.pkg). Zstd compression is
+  deferred to Phase 3, when the producer codec config lands.
 - **moonbitlang/async maturity**: long-lived background tasks + cancellation
   semantics for heartbeat/sender loops need care (leaks on close paths);
   mock-broker tests should cover close-under-load.
