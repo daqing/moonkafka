@@ -11,7 +11,7 @@ fn fake_api_versions_response(throttle_ms : Int) -> Bytes {
   let apis : Array[(Int, Int)] = [
     (0, 13),
     (1, 16),
-    (2, 7),
+    (2, 11),
     (3, 13),
     (18, 3),
     (75, 0),
