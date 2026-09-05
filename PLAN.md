@@ -399,9 +399,18 @@ callback path unit-tested against a mock broker.
       `@buf` decoder bounds checks hardened (subtraction-based) so
       malformed huge lengths raise instead of panicking — the start of
       the decoder-robustness bullet below.
-- [ ] **Produce**: v12 + v13 (topic-id), with `record_errors` surfaced;
-      keep acks validation; response is now per-batch with
-      `base_offset/log_append_time` proper.
+- [x] **Produce**: DONE (commit 63ce59b): codecs moved to `produce.mbt`,
+      dispatching on the negotiated version — v12 (topic names) and v13
+      (topic-id, KIP-516), with the zero-id fail-fast when metadata has
+      not supplied an id. `ProducePartitionResult` now carries
+      `base_offset`, `log_append_time`, `log_start_offset`, and surfaced
+      `record_errors`/`error_message` (KIP-467); the producer's error
+      paths include the broker's message and offending batch indices.
+      Acks validation stays in `ProducerConfig` (1 or -1). The fake
+      broker advertises and serves v13, so end-to-end produce runs over
+      topic-id addressing. Note for Phase 3 transactions: per the 4.3
+      schema comment, a producer without txn v2 must cap at v11 inside
+      transactions — the txn manager needs its own version choice.
 - [ ] **Fetch**: v12 (names) + v13–v16 (topic-ids; v15 drops replica_id,
       v16 `node_endpoints`); **incremental fetch sessions** — session
       acquisition (epoch 0 → id), incremental updates (added/forgotten
