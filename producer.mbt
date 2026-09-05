@@ -14,6 +14,8 @@ pub struct Producer {
   retry_backoff_max_ms : Int
   bootstrap : BootstrapServers
   sasl : SaslConfig?
+  use_tls : Bool
+  tls_options : TlsClientOptions?
   mut meta_conn : BrokerConnection
   mut brokers : Map[Int, BrokerInfo]
   leader_conns : Map[Int, BrokerConnection]
@@ -53,11 +55,17 @@ pub async fn Producer::connect_with_config(config : ProducerConfig) -> Producer 
     SaslPlaintext | SaslSsl => config.common.sasl
     _ => None
   }
+  let use_tls = match config.common.security_protocol {
+    Ssl | SaslSsl => true
+    _ => false
+  }
   let meta_conn = connect_bootstrap(
     bootstrap,
     config.common.client_id,
     timeout_ms=config.common.request_timeout_ms,
     sasl~,
+    use_tls~,
+    tls=config.common.tls,
   )
   meta_conn.check_api_versions(timeout_ms=config.common.request_timeout_ms)
   let producer = {
@@ -69,6 +77,8 @@ pub async fn Producer::connect_with_config(config : ProducerConfig) -> Producer 
     retry_backoff_max_ms: config.common.retry_backoff_max_ms,
     bootstrap,
     sasl,
+    use_tls,
+    tls_options: config.common.tls,
     meta_conn,
     brokers: Map([]),
     leader_conns: Map([]),
@@ -135,12 +145,25 @@ async fn Producer::refresh_metadata(self : Producer) -> Unit {
   for p in self.partitions {
     if !self.leader_conns.contains(p.leader) {
       match self.brokers.get(p.leader) {
-        Some(broker) =>
+        Some(broker) => {
+          let tls_opts = match self.tls_options {
+            Some(opts) => Some(opts)
+            None =>
+              if self.use_tls {
+                Some(TlsClientOptions::new(broker.host))
+              } else {
+                None
+              }
+          }
           self.leader_conns[p.leader] = BrokerConnection::connect(
             broker.host,
             broker.port,
             client_id=self.meta_conn.client_id,
+            sasl=self.sasl,
+            timeout_ms=self.timeout_ms,
+            tls=tls_opts,
           )
+        }
         None =>
           raise ProtocolError::ProtocolError(
             "no broker info for leader node \{p.leader}",

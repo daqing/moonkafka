@@ -12,8 +12,61 @@
 // closed and every later request fails with TransportError.
 
 ///|
+/// Byte stream to a broker: plaintext TCP, or TLS layered over TCP.
+pub(all) enum BrokerStream {
+  Plain(@socket.Tcp)
+  Secure(@tls.Tls)
+}
+
+///|
+/// TLS settings for a broker connection. `server_name` drives SNI and
+/// certificate verification; `ca_pem_file` overrides the system trust
+/// roots with a custom CA bundle.
+pub(all) struct TlsClientOptions {
+  server_name : String
+  verify_certificates : Bool
+  ca_pem_file : String?
+} derive(@debug.Debug)
+
+///|
+pub fn TlsClientOptions::new(
+  server_name : String,
+  verify_certificates? : Bool = true,
+  ca_pem_file? : String? = None,
+) -> TlsClientOptions {
+  { server_name, verify_certificates, ca_pem_file, }
+}
+
+///|
+pub async fn BrokerStream::read_exactly(self : BrokerStream, n : Int) -> Bytes {
+  match self {
+    Plain(tcp) => tcp.read_exactly(n)
+    Secure(tls) => tls.read_exactly(n)
+  }
+}
+
+///|
+pub async fn BrokerStream::write(self : BrokerStream, data : Bytes) -> Unit {
+  match self {
+    Plain(tcp) => tcp.write(data)
+    Secure(tls) => tls.write(data)
+  }
+}
+
+///|
+/// Release the stream. The TLS layer must be freed before the raw socket
+/// underneath it, per the @tls requirements.
+fn BrokerStream::shutdown(self : BrokerStream) -> Unit {
+  match self {
+    Secure(tls) => tls.close()
+    Plain(_) => ()
+  }
+}
+
+///|
 pub struct BrokerConnection {
   tcp : @socket.Tcp
+  stream : BrokerStream
   client_id : String
   write_lock : @async.Mutex
   read_lock : @async.Mutex
@@ -37,10 +90,29 @@ pub async fn BrokerConnection::connect(
   max_in_flight? : Int = 5,
   sasl? : SaslConfig? = None,
   timeout_ms? : Int = 30000,
+  tls? : TlsClientOptions? = None,
 ) -> BrokerConnection {
   let tcp = @socket.Tcp::connect_to_host(host, port~)
+  let stream : BrokerStream = match tls {
+    Some(opts) => {
+      let trust = match opts.ca_pem_file {
+        Some(file) => @tls.CustomPemFile(file)
+        None =>
+          if opts.verify_certificates {
+            @tls.SystemRoot
+          } else {
+            @tls.NoVerification
+          }
+      }
+      // Verification is expressed entirely through the trust root:
+      // NoVerification when the user disabled certificate checks.
+      Secure(@tls.Tls::client(tcp, host=opts.server_name, sni=true, trust~))
+    }
+    None => Plain(tcp)
+  }
   let conn : BrokerConnection = {
     tcp,
+    stream,
     client_id,
     write_lock: @async.Mutex(),
     read_lock: @async.Mutex(),
@@ -78,6 +150,7 @@ pub fn BrokerConnection::note_throttle(
 pub fn BrokerConnection::close(self : BrokerConnection) -> Unit {
   if !self.closed {
     self.closed = true
+    self.stream.shutdown()
     self.tcp.close()
   }
 }
@@ -163,7 +236,7 @@ async fn BrokerConnection::issue_request(
   defer self.write_lock.release()
   self.correlation_id += 1
   let corr = self.correlation_id
-  self.tcp.write(
+  self.stream.write(
     encode_request(api_key, api_version, corr, self.client_id, body, flexible~),
   )
   corr
@@ -218,7 +291,7 @@ async fn BrokerConnection::read_frame(self : BrokerConnection) -> Bytes {
   // A timeout cancels the read mid-frame with a cancellation error; that
   // must pass through untranslated so request() can classify it, while
   // genuine socket failures become ConnectionClosed.
-  let size_bytes = self.tcp.read_exactly(4) catch {
+  let size_bytes = self.stream.read_exactly(4) catch {
     e => {
       if @async.is_cancellation_error(e) {
         raise e
@@ -232,7 +305,7 @@ async fn BrokerConnection::read_frame(self : BrokerConnection) -> Bytes {
   if size < 4 {
     raise TransportError::ConnectionClosed("impossible response size \{size}")
   }
-  self.tcp.read_exactly(size) catch {
+  self.stream.read_exactly(size) catch {
     e => {
       if @async.is_cancellation_error(e) {
         raise e

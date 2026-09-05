@@ -154,6 +154,9 @@ pub struct CommonConfig {
   retry_backoff_max_ms : Int
   security_protocol : SecurityProtocol
   sasl : SaslConfig?
+  /// TLS settings for Ssl / SaslSsl protocols; None synthesizes defaults
+  /// whose server name is the dialed host.
+  tls : TlsClientOptions?
 } derive(@debug.Debug)
 
 ///|
@@ -166,6 +169,7 @@ pub fn CommonConfig::new(
   request_timeout_ms? : Int = 30000,
   security_protocol? : SecurityProtocol = Plaintext,
   sasl? : SaslConfig? = None,
+  tls? : TlsClientOptions? = None,
 ) -> CommonConfig raise {
   let config : CommonConfig = {
     bootstrap_servers,
@@ -177,6 +181,7 @@ pub fn CommonConfig::new(
     retry_backoff_max_ms: 1000,
     security_protocol,
     sasl,
+    tls,
   }
   config.validate()
   config
@@ -253,6 +258,7 @@ pub fn ProducerConfig::new(
   request_timeout_ms? : Int = 30000,
   security_protocol? : SecurityProtocol = Plaintext,
   sasl? : SaslConfig? = None,
+  tls? : TlsClientOptions? = None,
 ) -> ProducerConfig raise {
   if acks != 1 && acks != -1 {
     raise ProtocolError::ProtocolError(
@@ -268,6 +274,7 @@ pub fn ProducerConfig::new(
       request_timeout_ms~,
       security_protocol~,
       sasl~,
+      tls~,
     ),
     topic,
     acks,
@@ -289,6 +296,7 @@ pub fn ConsumerConfig::new(
   request_timeout_ms? : Int = 30000,
   security_protocol? : SecurityProtocol = Plaintext,
   sasl? : SaslConfig? = None,
+  tls? : TlsClientOptions? = None,
 ) -> ConsumerConfig raise {
   if topic.length() == 0 {
     raise ProtocolError::ProtocolError("topic must not be empty")
@@ -299,6 +307,7 @@ pub fn ConsumerConfig::new(
       request_timeout_ms~,
       security_protocol~,
       sasl~,
+      tls~,
     ),
     topic,
     start_from,

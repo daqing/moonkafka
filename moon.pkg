@@ -3,6 +3,7 @@ import {
   "daqing/moonkafka/internal",
   "moonbitlang/async",
   "moonbitlang/async/socket",
+  "moonbitlang/async/tls",
   "moonbitlang/core/debug",
   "moonbitlang/core/encoding/utf8",
 }
