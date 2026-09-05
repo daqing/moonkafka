@@ -55,7 +55,7 @@ pub fn driver_api_range(api_key : Int) -> ApiRange? {
   match api_key {
     API_PRODUCE =>
       Some({ key: API_PRODUCE, name: "Produce", min: 12, max: 13, })
-    API_FETCH => Some({ key: API_FETCH, name: "Fetch", min: 12, max: 12, })
+    API_FETCH => Some({ key: API_FETCH, name: "Fetch", min: 12, max: 16, })
     API_LIST_OFFSETS =>
       Some({ key: API_LIST_OFFSETS, name: "ListOffsets", min: 7, max: 7, })
     API_METADATA =>

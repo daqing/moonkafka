@@ -54,7 +54,7 @@ test "pick caps at the driver ceiling and exposes ranges" {
   let v = versions_of([(API_PRODUCE, 0, 20), (API_FETCH, 11, 20)])
   // A broker newer than the driver still gets the driver's ceiling.
   assert_eq(v.pick(API_PRODUCE), 13)
-  assert_eq(v.pick(API_FETCH), 12)
+  assert_eq(v.pick(API_FETCH), 16)
   assert_eq(v.range(API_PRODUCE), Some((0, 20)))
   assert_eq(v.range(75), None)
 }

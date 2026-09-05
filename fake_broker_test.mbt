@@ -10,7 +10,7 @@ fn fake_api_versions_response(throttle_ms : Int) -> Bytes {
   e.write_compact_len(6)
   let apis : Array[(Int, Int)] = [
     (0, 13),
-    (1, 12),
+    (1, 16),
     (2, 7),
     (3, 13),
     (18, 3),
@@ -257,6 +257,90 @@ fn fake_produce_response(
 }
 
 ///|
+/// ListOffsets v7 response body: one partition at the given offset.
+fn fake_list_offsets_response(topic : String, offset : Int64) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(1) // one topic
+  e.write_compact_string(topic)
+  e.write_compact_len(1) // one partition
+  e.write_i32(0) // index
+  e.write_i16(0) // no error
+  e.write_i64(-1L) // timestamp
+  e.write_i64(offset)
+  e.write_i32(-1) // leader epoch
+  e.write_tag_buffer()
+  e.write_tag_buffer()
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// session_epoch of a Fetch request at v15+ (no replica_id field): the
+/// value sits after max_wait/min/max/isolation and session_id.
+fn fake_fetch_request_session_epoch(rest : Bytes) -> Int raise {
+  let d = @buf.Decoder::new(rest)
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  let id_len = d.read_i16()
+  ignore(d.read_bytes(id_len)) // client id
+  d.skip_tag_buffer()
+  ignore(d.read_i32()) // max_wait_ms
+  ignore(d.read_i32()) // min_bytes
+  ignore(d.read_i32()) // max_bytes
+  ignore(d.read_i8()) // isolation level
+  ignore(d.read_i32()) // session id
+  d.read_i32() // session epoch
+}
+
+///|
+/// A Fetch response body (any v12-v16: the shape matches) carrying two
+/// records at base_offset 42 and the given session id. The record batch's
+/// base offset is patched after encoding (it is outside the CRC).
+fn fake_fetch_response(
+  topic : String,
+  version : Int,
+  session_id : Int,
+) -> Bytes {
+  let batch = @moonkafka.encode_record_batch([
+    { offset: 0L, timestamp: 1000L, key: None, value: Some(b"one"), },
+    { offset: 0L, timestamp: 2000L, key: None, value: Some(b"two"), },
+  ])
+  let patched_arr : Array[Byte] = [
+    b'\x00', b'\x00', b'\x00', b'\x00', b'\x00', b'\x00', b'\x00', b'\x2a',
+  ]
+  for i in 8..<batch.length() {
+    patched_arr.push(batch[i])
+  }
+  let patched = Bytes::from_array(patched_arr)
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_i16(0) // top-level error
+  e.write_i32(session_id)
+  e.write_compact_len(1) // one topic
+  if version >= 13 {
+    e.write_bytes(fake_topic_id)
+  } else {
+    e.write_compact_string(topic)
+  }
+  e.write_compact_len(1) // one partition
+  e.write_i32(0) // index
+  e.write_i16(0) // no error
+  e.write_i64(100L) // high watermark
+  e.write_i64(-1L) // last stable offset
+  e.write_i64(-1L) // log start offset
+  e.write_compact_len(-1) // aborted transactions: null
+  e.write_i32(-1) // preferred read replica
+  e.write_compact_len(patched.length()) // records
+  e.write_bytes(patched)
+  e.write_tag_buffer()
+  e.write_tag_buffer()
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
 /// Cursor from a DescribeTopicPartitions request (flexible v0: header v2
 /// with its tag buffer, then topics array, response limit, cursor struct).
 fn fake_dtp_request_cursor(rest : Bytes) -> TopicPartitionCursor? raise {
@@ -337,6 +421,7 @@ async fn fake_serve_conn(
   sasl_ok? : Bool = true,
   scram_password? : String = "secret",
   scram_sha512? : Bool = false,
+  fetch_epochs? : Array[Int] = [],
 ) -> Unit {
   // per-connection SASL state
   let mut sasl_mechanism : String? = None
@@ -359,6 +444,11 @@ async fn fake_serve_conn(
         fake_sasl_handshake_response()
       }
       0 => fake_produce_response(topic, version, 42L)
+      2 => fake_list_offsets_response(topic, 42L)
+      1 => {
+        fetch_epochs.push(fake_fetch_request_session_epoch(rest))
+        fake_fetch_response(topic, version, 7)
+      }
       3 => fake_metadata_response(topic, broker_port, version)
       75 =>
         // Two pages: a fresh request returns partition 0 with a cursor at
@@ -466,6 +556,7 @@ async fn fake_broker(
   scram_password? : String = "secret",
   scram_sha512? : Bool = false,
   wrap_tls? : Bool = false,
+  fetch_epochs? : Array[Int] = [],
 ) -> Unit {
   for ;; {
     let (tcp, _) = server.accept()
@@ -493,6 +584,7 @@ async fn fake_broker(
         sasl_ok~,
         scram_password~,
         scram_sha512~,
+        fetch_epochs~,
       )
     }
   }
@@ -573,6 +665,38 @@ async test "producer authenticates with SCRAM-SHA-256" {
       @moonkafka.SaslError(msg) => abort("SCRAM send failed: \{msg}")
       e => abort("SCRAM send failed: \{e}")
     }
+    server.close()
+  }
+}
+
+///|
+async test "consumer polls over an incremental fetch session" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let fetch_epochs : Array[Int] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, fetch_epochs~)
+    }
+    let consumer = @moonkafka.Consumer::connect_with_config(
+      @moonkafka.ConsumerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        start_from=Earliest,
+        request_timeout_ms=10000,
+      ),
+    )
+    defer consumer.close()
+    // First poll: sessionless full fetch (epoch 0) at the resolved offset.
+    let first = consumer.poll(max_wait_ms=200)
+    assert_eq(first.length(), 2)
+    assert_eq(first[0].offset, 42L)
+    assert_eq(first[1].offset, 43L)
+    // Second poll: the position moved, so an incremental request (epoch 1)
+    // carries the partition again under the granted session id.
+    let second = consumer.poll(max_wait_ms=200)
+    assert_eq(second.length(), 2)
+    assert_eq(fetch_epochs, [0, 1])
     server.close()
   }
 }
