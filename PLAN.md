@@ -429,8 +429,12 @@ callback path unit-tested against a mock broker.
       stays offset-safe. Leader-epoch validation
       (`OffsetForLeaderEpoch`, diverging-epoch tagged fields) stays
       queued for P4 as planned.
-- [ ] **ListOffsets** v10/v11 with `timeout_ms`; timestamp queries
-      (`OffsetForTimestamp`) exposed.
+- [x] **ListOffsets** v10/v11 DONE (commit 9f0f0f7): codecs moved to
+      `offsets.mbt`; v10 appends `timeout_ms` (KIP-1075), v11 adds the
+      earliest pending upload sentinel (KIP-1023); all sentinels are
+      public constants and a timestamp query is this API with a
+      wall-clock timestamp (`OffsetForTimestamp`). The fake broker
+      advertises v11.
 - [ ] **Record layer** (`record.mbt`): decode **and** encode record headers;
       expose headers on `Record`; `is_control`/`is_transactional` flags;
       aborted-transaction filter primitive for read_committed
