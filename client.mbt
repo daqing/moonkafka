@@ -80,7 +80,7 @@ pub async fn BrokerConnection::list_offsets(
   let d = self.request(
     API_LIST_OFFSETS,
     version,
-    encode_list_offsets_request(topic, partitions, timestamp),
+    encode_list_offsets_request(version, topic, partitions, timestamp),
     timeout_ms~,
   )
   let (offsets, throttle) = decode_list_offsets_response(d)
