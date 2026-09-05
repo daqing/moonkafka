@@ -89,10 +89,14 @@ pub async fn BrokerConnection::list_offsets(
 }
 
 ///|
+/// Produce one batch per partition to a single topic. `topic_id` comes
+/// from metadata and is mandatory once the negotiated version is 13. The
+/// acks validation (1 or -1) lives in ProducerConfig.
 pub async fn BrokerConnection::produce(
   self : BrokerConnection,
   topic : String,
-  partitions : Array[(Int, Bytes)],
+  topic_id? : Uuid = Uuid::zero(),
+  partitions~ : Array[(Int, Bytes)],
   acks~ : Int,
   timeout_ms~ : Int,
 ) -> Array[ProducePartitionResult] {
@@ -100,10 +104,17 @@ pub async fn BrokerConnection::produce(
   let d = self.request(
     API_PRODUCE,
     version,
-    encode_produce_request(topic, partitions, acks, timeout_ms),
+    encode_produce_request(
+      version,
+      topic,
+      topic_id,
+      partitions,
+      acks~,
+      timeout_ms~,
+    ),
     timeout_ms~,
   )
-  let (results, throttle) = decode_produce_response(d)
+  let (results, throttle) = decode_produce_response(version, d)
   self.note_throttle(throttle)
   results
 }

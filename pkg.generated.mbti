@@ -42,7 +42,7 @@ pub fn decode_list_offsets_response(@buf.Decoder) -> (Map[Int, Int64], Int) rais
 
 pub fn decode_metadata_response(Int, @buf.Decoder) -> (Metadata, Int) raise
 
-pub fn decode_produce_response(@buf.Decoder) -> (Array[ProducePartitionResult], Int) raise
+pub fn decode_produce_response(Int, @buf.Decoder) -> (Array[ProducePartitionResult], Int) raise
 
 pub fn decode_record_batches(Bytes) -> Array[Record] raise @buf.DecodeError
 
@@ -62,7 +62,7 @@ pub fn encode_list_offsets_request(String, Array[PartitionInfo], Int64) -> Bytes
 
 pub fn encode_metadata_request(Array[String]?) -> Bytes
 
-pub fn encode_produce_request(String, Array[(Int, Bytes)], Int, Int) -> Bytes
+pub fn encode_produce_request(Int, String, Uuid, Array[(Int, Bytes)], transactional_id? : String?, acks~ : Int, timeout_ms~ : Int) -> Bytes raise
 
 pub fn encode_record_batch(Array[Record]) -> Bytes
 
@@ -159,7 +159,7 @@ pub async fn BrokerConnection::fetch_metadata(Self, String, timeout_ms? : Int) -
 pub async fn BrokerConnection::list_offsets(Self, String, Array[PartitionInfo], Int64, timeout_ms? : Int) -> Map[Int, Int64]
 pub async fn BrokerConnection::negotiate_api_versions(Self, timeout_ms? : Int) -> Unit
 pub fn BrokerConnection::note_throttle(Self, Int) -> Unit
-pub async fn BrokerConnection::produce(Self, String, Array[(Int, Bytes)], acks~ : Int, timeout_ms~ : Int) -> Array[ProducePartitionResult]
+pub async fn BrokerConnection::produce(Self, String, topic_id? : Uuid, partitions~ : Array[(Int, Bytes)], acks~ : Int, timeout_ms~ : Int) -> Array[ProducePartitionResult]
 pub async fn BrokerConnection::request(Self, Int, Int, Bytes, timeout_ms? : Int) -> @buf.Decoder
 pub async fn BrokerConnection::request_raw(Self, Int, Int, Bytes, timeout_ms? : Int, flexible? : Bool) -> @buf.Decoder
 
@@ -265,7 +265,16 @@ pub struct ProducePartitionResult {
   partition : Int
   error_code : Int
   base_offset : Int64
+  log_append_time : Int64
+  log_start_offset : Int64
+  record_errors : Array[ProduceRecordError]
+  error_message : String?
 }
+
+pub(all) struct ProduceRecordError {
+  batch_index : Int
+  message : String?
+} derive(@debug.Debug)
 
 pub struct Producer {
   topic : String
@@ -280,6 +289,7 @@ pub struct Producer {
   tls_options : TlsClientOptions?
   mut meta_conn : BrokerConnection
   mut brokers : Map[Int, BrokerInfo]
+  mut topic_id : Uuid
   leader_conns : Map[Int, BrokerConnection]
   mut partitions : Array[PartitionInfo]
   mut round_robin : Int

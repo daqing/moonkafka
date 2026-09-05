@@ -6,8 +6,8 @@ test "fake api versions response decodes with zero throttle" {
   assert_eq(throttle, 0)
   assert_eq(d.remaining(), 0)
   // The fake broker's advertised ranges negotiate the driver's implemented
-  // versions; Metadata tops out at the v13 codec.
-  assert_eq(versions.pick(@moonkafka.API_PRODUCE), 11)
+  // versions; Produce and Metadata top out at the v13 codecs.
+  assert_eq(versions.pick(@moonkafka.API_PRODUCE), 13)
   assert_eq(versions.pick(@moonkafka.API_FETCH), 12)
   assert_eq(versions.pick(@moonkafka.API_LIST_OFFSETS), 7)
   assert_eq(versions.pick(@moonkafka.API_METADATA), 13)

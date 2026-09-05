@@ -18,6 +18,7 @@ pub struct Producer {
   tls_options : TlsClientOptions?
   mut meta_conn : BrokerConnection
   mut brokers : Map[Int, BrokerInfo]
+  mut topic_id : Uuid
   leader_conns : Map[Int, BrokerConnection]
   mut partitions : Array[PartitionInfo]
   mut round_robin : Int
@@ -80,6 +81,7 @@ pub async fn Producer::connect_with_config(config : ProducerConfig) -> Producer 
     tls_options: config.common.tls,
     meta_conn,
     brokers: Map([]),
+    topic_id: Uuid::zero(),
     leader_conns: Map([]),
     partitions: [],
     round_robin: 0,
@@ -142,6 +144,7 @@ async fn Producer::refresh_metadata(self : Producer) -> Unit {
     )
   }
   self.partitions = topic_meta.partitions
+  self.topic_id = topic_meta.topic_id
   // Open a connection per distinct partition leader.
   for _, conn in self.leader_conns {
     conn.close()
@@ -251,7 +254,8 @@ async fn Producer::attempt_send(
   guard self.leader_conns.get(p.leader) is Some(conn) else { return None }
   let results = conn.produce(
     self.topic,
-    [(p.index, batch)],
+    topic_id=self.topic_id,
+    partitions=[(p.index, batch)],
     acks=self.acks,
     timeout_ms=self.timeout_ms,
   ) catch {
@@ -272,7 +276,24 @@ async fn Producer::attempt_send(
     5 | 6 | 129 => None
     code =>
       raise ProtocolError::ProtocolError(
-        "Produce failed for partition \{result.partition}: \{error_name(code)}",
+        "Produce failed for partition \{result.partition}: \{error_name(code)}\{produce_error_detail(result)}",
       )
   }
+}
+
+///|
+/// The broker's own explanation for a dropped batch: the summary message
+/// and the offending record indices (KIP-467), when it reported any.
+fn produce_error_detail(result : ProducePartitionResult) -> String {
+  let detail = match result.error_message {
+    Some(msg) => ": \{msg}"
+    None => ""
+  }
+  if result.record_errors.is_empty() {
+    return detail
+  }
+  let indices = result.record_errors
+    .map(fn(err) { err.batch_index.to_string() })
+    .join(",")
+  "\{detail} (records [\{indices}])"
 }
