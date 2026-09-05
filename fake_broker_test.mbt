@@ -106,16 +106,16 @@ fn fake_produce_response(topic : String, base_offset : Int64) -> Bytes {
 /// Answer requests forever on one client connection; exits when the client
 /// goes away. Every API answers with offset 42.
 async fn fake_serve_conn(
-  tcp : @socket.Tcp,
+  stream : BrokerStream,
   topic : String,
   broker_port : Int,
   api_throttle_ms? : Int = 0,
   sasl_ok? : Bool = true,
 ) -> Unit {
   for ;; {
-    let size_bytes = tcp.read_exactly(4)
+    let size_bytes = stream.read_exactly(4)
     let size = @buf.Decoder::new(size_bytes).read_i32()
-    let rest = tcp.read_exactly(size)
+    let rest = stream.read_exactly(size)
     let key = (rest[0].to_int() << 8) | rest[1].to_int()
     let corr = (rest[4].to_int() << 24) |
       (rest[5].to_int() << 16) |
@@ -139,7 +139,7 @@ async fn fake_serve_conn(
       frame.write_tag_buffer()
     }
     frame.write_bytes(body)
-    tcp.write(frame.to_bytes())
+    stream.write(frame.to_bytes())
   }
 }
 
@@ -152,13 +152,28 @@ async fn fake_broker(
   accepted : Array[@socket.Tcp],
   api_throttle_ms? : Int = 0,
   sasl_ok? : Bool = true,
+  wrap_tls? : Bool = false,
 ) -> Unit {
   for ;; {
     let (tcp, _) = server.accept()
     accepted.push(tcp)
     root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      let stream = if wrap_tls {
+        @moonkafka.Secure(
+          @tls.Tls::server_from_pair(
+            tcp,
+            tcp,
+            private_key_file="test_keys/key.pem",
+            private_key_type=PEM,
+            certificate_file="test_keys/cert.pem",
+            certificate_type=PEM,
+          ),
+        )
+      } else {
+        @moonkafka.Plain(tcp)
+      }
       fake_serve_conn(
-        tcp,
+        stream,
         topic,
         server.addr.port(),
         api_throttle_ms~,
@@ -331,6 +346,61 @@ async test "failed SASL authentication raises SaslError" {
       e => fail("expected a SaslError, got \{e}")
     }
     assert_true(sasl_failed)
+    server.close()
+  }
+}
+
+///|
+async test "producer produces over verified TLS" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, wrap_tls=true)
+    }
+    let producer = @moonkafka.Producer::connect_with_config(
+      @moonkafka.ProducerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        acks=1,
+        request_timeout_ms=5000,
+        security_protocol=Ssl,
+        tls=Some(
+          TlsClientOptions::new(
+            "localhost",
+            verify_certificates=true,
+            ca_pem_file=Some("test_keys/cert.pem"),
+          ),
+        ),
+      ),
+    )
+    defer producer.close()
+    assert_eq(producer.send(value=b"hello"), 42L)
+    server.close()
+  }
+}
+
+///|
+async test "producer produces over SASL_SSL" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, wrap_tls=true)
+    }
+    let producer = @moonkafka.Producer::connect_with_config(
+      @moonkafka.ProducerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        acks=1,
+        request_timeout_ms=5000,
+        security_protocol=SaslSsl,
+        sasl=Some({ mechanism: Plain, username: "admin", password: "secret", }),
+        tls=Some(TlsClientOptions::new("localhost", verify_certificates=false)),
+      ),
+    )
+    defer producer.close()
+    assert_eq(producer.send(value=b"hello"), 42L)
     server.close()
   }
 }

@@ -6,6 +6,7 @@ import {
   "moonbitlang/async",
   "moonbitlang/async/semaphore",
   "moonbitlang/async/socket",
+  "moonbitlang/async/tls",
   "moonbitlang/core/debug",
 }
 
@@ -22,7 +23,7 @@ pub const API_PRODUCE : Int = 0
 
 pub fn backoff_ms(Int, Int, Int) -> Int
 
-pub async fn connect_bootstrap(BootstrapServers, String, timeout_ms? : Int, sasl? : SaslConfig?) -> BrokerConnection
+pub async fn connect_bootstrap(BootstrapServers, String, timeout_ms? : Int, sasl? : SaslConfig?, use_tls? : Bool, tls? : TlsClientOptions?) -> BrokerConnection
 
 pub fn decode_api_versions_response(@buf.Decoder) -> Int raise
 
@@ -101,6 +102,7 @@ pub fn BootstrapServers::next(Self) -> HostPort
 
 pub struct BrokerConnection {
   tcp : @socket.Tcp
+  stream : BrokerStream
   client_id : String
   write_lock : @async.Mutex
   read_lock : @async.Mutex
@@ -113,7 +115,7 @@ pub struct BrokerConnection {
 pub async fn BrokerConnection::authenticate(Self, SaslConfig, timeout_ms? : Int) -> Unit
 pub async fn BrokerConnection::check_api_versions(Self, timeout_ms? : Int) -> Unit
 pub fn BrokerConnection::close(Self) -> Unit
-pub async fn BrokerConnection::connect(String, Int, client_id? : String, max_in_flight? : Int, sasl? : SaslConfig?, timeout_ms? : Int) -> Self
+pub async fn BrokerConnection::connect(String, Int, client_id? : String, max_in_flight? : Int, sasl? : SaslConfig?, timeout_ms? : Int, tls? : TlsClientOptions?) -> Self
 pub async fn BrokerConnection::fetch(Self, String, Array[(PartitionInfo, Int64)], max_wait_ms~ : Int, max_bytes~ : Int, timeout_ms? : Int) -> Array[FetchPartitionResult]
 pub async fn BrokerConnection::fetch_metadata(Self, String, timeout_ms? : Int) -> Metadata
 pub async fn BrokerConnection::list_offsets(Self, String, Array[PartitionInfo], Int64, timeout_ms? : Int) -> Map[Int, Int64]
@@ -128,6 +130,13 @@ pub struct BrokerInfo {
   port : Int
 }
 
+pub(all) enum BrokerStream {
+  Plain(@socket.Tcp)
+  Secure(@tls.Tls)
+}
+pub async fn BrokerStream::read_exactly(Self, Int) -> Bytes
+pub async fn BrokerStream::write(Self, Bytes) -> Unit
+
 pub struct CommonConfig {
   bootstrap_servers : Array[String]
   client_id : String
@@ -138,9 +147,10 @@ pub struct CommonConfig {
   retry_backoff_max_ms : Int
   security_protocol : SecurityProtocol
   sasl : SaslConfig?
+  tls : TlsClientOptions?
 } derive(@debug.Debug)
 pub fn CommonConfig::bootstrap_addresses(Self) -> Array[HostPort] raise ProtocolError
-pub fn CommonConfig::new(Array[String], request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?) -> Self raise
+pub fn CommonConfig::new(Array[String], request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?, tls? : TlsClientOptions?) -> Self raise
 pub fn CommonConfig::validate(Self) -> Unit raise ProtocolError
 
 pub struct Consumer {
@@ -165,7 +175,7 @@ pub struct ConsumerConfig {
   topic : String
   start_from : StartFrom
 } derive(@debug.Debug)
-pub fn ConsumerConfig::new(Array[String], String, start_from? : StartFrom, request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?) -> Self raise
+pub fn ConsumerConfig::new(Array[String], String, start_from? : StartFrom, request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?, tls? : TlsClientOptions?) -> Self raise
 
 pub struct Deadline {
   at_ms : Int64
@@ -215,6 +225,8 @@ pub struct Producer {
   retry_backoff_max_ms : Int
   bootstrap : BootstrapServers
   sasl : SaslConfig?
+  use_tls : Bool
+  tls_options : TlsClientOptions?
   mut meta_conn : BrokerConnection
   mut brokers : Map[Int, BrokerInfo]
   leader_conns : Map[Int, BrokerConnection]
@@ -232,7 +244,7 @@ pub struct ProducerConfig {
   topic : String
   acks : Int
 } derive(@debug.Debug)
-pub fn ProducerConfig::new(Array[String], String, acks? : Int, request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?) -> Self raise
+pub fn ProducerConfig::new(Array[String], String, acks? : Int, request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?, tls? : TlsClientOptions?) -> Self raise
 
 pub(all) struct Record {
   offset : Int64
@@ -276,6 +288,13 @@ pub(all) enum StartFrom {
   Earliest
   Latest
 } derive(@debug.Debug)
+
+pub(all) struct TlsClientOptions {
+  server_name : String
+  verify_certificates : Bool
+  ca_pem_file : String?
+} derive(@debug.Debug)
+pub fn TlsClientOptions::new(String, verify_certificates? : Bool, ca_pem_file? : String?) -> Self
 
 pub struct TopicMetadata {
   name : String

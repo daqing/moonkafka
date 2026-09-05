@@ -35,6 +35,8 @@ pub async fn connect_bootstrap(
   client_id : String,
   timeout_ms? : Int = 10000,
   sasl? : SaslConfig? = None,
+  use_tls? : Bool = false,
+  tls? : TlsClientOptions? = None,
 ) -> BrokerConnection {
   let n = servers.addrs.length()
   let mut last_error : Error = ProtocolError::ProtocolError(
@@ -42,7 +44,7 @@ pub async fn connect_bootstrap(
   )
   for _ in 0..<n {
     let addr = servers.next()
-    match dial(addr, client_id, timeout_ms, sasl) {
+    match dial(addr, client_id, timeout_ms, sasl, use_tls, tls) {
       Ok(conn) => return conn
       Err(e) => last_error = e
     }
@@ -60,7 +62,15 @@ async fn dial(
   client_id : String,
   timeout_ms : Int,
   sasl : SaslConfig?,
+  use_tls : Bool,
+  tls : TlsClientOptions?,
 ) -> Result[BrokerConnection, Error] {
+  // Without explicit TLS options, a TLS protocol still gets defaults whose
+  // server name is the dialed host.
+  let tls_opts = match tls {
+    Some(opts) => Some(opts)
+    None => if use_tls { Some(TlsClientOptions::new(addr.host)) } else { None }
+  }
   try
     @async.with_timeout(timeout_ms, () => {
       BrokerConnection::connect(
@@ -69,6 +79,7 @@ async fn dial(
         client_id~,
         sasl~,
         timeout_ms~,
+        tls=tls_opts,
       )
     })
     |> Ok
