@@ -1,13 +1,19 @@
 // A simple producer: sends messages to one topic, one Produce request per
 // send. Messages with a key are routed by key hash; messages without a key
-// are spread over the partitions round-robin.
+// are spread over the partitions round-robin. Transport failures and
+// leadership changes trigger recovery — reconnect through the bootstrap
+// set, refresh metadata, and retry with backoff up to `retries` times.
 
 ///|
 pub struct Producer {
   topic : String
   acks : Int
   timeout_ms : Int
-  meta_conn : BrokerConnection
+  retries : Int
+  retry_backoff_ms : Int
+  retry_backoff_max_ms : Int
+  bootstrap : BootstrapServers
+  mut meta_conn : BrokerConnection
   mut brokers : Map[Int, BrokerInfo]
   leader_conns : Map[Int, BrokerConnection]
   mut partitions : Array[PartitionInfo]
@@ -37,22 +43,24 @@ pub async fn Producer::connect(
 }
 
 ///|
-/// Connect using explicit configuration, which is validated first. Until
-/// Phase 1 adds the bootstrap set, only the first bootstrap server is dialed.
+/// Connect using explicit configuration, which is validated first. The
+/// meta connection lands on the first bootstrap server that accepts.
 pub async fn Producer::connect_with_config(config : ProducerConfig) -> Producer {
-  guard config.common.bootstrap_addresses().get(0) is Some(addr) else {
-    raise ProtocolError::ProtocolError("bootstrap_servers must not be empty")
-  }
-  let meta_conn = BrokerConnection::connect(
-    addr.host,
-    addr.port,
-    client_id=config.common.client_id,
+  let bootstrap = BootstrapServers::new(config.common.bootstrap_addresses())
+  let meta_conn = connect_bootstrap(
+    bootstrap,
+    config.common.client_id,
+    timeout_ms=config.common.request_timeout_ms,
   )
   meta_conn.check_api_versions(timeout_ms=config.common.request_timeout_ms)
   let producer = {
     topic: config.topic,
     acks: config.acks,
     timeout_ms: config.common.request_timeout_ms,
+    retries: config.common.retries,
+    retry_backoff_ms: config.common.retry_backoff_ms,
+    retry_backoff_max_ms: config.common.retry_backoff_max_ms,
+    bootstrap,
     meta_conn,
     brokers: Map([]),
     leader_conns: Map([]),
@@ -68,16 +76,38 @@ pub async fn Producer::connect_with_config(config : ProducerConfig) -> Producer 
 pub fn Producer::close(self : Producer) -> Unit {
   if !self.closed {
     self.closed = true
-    self.meta_conn.close()
-    for _, conn in self.leader_conns {
-      conn.close()
-    }
+    self.drop_connections()
   }
 }
 
 ///|
+fn Producer::drop_connections(self : Producer) -> Unit {
+  self.meta_conn.close()
+  for _, conn in self.leader_conns {
+    conn.close()
+  }
+  self.leader_conns.clear()
+}
+
+///|
+/// Rebuild every connection after a transport failure: dial a bootstrap
+/// server (rotating), then refresh metadata and leader connections.
+async fn Producer::recover(self : Producer) -> Unit {
+  self.drop_connections()
+  self.meta_conn = connect_bootstrap(
+    self.bootstrap,
+    self.meta_conn.client_id,
+    timeout_ms=self.timeout_ms,
+  )
+  self.refresh_metadata()
+}
+
+///|
 async fn Producer::refresh_metadata(self : Producer) -> Unit {
-  let metadata = self.meta_conn.fetch_metadata(self.topic)
+  let metadata = self.meta_conn.fetch_metadata(
+    self.topic,
+    timeout_ms=self.timeout_ms,
+  )
   self.brokers = metadata.brokers
   let topic_meta = match metadata.topics.get(0) {
     Some(t) => t
@@ -133,7 +163,8 @@ fn Producer::pick_partition(self : Producer, key : Bytes?) -> PartitionInfo {
 ///|
 /// Send one message and return the offset assigned by the broker.
 /// `timestamp` defaults to the current time (ms since epoch).
-/// On a leadership change the producer refreshes metadata and retries once.
+/// Leadership changes and transport failures trigger recovery and a
+/// backoff-paced retry, up to `retries` attempts after the first.
 pub async fn Producer::send(
   self : Producer,
   key? : Bytes,
@@ -142,29 +173,62 @@ pub async fn Producer::send(
 ) -> Int64 {
   let timestamp = timestamp.unwrap_or(@async.now())
   let batch = encode_record_batch([{ offset: 0L, timestamp, key, value, }])
-  for _ in 0..<2 {
+  let backoff = Backoff::new(
+    base_ms=self.retry_backoff_ms,
+    max_ms=self.retry_backoff_max_ms,
+  )
+  // Cap the materialized attempt count: huge `retries` values (Java-style
+  // unbounded) must not overflow the loop bound.
+  let attempts = if self.retries > 1000 { 1000 } else { self.retries + 1 }
+  for attempt in 0..<attempts {
     let p = self.pick_partition(key)
-    guard self.leader_conns.get(p.leader) is Some(conn) else {
-      self.refresh_metadata()
-      continue
-    }
-    let results = conn.produce(
-      self.topic,
-      [(p.index, batch)],
-      acks=self.acks,
-      timeout_ms=self.timeout_ms,
-    )
-    guard results.get(0) is Some(result) else {
-      raise ProtocolError::ProtocolError("Produce response has no partitions")
-    }
-    match result.error_code {
-      0 => return result.base_offset
-      5 | 6 => self.refresh_metadata() // LEADER_NOT_AVAILABLE / NOT_LEADER_OR_FOLLOWER
-      code =>
-        raise ProtocolError::ProtocolError(
-          "Produce failed for partition \{result.partition}: \{error_name(code)}",
-        )
+    match self.attempt_send(p, batch) {
+      Some(offset) => return offset
+      None => {
+        self.recover()
+        if attempt + 1 < attempts {
+          @async.sleep(backoff.next_ms())
+        }
+      }
     }
   }
-  raise ProtocolError::ProtocolError("Produce failed after metadata refresh")
+  raise ProtocolError::ProtocolError(
+    "send to topic \{self.topic} failed after \{attempts} attempts",
+  )
+}
+
+///|
+/// One produce attempt. Returns None when the failure is recoverable —
+/// a dead connection or a leadership change — after recovery has been
+/// triggered; permanent broker errors raise.
+async fn Producer::attempt_send(
+  self : Producer,
+  p : PartitionInfo,
+  batch : Bytes,
+) -> Int64? {
+  guard self.leader_conns.get(p.leader) is Some(conn) else { return None }
+  let results = conn.produce(
+    self.topic,
+    [(p.index, batch)],
+    acks=self.acks,
+    timeout_ms=self.timeout_ms,
+  ) catch {
+    e =>
+      match e {
+        TransportError::ConnectionClosed(_) => return None
+        TransportError::RequestTimeout(_) => return None
+        _ => raise e
+      }
+  }
+  guard results.get(0) is Some(result) else {
+    raise ProtocolError::ProtocolError("Produce response has no partitions")
+  }
+  match result.error_code {
+    0 => Some(result.base_offset)
+    5 | 6 => None // LEADER_NOT_AVAILABLE / NOT_LEADER_OR_FOLLOWER
+    code =>
+      raise ProtocolError::ProtocolError(
+        "Produce failed for partition \{result.partition}: \{error_name(code)}",
+      )
+  }
 }

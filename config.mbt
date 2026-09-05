@@ -158,7 +158,9 @@ pub struct CommonConfig {
 
 ///|
 /// Defaults mirror the Java client where sensible: 30s request timeout,
-/// 9-minute idle connection limit, unbounded retries paced 100ms..1s.
+/// 9-minute idle connection limit. Retries are bounded at 10 for now —
+/// the Java default is effectively unbounded but is gated by
+/// delivery.timeout.ms, which the batching producer (Phase 3) introduces.
 pub fn CommonConfig::new(
   bootstrap_servers : Array[String],
   request_timeout_ms? : Int = 30000,
@@ -168,7 +170,7 @@ pub fn CommonConfig::new(
     client_id: "moonkafka",
     request_timeout_ms,
     connection_max_idle_ms: 540000,
-    retries: 2147483647,
+    retries: 10,
     retry_backoff_ms: 100,
     retry_backoff_max_ms: 1000,
     security_protocol: Plaintext,
