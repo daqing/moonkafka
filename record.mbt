@@ -215,20 +215,33 @@ fn decode_one_batch(
   let is_control = (attributes & ATTR_CONTROL) != 0
   let is_transactional = (attributes & ATTR_TRANSACTIONAL) != 0
   let records : Array[Record] = []
-  if (attributes & ATTR_COMPRESSION_MASK) != 0 {
-    return { // compressed batches not supported yet
-      records,
-      producer_id,
-      producer_epoch,
-      base_sequence,
-      is_control,
-      is_transactional,
-      truncated: false,
-    }
-  }
+  let compression_id = attributes & ATTR_COMPRESSION_MASK
   let log_append_time = (attributes & ATTR_TIMESTAMP_TYPE) != 0
+  // Compressed batches carry the records region as one whole-batch
+  // compressed blob right after the fixed header; decompress, then parse
+  // the same record_count records out of it. Reserved attribute bits
+  // (above 4) skip the batch like the Java client does.
+  let records_decoder : @buf.Decoder = if compression_id != 0 {
+    let codec = match @compression.codec_by_id(compression_id) {
+      Some(codec) => codec
+      None =>
+        return {
+          records,
+          producer_id,
+          producer_epoch,
+          base_sequence,
+          is_control,
+          is_transactional,
+          truncated: false,
+        }
+    }
+    let blob = header.read_bytes(header.remaining())
+    @buf.Decoder::new((codec.decompress)(blob))
+  } else {
+    header
+  }
   for _ in 0..<record_count {
-    let record = decode_record(header)
+    let record = decode_record(records_decoder)
     let timestamp = if log_append_time {
       max_timestamp
     } else {
