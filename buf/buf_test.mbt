@@ -79,3 +79,31 @@ test "empty tag forms both read as zero count" {
   d2.skip_tag_buffer()
   assert_eq(d2.remaining(), 0)
 }
+
+///|
+test "huge compact lengths raise instead of panicking" {
+  // A compact string claiming ~2GB must raise, not overflow the pos+n
+  // bounds check into a negative and index out of bounds mid-read; a byte
+  // is consumed first so the addition would wrap on 32-bit ints.
+  let d = @buf.Decoder::new(b"\x00\xff\xff\xff\xff\x07") // uvarint 0x7FFFFFFF
+  ignore(d.read_byte())
+  let mut eof = false
+  ignore(d.read_compact_nullable_string()) catch {
+    @buf.UnexpectedEof => eof = true
+    _ => fail("expected UnexpectedEof")
+  }
+  assert_true(eof)
+}
+
+///|
+test "negative skip is rejected without rewinding the position" {
+  let d = @buf.Decoder::new(b"abcd")
+  ignore(d.read_i16()) // consume two bytes
+  let mut rejected = false
+  ignore(d.skip(-1)) catch {
+    @buf.UnexpectedEof => rejected = true
+    _ => fail("expected UnexpectedEof")
+  }
+  assert_true(rejected)
+  assert_eq(d.remaining(), 2)
+}

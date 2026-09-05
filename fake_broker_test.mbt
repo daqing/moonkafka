@@ -7,8 +7,15 @@
 fn fake_api_versions_response(throttle_ms : Int) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i16(0) // error_code
-  e.write_compact_len(5)
-  let apis : Array[(Int, Int)] = [(0, 11), (1, 12), (2, 7), (3, 12), (18, 3)]
+  e.write_compact_len(6)
+  let apis : Array[(Int, Int)] = [
+    (0, 11),
+    (1, 12),
+    (2, 7),
+    (3, 13),
+    (18, 3),
+    (75, 0),
+  ]
   for pair in apis {
     let (key, max) = pair
     e.write_i16(key)
@@ -176,7 +183,13 @@ fn fake_sasl_authenticate_response(ok : Bool) -> Bytes {
 }
 
 ///|
-fn fake_metadata_response(topic : String, broker_port : Int) -> Bytes {
+/// Metadata response body; v13 appends a top-level error code after the
+/// topics array.
+fn fake_metadata_response(
+  topic : String,
+  broker_port : Int,
+  version : Int,
+) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(0) // throttle
   e.write_compact_len(1) // one broker, node 0, which is also the leader
@@ -203,6 +216,9 @@ fn fake_metadata_response(topic : String, broker_port : Int) -> Bytes {
   e.write_tag_buffer()
   e.write_i32(0) // authorized operations (skipped by the decoder)
   e.write_tag_buffer()
+  if version >= 13 {
+    e.write_i16(0) // top-level error code
+  }
   e.write_tag_buffer()
   e.to_bytes()
 }
@@ -228,6 +244,76 @@ fn fake_produce_response(topic : String, base_offset : Int64) -> Bytes {
 }
 
 ///|
+/// Cursor from a DescribeTopicPartitions request (flexible v0: header v2
+/// with its tag buffer, then topics array, response limit, cursor struct).
+fn fake_dtp_request_cursor(rest : Bytes) -> TopicPartitionCursor? raise {
+  let d = @buf.Decoder::new(rest)
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  let id_len = d.read_i16()
+  ignore(d.read_bytes(id_len))
+  d.skip_tag_buffer()
+  let topic_count = d.read_compact_len()
+  for _ in 0..<topic_count {
+    ignore(d.read_compact_string())
+    d.skip_tag_buffer()
+  }
+  ignore(d.read_i32()) // response_partition_limit
+  if d.read_i8() < 0 {
+    None
+  } else {
+    let topic_name = d.read_compact_string()
+    let partition_index = d.read_i32()
+    d.skip_tag_buffer()
+    Some({ topic_name, partition_index, })
+  }
+}
+
+///|
+/// DescribeTopicPartitions response page for one topic: the given
+/// partitions plus an optional resume cursor.
+fn fake_describe_topic_partitions_response(
+  topic : String,
+  partitions : Array[Int],
+  next_cursor : TopicPartitionCursor?,
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(1) // one topic
+  e.write_i16(0) // no error
+  e.write_compact_string(topic)
+  e.write_bytes(Bytes::make(16, b'\x07')) // topic id
+  e.write_bool(false) // is_internal
+  e.write_compact_len(partitions.length())
+  for p in partitions {
+    e.write_i16(0) // no error
+    e.write_i32(p) // index
+    e.write_i32(0) // leader node
+    e.write_i32(0) // leader epoch
+    e.write_compact_len(0) // replicas
+    e.write_compact_len(0) // isr
+    e.write_compact_len(-1) // eligible leader replicas: null
+    e.write_compact_len(-1) // last known elr: null
+    e.write_compact_len(0) // offline replicas
+    e.write_tag_buffer()
+  }
+  e.write_i32(0) // authorized operations
+  e.write_tag_buffer()
+  match next_cursor {
+    None => e.write_i8(-1) // nullable struct marker
+    Some(cursor) => {
+      e.write_i8(1)
+      e.write_compact_string(cursor.topic_name)
+      e.write_i32(cursor.partition_index)
+      e.write_tag_buffer()
+    }
+  }
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
 /// Answer requests forever on one client connection; exits when the client
 /// goes away. Every API answers with offset 42.
 async fn fake_serve_conn(
@@ -248,6 +334,7 @@ async fn fake_serve_conn(
     let size = @buf.Decoder::new(size_bytes).read_i32()
     let rest = stream.read_exactly(size)
     let key = (rest[0].to_int() << 8) | rest[1].to_int()
+    let version = (rest[2].to_int() << 8) | rest[3].to_int()
     let corr = (rest[4].to_int() << 24) |
       (rest[5].to_int() << 16) |
       (rest[6].to_int() << 8) |
@@ -259,7 +346,19 @@ async fn fake_serve_conn(
         fake_sasl_handshake_response()
       }
       0 => fake_produce_response(topic, 42L)
-      3 => fake_metadata_response(topic, broker_port)
+      3 => fake_metadata_response(topic, broker_port, version)
+      75 =>
+        // Two pages: a fresh request returns partition 0 with a cursor at
+        // partition 1; a resumed request returns partition 1 and completes.
+        match fake_dtp_request_cursor(rest) {
+          None =>
+            fake_describe_topic_partitions_response(
+              topic,
+              [0],
+              Some({ topic_name: topic, partition_index: 1, }),
+            )
+          Some(_) => fake_describe_topic_partitions_response(topic, [1], None)
+        }
       36 => {
         let mechanism = sasl_mechanism.unwrap_or("")
         if !sasl_ok {
@@ -331,9 +430,6 @@ async fn fake_serve_conn(
     // ApiVersions and SaslHandshake v1 responses use header v0: no tag
     // buffer after the correlation id. The rest are flexible (header v1).
     let has_tag = key != 18 && key != 17
-    if key == 3 {
-
-    }
     let frame = @buf.Encoder::new()
     frame.write_i32(4 + (if has_tag { 1 } else { 0 }) + body.length())
     frame.write_i32(corr)
@@ -386,6 +482,50 @@ async fn fake_broker(
         scram_sha512~,
       )
     }
+  }
+}
+
+///|
+async test "describe topic partitions follows the pagination cursor" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted)
+    }
+    let conn = @moonkafka.BrokerConnection::connect(
+      "127.0.0.1",
+      server.addr.port(),
+      timeout_ms=5000,
+    )
+    defer conn.close()
+    conn.negotiate_api_versions(timeout_ms=5000)
+    // Page one returns partition 0 plus a cursor at partition 1; page two
+    // returns partition 1 and completes the listing.
+    let page1 = conn.describe_topic_partitions(
+      ["events"],
+      response_partition_limit=1,
+      timeout_ms=5000,
+    )
+    let topic1 = page1.topics[0]
+    assert_eq(topic1.name, "events")
+    assert_eq(topic1.partitions.length(), 1)
+    assert_eq(topic1.partitions[0].index, 0)
+    guard page1.next_cursor is Some(cursor) else {
+      abort("page one must carry a next cursor")
+    }
+    assert_eq(cursor.topic_name, "events")
+    assert_eq(cursor.partition_index, 1)
+    let page2 = conn.describe_topic_partitions(
+      ["events"],
+      cursor=Some(cursor),
+      timeout_ms=5000,
+    )
+    let topic2 = page2.topics[0]
+    assert_eq(topic2.partitions.length(), 1)
+    assert_eq(topic2.partitions[0].index, 1)
+    assert_true(page2.next_cursor is None)
+    server.close()
   }
 }
 

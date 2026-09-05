@@ -14,6 +14,8 @@ import {
 // Values
 pub const API_API_VERSIONS : Int = 18
 
+pub const API_DESCRIBE_TOPIC_PARTITIONS : Int = 75
+
 pub const API_FETCH : Int = 1
 
 pub const API_LIST_OFFSETS : Int = 2
@@ -32,11 +34,13 @@ pub async fn connect_bootstrap(BootstrapServers, String, timeout_ms? : Int, sasl
 
 pub fn decode_api_versions_response(@buf.Decoder) -> (BrokerVersions, Int) raise
 
+pub fn decode_describe_topic_partitions_response(@buf.Decoder) -> (DescribeTopicPartitions, Int) raise
+
 pub fn decode_fetch_response(@buf.Decoder) -> (Array[FetchPartitionResult], Int) raise
 
 pub fn decode_list_offsets_response(@buf.Decoder) -> (Map[Int, Int64], Int) raise
 
-pub fn decode_metadata_response(@buf.Decoder) -> (Metadata, Int) raise
+pub fn decode_metadata_response(Int, @buf.Decoder) -> (Metadata, Int) raise
 
 pub fn decode_produce_response(@buf.Decoder) -> (Array[ProducePartitionResult], Int) raise
 
@@ -50,11 +54,13 @@ pub fn driver_api_range(Int) -> ApiRange?
 
 pub fn encode_api_versions_request() -> Bytes
 
+pub fn encode_describe_topic_partitions_request(Array[String], Int, cursor? : TopicPartitionCursor?) -> Bytes
+
 pub fn encode_fetch_request(String, Array[(PartitionInfo, Int64)], Int, Int) -> Bytes
 
 pub fn encode_list_offsets_request(String, Array[PartitionInfo], Int64) -> Bytes
 
-pub fn encode_metadata_request(String) -> Bytes
+pub fn encode_metadata_request(Array[String]?) -> Bytes
 
 pub fn encode_produce_request(String, Array[(Int, Bytes)], Int, Int) -> Bytes
 
@@ -147,6 +153,7 @@ pub fn BrokerConnection::api_version(Self, Int, want? : Int?) -> Int raise
 pub async fn BrokerConnection::authenticate(Self, SaslConfig, timeout_ms? : Int) -> Unit
 pub fn BrokerConnection::close(Self) -> Unit
 pub async fn BrokerConnection::connect(String, Int, client_id? : String, max_in_flight? : Int, timeout_ms? : Int, tls? : TlsClientOptions?) -> Self
+pub async fn BrokerConnection::describe_topic_partitions(Self, Array[String], response_partition_limit? : Int, cursor? : TopicPartitionCursor?, timeout_ms? : Int) -> DescribeTopicPartitions
 pub async fn BrokerConnection::fetch(Self, String, Array[(PartitionInfo, Int64)], max_wait_ms~ : Int, max_bytes~ : Int, timeout_ms? : Int) -> Array[FetchPartitionResult]
 pub async fn BrokerConnection::fetch_metadata(Self, String, timeout_ms? : Int) -> Metadata
 pub async fn BrokerConnection::list_offsets(Self, String, Array[PartitionInfo], Int64, timeout_ms? : Int) -> Map[Int, Int64]
@@ -222,6 +229,11 @@ pub struct Deadline {
 pub fn Deadline::after_ms(Int64) -> Self
 pub fn Deadline::expired(Self) -> Bool
 pub fn Deadline::remaining_ms(Self) -> Int64
+
+pub struct DescribeTopicPartitions {
+  topics : Array[TopicMetadata]
+  next_cursor : TopicPartitionCursor?
+}
 
 pub struct FetchPartitionResult {
   partition : Int
@@ -347,8 +359,15 @@ pub fn TlsClientOptions::new(String, verify_certificates? : Bool, ca_pem_file? :
 
 pub struct TopicMetadata {
   name : String
+  topic_id : Uuid
+  is_internal : Bool
   partitions : Array[PartitionInfo]
 }
+
+pub(all) struct TopicPartitionCursor {
+  topic_name : String
+  partition_index : Int
+} derive(@debug.Debug)
 
 pub struct Uuid {
   bytes : Bytes

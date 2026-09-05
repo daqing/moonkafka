@@ -174,8 +174,10 @@ pub fn Decoder::remaining(self : Decoder) -> Int {
 }
 
 ///|
+/// Bounds check computed by subtraction (never overflows); negative
+/// lengths from malformed input raise instead of rewinding or panicking.
 fn Decoder::need(self : Decoder, n : Int) -> Unit raise DecodeError {
-  if self.pos + n > self.data.length() {
+  if n < 0 || n > self.data.length() - self.pos {
     raise DecodeError::UnexpectedEof
   }
 }
@@ -234,9 +236,12 @@ pub fn Decoder::read_i64(self : Decoder) -> Int64 raise DecodeError {
 }
 
 ///|
-/// Skip n bytes, raising on overrun.
+/// Skip n bytes. Negative n and overruns raise; bounds are computed by
+/// subtraction so a malformed huge length cannot overflow the check.
 pub fn Decoder::skip(self : Decoder, n : Int) -> Unit raise DecodeError {
-  self.need(n)
+  if n < 0 || n > self.data.length() - self.pos {
+    raise DecodeError::UnexpectedEof
+  }
   self.pos += n
 }
 

@@ -32,12 +32,40 @@ pub async fn BrokerConnection::fetch_metadata(
   let d = self.request(
     API_METADATA,
     version,
-    encode_metadata_request(topic),
+    encode_metadata_request(Some([topic])),
     timeout_ms~,
   )
-  let (metadata, throttle) = decode_metadata_response(d)
+  let (metadata, throttle) = decode_metadata_response(version, d)
   self.note_throttle(throttle)
   metadata
+}
+
+///|
+/// Describe topics via DescribeTopicPartitions v0, one page per call:
+/// returns the page plus the cursor to resume with when the broker
+/// truncated the response at `response_partition_limit`. An empty `topics`
+/// list describes all topics.
+pub async fn BrokerConnection::describe_topic_partitions(
+  self : BrokerConnection,
+  topics : Array[String],
+  response_partition_limit? : Int = 2000,
+  cursor? : TopicPartitionCursor? = None,
+  timeout_ms? : Int = 30000,
+) -> DescribeTopicPartitions {
+  let version = self.api_version(API_DESCRIBE_TOPIC_PARTITIONS)
+  let d = self.request(
+    API_DESCRIBE_TOPIC_PARTITIONS,
+    version,
+    encode_describe_topic_partitions_request(
+      topics,
+      response_partition_limit,
+      cursor~,
+    ),
+    timeout_ms~,
+  )
+  let (page, throttle) = decode_describe_topic_partitions_response(d)
+  self.note_throttle(throttle)
+  page
 }
 
 ///|
