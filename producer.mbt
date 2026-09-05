@@ -116,7 +116,13 @@ async fn Producer::recover(self : Producer) -> Unit {
     self.bootstrap,
     self.meta_conn.client_id,
     timeout_ms=self.timeout_ms,
+    use_tls=self.use_tls,
+    tls=self.tls_options,
   )
+  match self.sasl {
+    Some(sasl) => self.meta_conn.authenticate(sasl, timeout_ms=self.timeout_ms)
+    None => ()
+  }
   self.refresh_metadata()
 }
 
@@ -155,14 +161,18 @@ async fn Producer::refresh_metadata(self : Producer) -> Unit {
                 None
               }
           }
-          self.leader_conns[p.leader] = BrokerConnection::connect(
+          let conn = BrokerConnection::connect(
             broker.host,
             broker.port,
             client_id=self.meta_conn.client_id,
-            sasl=self.sasl,
             timeout_ms=self.timeout_ms,
             tls=tls_opts,
           )
+          match self.sasl {
+            Some(sasl) => conn.authenticate(sasl, timeout_ms=self.timeout_ms)
+            None => ()
+          }
+          self.leader_conns[p.leader] = conn
         }
         None =>
           raise ProtocolError::ProtocolError(

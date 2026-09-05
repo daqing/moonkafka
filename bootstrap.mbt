@@ -44,8 +44,16 @@ pub async fn connect_bootstrap(
   )
   for _ in 0..<n {
     let addr = servers.next()
-    match dial(addr, client_id, timeout_ms, sasl, use_tls, tls) {
-      Ok(conn) => return conn
+    match dial(addr, client_id, timeout_ms, use_tls, tls) {
+      Ok(conn) => {
+        // SASL runs before the connection is handed out; an authentication
+        // failure is NOT a dial failure, so it propagates without failover.
+        match sasl {
+          Some(sasl) => conn.authenticate(sasl, timeout_ms~)
+          None => ()
+        }
+        return conn
+      }
       Err(e) => last_error = e
     }
   }
@@ -61,7 +69,6 @@ async fn dial(
   addr : HostPort,
   client_id : String,
   timeout_ms : Int,
-  sasl : SaslConfig?,
   use_tls : Bool,
   tls : TlsClientOptions?,
 ) -> Result[BrokerConnection, Error] {
@@ -77,7 +84,6 @@ async fn dial(
         addr.host,
         addr.port,
         client_id~,
-        sasl~,
         timeout_ms~,
         tls=tls_opts,
       )

@@ -132,7 +132,7 @@ pub struct BrokerConnection {
 pub async fn BrokerConnection::authenticate(Self, SaslConfig, timeout_ms? : Int) -> Unit
 pub async fn BrokerConnection::check_api_versions(Self, timeout_ms? : Int) -> Unit
 pub fn BrokerConnection::close(Self) -> Unit
-pub async fn BrokerConnection::connect(String, Int, client_id? : String, max_in_flight? : Int, sasl? : SaslConfig?, timeout_ms? : Int, tls? : TlsClientOptions?) -> Self
+pub async fn BrokerConnection::connect(String, Int, client_id? : String, max_in_flight? : Int, timeout_ms? : Int, tls? : TlsClientOptions?) -> Self
 pub async fn BrokerConnection::fetch(Self, String, Array[(PartitionInfo, Int64)], max_wait_ms~ : Int, max_bytes~ : Int, timeout_ms? : Int) -> Array[FetchPartitionResult]
 pub async fn BrokerConnection::fetch_metadata(Self, String, timeout_ms? : Int) -> Metadata
 pub async fn BrokerConnection::list_offsets(Self, String, Array[PartitionInfo], Int64, timeout_ms? : Int) -> Map[Int, Int64]
@@ -282,7 +282,9 @@ pub(all) struct SaslConfig {
   mechanism : SaslMechanism
   username : String
   password : String
-} derive(@debug.Debug)
+  oauth_token_provider : (() -> String raise)?
+}
+pub impl @debug.Debug for SaslConfig
 
 pub(all) struct SaslHandshakeResult {
   error_code : Int

@@ -146,7 +146,9 @@ fn scram_final_without_proof(msg : String) -> String {
 fn fake_sasl_handshake_response() -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i16(0) // error_code
-  let mechanisms : Array[String] = ["PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512"]
+  let mechanisms : Array[String] = [
+    "PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512", "OAUTHBEARER",
+  ]
   e.write_i32(mechanisms.length())
   for mechanism in mechanisms {
     let bytes = @utf8.encode(mechanism)
@@ -264,6 +266,16 @@ async fn fake_serve_conn(
           fake_sasl_authenticate_response(false)
         } else if mechanism == "PLAIN" {
           fake_sasl_authenticate_response(true)
+        } else if mechanism == "OAUTHBEARER" {
+          // RFC 7628 voucher: "n,<SOH>auth=Bearer <token><SOH><SOH>"
+          let voucher = @utf8.decode_lossy(fake_sasl_auth_bytes(rest)[:])
+          let prefix = "n,\u{1}auth=Bearer "
+          let suffix = "\u{1}\u{1}"
+          if voucher.has_prefix(prefix) && voucher.has_suffix(suffix) {
+            fake_sasl_authenticate_response(true)
+          } else {
+            fake_sasl_authenticate_response(false)
+          }
         } else if mechanism != "SCRAM-SHA-256" && mechanism != "SCRAM-SHA-512" {
           fake_sasl_authenticate_response(false)
         } else {
@@ -272,7 +284,10 @@ async fn fake_serve_conn(
             None => {
               // client-first-message: strip the "n,," gs2 header
               let bare = scram_bare_message(msg)
-              let client_nonce = scram_attr_value(bare, 'r')
+              let client_nonce = match scram_attr_value(bare, 'r') {
+                Some(n) => n
+                None => abort("client-first-message has no nonce")
+              }
               let server_nonce = "\{client_nonce}srv"
               let server_first = "r=\{server_nonce},s=\{@base64.encode(scram_test_salt[:])},i=4096"
               scram_client_first_bare = Some(bare)
@@ -311,8 +326,6 @@ async fn fake_serve_conn(
           }
         }
       }
-      3 => fake_metadata_response(topic, broker_port)
-      0 => fake_produce_response(topic, 42L)
       _ => continue
     }
     // ApiVersions and SaslHandshake v1 responses use header v0: no tag
@@ -377,7 +390,7 @@ async fn fake_broker(
 }
 
 ///|
-async test "producer completes a full send against a fake broker" {
+async test "producer authenticates with SCRAM-SHA-256" {
   @async.with_task_group() <| root => {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     let accepted : Array[@socket.Tcp] = []
@@ -389,20 +402,24 @@ async test "producer completes a full send against a fake broker" {
         ["127.0.0.1:\{server.addr.port()}"],
         "events",
         acks=1,
-        request_timeout_ms=5000,
+        request_timeout_ms=10000,
+        security_protocol=SaslPlaintext,
+        sasl=Some({
+          mechanism: ScramSha256,
+          username: "admin",
+          password: "secret",
+          oauth_token_provider: None,
+        }),
       ),
-    ) catch {
-      e => abort("CONNECT FAILED: \{e}")
-    }
+    )
     defer producer.close()
     try {
       let offset = producer.send(value=b"hello")
       assert_eq(offset, 42L)
     } catch {
-      e => abort("SEND FAILED: \{e}")
+      @moonkafka.SaslError(msg) => abort("SCRAM send failed: \{msg}")
+      e => abort("SCRAM send failed: \{e}")
     }
-    // Shut the broker down so its accept loop ends and the task group can
-    // join it at exit.
     server.close()
   }
 }

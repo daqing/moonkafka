@@ -140,14 +140,20 @@ async fn Consumer::refresh_metadata(self : Consumer) -> Unit {
     let leader = p.info.leader
     if !self.leader_conns.contains(leader) {
       match self.brokers.get(leader) {
-        Some(broker) =>
-          self.leader_conns[leader] = BrokerConnection::connect(
+        Some(broker) => {
+          let conn = BrokerConnection::connect(
             broker.host,
             broker.port,
             client_id=self.meta_conn.client_id,
-            sasl=self.sasl,
             timeout_ms=self.request_timeout_ms,
           )
+          match self.sasl {
+            Some(sasl) =>
+              conn.authenticate(sasl, timeout_ms=self.request_timeout_ms)
+            None => ()
+          }
+          self.leader_conns[leader] = conn
+        }
         None =>
           raise ProtocolError::ProtocolError(
             "no broker info for leader node \{leader}",
