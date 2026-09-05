@@ -4,6 +4,8 @@ import {
   "moonbitlang/async",
   "moonbitlang/async/socket",
   "moonbitlang/async/tls",
+  "moonbitlang/x/codec/base64",
+  "moonbitlang/x/crypto",
   "moonbitlang/core/debug",
   "moonbitlang/core/encoding/utf8",
 }

@@ -19,6 +19,7 @@ pub(all) enum SaslMechanism {
   Plain
   ScramSha256
   ScramSha512
+  OAuthBearer
 } derive(@debug.Debug)
 
 ///|

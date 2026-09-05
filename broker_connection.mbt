@@ -56,7 +56,7 @@ pub async fn BrokerStream::write(self : BrokerStream, data : Bytes) -> Unit {
 ///|
 /// Release the stream. The TLS layer must be freed before the raw socket
 /// underneath it, per the @tls requirements.
-fn BrokerStream::shutdown(self : BrokerStream) -> Unit {
+pub fn BrokerStream::shutdown(self : BrokerStream) -> Unit {
   match self {
     Secure(tls) => tls.close()
     Plain(_) => ()
@@ -200,8 +200,10 @@ pub async fn BrokerConnection::request_raw(
       )
     }
     e => {
+      // The byte stream can no longer be trusted once a read is abandoned:
+      // close so later requests fail fast.
       self.close()
-      raise e
+      raise TransportError::ConnectionClosed("api \{api_key}: \{e}")
     }
   }
   result
