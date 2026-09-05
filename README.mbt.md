@@ -27,15 +27,17 @@ Working today:
 - Simple producer: per-leader connections, Kafka-compatible murmur2
   key-partitioning (round-robin for keyless messages), metadata refresh on
   leadership changes
-- Simple consumer: per-leader connections, all partitions, in-memory offsets,
-  earliest/latest start, metadata refresh on leadership changes
+- Pipelined broker connections: request timeouts, in-flight cap, reconnect
+  through bootstrap servers, broker throttling
+- TLS (including verified certificates via a custom CA) and SASL
+  (PLAIN, SCRAM-SHA-256/512, OAUTHBEARER)
 
 Planned:
 
 - Batched/async producer
 - Consumer groups with the new KIP-848 consumer rebalance protocol
 - Compressed batches (gzip/snappy/lz4/zstd)
-- TLS and SASL authentication
+- Admin client and share groups
 
 ## Requirements
 
