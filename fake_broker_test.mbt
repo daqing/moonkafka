@@ -9,7 +9,7 @@ fn fake_api_versions_response(throttle_ms : Int) -> Bytes {
   e.write_i16(0) // error_code
   e.write_compact_len(6)
   let apis : Array[(Int, Int)] = [
-    (0, 11),
+    (0, 13),
     (1, 12),
     (2, 7),
     (3, 13),
@@ -203,7 +203,7 @@ fn fake_metadata_response(
   e.write_compact_len(1) // one topic
   e.write_i16(0) // no error
   e.write_compact_string(topic)
-  e.write_bytes(Bytes::make(16, b'\x00')) // topic id
+  e.write_bytes(fake_topic_id) // topic id
   e.write_bool(false) // is_internal
   e.write_compact_len(1) // one partition
   e.write_i16(0) // no error
@@ -224,10 +224,23 @@ fn fake_metadata_response(
 }
 
 ///|
-fn fake_produce_response(topic : String, base_offset : Int64) -> Bytes {
+/// The fake topic's id; metadata reports it and Produce v13 responses
+/// echo it (KIP-516 topic-id addressing).
+let fake_topic_id : Bytes = Bytes::make(16, b'\x2a')
+
+///|
+fn fake_produce_response(
+  topic : String,
+  version : Int,
+  base_offset : Int64,
+) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_compact_len(1) // topics
-  e.write_compact_string(topic)
+  if version >= 13 {
+    e.write_bytes(fake_topic_id)
+  } else {
+    e.write_compact_string(topic)
+  }
   e.write_compact_len(1) // partitions
   e.write_i32(0) // index
   e.write_i16(0) // no error
@@ -345,7 +358,7 @@ async fn fake_serve_conn(
         sasl_mechanism = Some(fake_sasl_handshake_mechanism(rest))
         fake_sasl_handshake_response()
       }
-      0 => fake_produce_response(topic, 42L)
+      0 => fake_produce_response(topic, version, 42L)
       3 => fake_metadata_response(topic, broker_port, version)
       75 =>
         // Two pages: a fresh request returns partition 0 with a cursor at
