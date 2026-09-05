@@ -1,12 +1,9 @@
 // SASL negotiation: SaslHandshake v1 (non-flexible framing!) and
 // SaslAuthenticate v2 (flexible). PLAIN is implemented; SCRAM and
 // OAUTHBEARER arrive with their crypto/callback spikes.
-
-///|
-const API_SASL_HANDSHAKE : Int = 17
-
-///|
-const API_SASL_AUTHENTICATE : Int = 36
+// API keys live in versions.mbt. SASL versions are fixed, not negotiated:
+// authentication runs before the ApiVersions handshake could inform a
+// choice, and v1/v2 are the only versions 4.x brokers serve.
 
 ///|
 const SASL_HANDSHAKE_VERSION : Int = 1

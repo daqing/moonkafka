@@ -1,10 +1,13 @@
 // High-level RPC helpers on BrokerConnection: one method per API the
-// simple producer and consumer use. Timeouts come from the caller's
-// request_timeout_ms; the fetch helper long-polls up to max_wait_ms, which
-// the default request timeout comfortably exceeds.
+// simple producer and consumer use. Every request negotiates its version
+// against the ranges stored by negotiate_api_versions. Timeouts come from
+// the caller's request_timeout_ms; the fetch helper long-polls up to
+// max_wait_ms, which the default request timeout comfortably exceeds.
 
 ///|
-pub async fn BrokerConnection::check_api_versions(
+/// Run the ApiVersions handshake and store the broker's advertised ranges;
+/// later requests pick their version from them (api_version).
+pub async fn BrokerConnection::negotiate_api_versions(
   self : BrokerConnection,
   timeout_ms? : Int = 30000,
 ) -> Unit {
@@ -14,7 +17,8 @@ pub async fn BrokerConnection::check_api_versions(
     encode_api_versions_request(),
     timeout_ms~,
   )
-  let throttle = decode_api_versions_response(d)
+  let (versions, throttle) = decode_api_versions_response(d)
+  self.versions = Some(versions)
   self.note_throttle(throttle)
 }
 
@@ -24,9 +28,10 @@ pub async fn BrokerConnection::fetch_metadata(
   topic : String,
   timeout_ms? : Int = 30000,
 ) -> Metadata {
+  let version = self.api_version(API_METADATA)
   let d = self.request(
     API_METADATA,
-    METADATA_VERSION,
+    version,
     encode_metadata_request(topic),
     timeout_ms~,
   )
@@ -43,9 +48,10 @@ pub async fn BrokerConnection::list_offsets(
   timestamp : Int64,
   timeout_ms? : Int = 30000,
 ) -> Map[Int, Int64] {
+  let version = self.api_version(API_LIST_OFFSETS)
   let d = self.request(
     API_LIST_OFFSETS,
-    LIST_OFFSETS_VERSION,
+    version,
     encode_list_offsets_request(topic, partitions, timestamp),
     timeout_ms~,
   )
@@ -62,9 +68,10 @@ pub async fn BrokerConnection::produce(
   acks~ : Int,
   timeout_ms~ : Int,
 ) -> Array[ProducePartitionResult] {
+  let version = self.api_version(API_PRODUCE)
   let d = self.request(
     API_PRODUCE,
-    PRODUCE_VERSION,
+    version,
     encode_produce_request(topic, partitions, acks, timeout_ms),
     timeout_ms~,
   )
@@ -82,9 +89,10 @@ pub async fn BrokerConnection::fetch(
   max_bytes~ : Int,
   timeout_ms? : Int = 30000,
 ) -> Array[FetchPartitionResult] {
+  let version = self.api_version(API_FETCH)
   let d = self.request(
     API_FETCH,
-    FETCH_VERSION,
+    version,
     encode_fetch_request(topic, partitions, max_wait_ms, max_bytes),
     timeout_ms~,
   )

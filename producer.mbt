@@ -67,7 +67,6 @@ pub async fn Producer::connect_with_config(config : ProducerConfig) -> Producer 
     use_tls~,
     tls=config.common.tls,
   )
-  meta_conn.check_api_versions(timeout_ms=config.common.request_timeout_ms)
   let producer = {
     topic: config.topic,
     acks: config.acks,
@@ -172,6 +171,7 @@ async fn Producer::refresh_metadata(self : Producer) -> Unit {
             Some(sasl) => conn.authenticate(sasl, timeout_ms=self.timeout_ms)
             None => ()
           }
+          conn.negotiate_api_versions(timeout_ms=self.timeout_ms)
           self.leader_conns[p.leader] = conn
         }
         None =>
@@ -267,7 +267,9 @@ async fn Producer::attempt_send(
   }
   match result.error_code {
     0 => Some(result.base_offset)
-    5 | 6 => None // LEADER_NOT_AVAILABLE / NOT_LEADER_OR_FOLLOWER
+    // LEADER_NOT_AVAILABLE / NOT_LEADER_OR_FOLLOWER / REBOOTSTRAP_REQUIRED:
+    // all recover by re-dialing the bootstrap set and refreshing metadata.
+    5 | 6 | 129 => None
     code =>
       raise ProtocolError::ProtocolError(
         "Produce failed for partition \{result.partition}: \{error_name(code)}",

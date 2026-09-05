@@ -80,6 +80,9 @@ pub struct BrokerConnection {
   /// Wall-clock deadline set by the broker's last throttle hint; requests
   /// started before it wait out the remainder.
   mut throttled_until_ms : Int64
+  /// Version ranges the broker advertised at handshake; set by
+  /// negotiate_api_versions and consulted by api_version per request.
+  mut versions : BrokerVersions?
 }
 
 ///|
@@ -124,6 +127,7 @@ pub async fn BrokerConnection::connect(
       closed: false,
       in_flight: @async.Semaphore(max_in_flight, initial_value=max_in_flight),
       throttled_until_ms: 0L,
+      versions: None,
     }
     conn
   })

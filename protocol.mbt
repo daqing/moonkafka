@@ -1,37 +1,6 @@
 // Kafka RPC layer: request framing and the four APIs used by the simple
 // consumer. Targets Kafka 4.x brokers (flexible message versions only).
-
-///|
-pub const API_PRODUCE : Int = 0
-
-///|
-pub const API_FETCH : Int = 1
-
-///|
-pub const API_LIST_OFFSETS : Int = 2
-
-///|
-pub const API_METADATA : Int = 3
-
-///|
-pub const API_API_VERSIONS : Int = 18
-
-///|
-const API_VERSIONS_VERSION : Int = 3
-
-///|
-const PRODUCE_VERSION : Int = 11
-
-///|
-const METADATA_VERSION : Int = 12
-
-///|
-const LIST_OFFSETS_VERSION : Int = 7
-
-///|
-// Fetch v12 is the last version that addresses topics by name;
-// v13+ requires topic UUIDs from Metadata.
-const FETCH_VERSION : Int = 12
+// API keys and the implemented-version matrix live in versions.mbt.
 
 ///|
 pub(all) suberror ProtocolError {
@@ -75,37 +44,30 @@ pub fn encode_api_versions_request() -> Bytes {
 }
 
 ///|
-/// Check the ApiVersions v3 response; response header is v0 (no tag buffer).
-/// Raises unless the broker supports the API versions this client uses.
-/// Returns the throttle hint in milliseconds.
-pub fn decode_api_versions_response(d : @buf.Decoder) -> Int raise {
+/// Decode an ApiVersions v3 response; response header is v0 (no tag buffer).
+/// Returns the broker's advertised version ranges plus the throttle hint
+/// in milliseconds. Version validation is not done here: requests
+/// negotiate against the ranges via BrokerVersions::pick.
+pub fn decode_api_versions_response(
+  d : @buf.Decoder,
+) -> (BrokerVersions, Int) raise {
   let error_code = d.read_i16()
   if error_code != 0 {
     raise BrokerError(error_code, "ApiVersions failed")
   }
   let count = d.read_compact_len()
+  let ranges : Map[Int, (Int, Int)] = Map([])
   for _ in 0..<count {
     let key = d.read_i16()
     let min_version = d.read_i16()
     let max_version = d.read_i16()
     d.skip_tag_buffer()
-    let required = match key {
-      API_PRODUCE => PRODUCE_VERSION
-      API_FETCH => FETCH_VERSION
-      API_METADATA => METADATA_VERSION
-      API_LIST_OFFSETS => LIST_OFFSETS_VERSION
-      _ => continue
-    }
-    if required < min_version || required > max_version {
-      raise ProtocolError::ProtocolError(
-        "broker does not support API key \{key} version \{required} (range \{min_version}-\{max_version}); only Kafka 4.x is supported",
-      )
-    }
+    ranges[key] = (min_version, max_version)
   }
   // throttle_time_ms, top-level tag buffer
   let throttle = d.read_i32()
   d.skip_tag_buffer()
-  throttle
+  ({ ranges, }, throttle)
 }
 
 ///|
