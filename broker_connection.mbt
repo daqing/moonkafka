@@ -1,6 +1,6 @@
 // Pipelined connection to a single Kafka broker.
 //
-// Unlike the simple Connection, several requests may be in flight at once:
+// Several requests may be in flight at once:
 // request tasks serialize frame WRITES on one lock and take turns reading
 // whole response FRAMES on another, pooling frames addressed to other
 // correlations until their owner comes to claim them. The cooperative event
