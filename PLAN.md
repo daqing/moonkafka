@@ -386,9 +386,19 @@ callback path unit-tested against a mock broker.
       version per call. This also delivered the deferred
       `REBOOTSTRAP_REQUIRED` (129) handling: the producer's recovery path
       re-bootstraps on it.
-- [ ] **Metadata**: implement v12 **and** v13; add
-      `DescribeTopicPartitions` v0 (paginated, cursor-based) used by admin and
-      for regex subscription expansion.
+- [x] **Metadata**: DONE (commit 2164447): codecs moved to `metadata.mbt`
+      (root scope; folds into the `protocol/` split) and now dispatch on
+      the negotiated version — v12 and v13 (v13 appends a top-level
+      error code). `TopicMetadata` exposes `topic_id` (needed by Fetch
+      v13+) and `is_internal`; requests take a topic list where None
+      means all topics (regex-expansion ready). `DescribeTopicPartitions`
+      v0 added with cursor pagination (nullable struct = signed-byte
+      marker per the Java generator; ELR arrays skipped), exposed as
+      `BrokerConnection::describe_topic_partitions` and exercised
+      end-to-end against the fake broker across two pages. Bonus:
+      `@buf` decoder bounds checks hardened (subtraction-based) so
+      malformed huge lengths raise instead of panicking — the start of
+      the decoder-robustness bullet below.
 - [ ] **Produce**: v12 + v13 (topic-id), with `record_errors` surfaced;
       keep acks validation; response is now per-batch with
       `base_offset/log_append_time` proper.
