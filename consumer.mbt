@@ -56,7 +56,6 @@ pub async fn Consumer::connect_with_config(config : ConsumerConfig) -> Consumer 
     timeout_ms=config.common.request_timeout_ms,
     sasl~,
   )
-  meta_conn.check_api_versions(timeout_ms=config.common.request_timeout_ms)
   let consumer = {
     topic: config.topic,
     start_from: config.start_from,
@@ -152,6 +151,7 @@ async fn Consumer::refresh_metadata(self : Consumer) -> Unit {
               conn.authenticate(sasl, timeout_ms=self.request_timeout_ms)
             None => ()
           }
+          conn.negotiate_api_versions(timeout_ms=self.request_timeout_ms)
           self.leader_conns[leader] = conn
         }
         None =>

@@ -52,6 +52,9 @@ pub async fn connect_bootstrap(
           Some(sasl) => conn.authenticate(sasl, timeout_ms~)
           None => ()
         }
+        // Every connection negotiates API versions, like the Java client:
+        // later requests on this connection pick versions from the ranges.
+        conn.negotiate_api_versions(timeout_ms~)
         return conn
       }
       Err(e) => last_error = e

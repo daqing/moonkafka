@@ -22,11 +22,15 @@ pub const API_METADATA : Int = 3
 
 pub const API_PRODUCE : Int = 0
 
+pub const API_SASL_AUTHENTICATE : Int = 36
+
+pub const API_SASL_HANDSHAKE : Int = 17
+
 pub fn backoff_ms(Int, Int, Int) -> Int
 
 pub async fn connect_bootstrap(BootstrapServers, String, timeout_ms? : Int, sasl? : SaslConfig?, use_tls? : Bool, tls? : TlsClientOptions?) -> BrokerConnection
 
-pub fn decode_api_versions_response(@buf.Decoder) -> Int raise
+pub fn decode_api_versions_response(@buf.Decoder) -> (BrokerVersions, Int) raise
 
 pub fn decode_fetch_response(@buf.Decoder) -> (Array[FetchPartitionResult], Int) raise
 
@@ -41,6 +45,8 @@ pub fn decode_record_batches(Bytes) -> Array[Record] raise @buf.DecodeError
 pub fn decode_sasl_authenticate_response(@buf.Decoder) -> SaslAuthenticateResult raise
 
 pub fn decode_sasl_handshake_response(@buf.Decoder) -> SaslHandshakeResult raise
+
+pub fn driver_api_range(Int) -> ApiRange?
 
 pub fn encode_api_versions_request() -> Bytes
 
@@ -101,6 +107,13 @@ pub(all) suberror TransportError {
 }
 
 // Types and methods
+pub(all) struct ApiRange {
+  key : Int
+  name : String
+  min : Int
+  max : Int
+} derive(@debug.Debug)
+
 pub struct Backoff {
   base_ms : Int
   max_ms : Int
@@ -128,14 +141,16 @@ pub struct BrokerConnection {
   mut closed : Bool
   in_flight : @semaphore.Semaphore
   mut throttled_until_ms : Int64
+  mut versions : BrokerVersions?
 }
+pub fn BrokerConnection::api_version(Self, Int, want? : Int?) -> Int raise
 pub async fn BrokerConnection::authenticate(Self, SaslConfig, timeout_ms? : Int) -> Unit
-pub async fn BrokerConnection::check_api_versions(Self, timeout_ms? : Int) -> Unit
 pub fn BrokerConnection::close(Self) -> Unit
 pub async fn BrokerConnection::connect(String, Int, client_id? : String, max_in_flight? : Int, timeout_ms? : Int, tls? : TlsClientOptions?) -> Self
 pub async fn BrokerConnection::fetch(Self, String, Array[(PartitionInfo, Int64)], max_wait_ms~ : Int, max_bytes~ : Int, timeout_ms? : Int) -> Array[FetchPartitionResult]
 pub async fn BrokerConnection::fetch_metadata(Self, String, timeout_ms? : Int) -> Metadata
 pub async fn BrokerConnection::list_offsets(Self, String, Array[PartitionInfo], Int64, timeout_ms? : Int) -> Map[Int, Int64]
+pub async fn BrokerConnection::negotiate_api_versions(Self, timeout_ms? : Int) -> Unit
 pub fn BrokerConnection::note_throttle(Self, Int) -> Unit
 pub async fn BrokerConnection::produce(Self, String, Array[(Int, Bytes)], acks~ : Int, timeout_ms~ : Int) -> Array[ProducePartitionResult]
 pub async fn BrokerConnection::request(Self, Int, Int, Bytes, timeout_ms? : Int) -> @buf.Decoder
@@ -154,6 +169,12 @@ pub(all) enum BrokerStream {
 pub async fn BrokerStream::read_exactly(Self, Int) -> Bytes
 pub fn BrokerStream::shutdown(Self) -> Unit
 pub async fn BrokerStream::write(Self, Bytes) -> Unit
+
+pub struct BrokerVersions {
+  ranges : Map[Int, (Int, Int)]
+}
+pub fn BrokerVersions::pick(Self, Int, want? : Int?) -> Int raise
+pub fn BrokerVersions::range(Self, Int) -> (Int, Int)?
 
 pub struct CommonConfig {
   bootstrap_servers : Array[String]
