@@ -22,19 +22,23 @@ pub const API_PRODUCE : Int = 0
 
 pub fn backoff_ms(Int, Int, Int) -> Int
 
-pub async fn connect_bootstrap(BootstrapServers, String, timeout_ms? : Int) -> BrokerConnection
+pub async fn connect_bootstrap(BootstrapServers, String, timeout_ms? : Int, sasl? : SaslConfig?) -> BrokerConnection
 
-pub fn decode_api_versions_response(@buf.Decoder) -> Unit raise
+pub fn decode_api_versions_response(@buf.Decoder) -> Int raise
 
-pub fn decode_fetch_response(@buf.Decoder) -> Array[FetchPartitionResult] raise
+pub fn decode_fetch_response(@buf.Decoder) -> (Array[FetchPartitionResult], Int) raise
 
-pub fn decode_list_offsets_response(@buf.Decoder) -> Map[Int, Int64] raise
+pub fn decode_list_offsets_response(@buf.Decoder) -> (Map[Int, Int64], Int) raise
 
-pub fn decode_metadata_response(@buf.Decoder) -> Metadata raise
+pub fn decode_metadata_response(@buf.Decoder) -> (Metadata, Int) raise
 
-pub fn decode_produce_response(@buf.Decoder) -> Array[ProducePartitionResult] raise
+pub fn decode_produce_response(@buf.Decoder) -> (Array[ProducePartitionResult], Int) raise
 
 pub fn decode_record_batches(Bytes) -> Array[Record] raise @buf.DecodeError
+
+pub fn decode_sasl_authenticate_response(@buf.Decoder) -> SaslAuthenticateResult raise
+
+pub fn decode_sasl_handshake_response(@buf.Decoder) -> SaslHandshakeResult raise
 
 pub fn encode_api_versions_request() -> Bytes
 
@@ -48,7 +52,11 @@ pub fn encode_produce_request(String, Array[(Int, Bytes)], Int, Int) -> Bytes
 
 pub fn encode_record_batch(Array[Record]) -> Bytes
 
-pub fn encode_request(Int, Int, Int, String, Bytes) -> Bytes
+pub fn encode_request(Int, Int, Int, String, Bytes, flexible? : Bool) -> Bytes
+
+pub fn encode_sasl_authenticate_request(Bytes) -> Bytes
+
+pub fn encode_sasl_handshake_request(String) -> Bytes
 
 pub fn error_name(Int) -> String
 
@@ -63,6 +71,10 @@ pub fn BrokerError::name(Self) -> String
 
 pub(all) suberror ProtocolError {
   ProtocolError(String)
+}
+
+pub(all) suberror SaslError {
+  SaslError(String)
 }
 
 pub(all) suberror TransportError {
@@ -96,15 +108,19 @@ pub struct BrokerConnection {
   mut correlation_id : Int
   mut closed : Bool
   in_flight : @semaphore.Semaphore
+  mut throttled_until_ms : Int64
 }
+pub async fn BrokerConnection::authenticate(Self, SaslConfig, timeout_ms? : Int) -> Unit
 pub async fn BrokerConnection::check_api_versions(Self, timeout_ms? : Int) -> Unit
 pub fn BrokerConnection::close(Self) -> Unit
-pub async fn BrokerConnection::connect(String, Int, client_id? : String, max_in_flight? : Int) -> Self
+pub async fn BrokerConnection::connect(String, Int, client_id? : String, max_in_flight? : Int, sasl? : SaslConfig?, timeout_ms? : Int) -> Self
 pub async fn BrokerConnection::fetch(Self, String, Array[(PartitionInfo, Int64)], max_wait_ms~ : Int, max_bytes~ : Int, timeout_ms? : Int) -> Array[FetchPartitionResult]
 pub async fn BrokerConnection::fetch_metadata(Self, String, timeout_ms? : Int) -> Metadata
 pub async fn BrokerConnection::list_offsets(Self, String, Array[PartitionInfo], Int64, timeout_ms? : Int) -> Map[Int, Int64]
+pub fn BrokerConnection::note_throttle(Self, Int) -> Unit
 pub async fn BrokerConnection::produce(Self, String, Array[(Int, Bytes)], acks~ : Int, timeout_ms~ : Int) -> Array[ProducePartitionResult]
 pub async fn BrokerConnection::request(Self, Int, Int, Bytes, timeout_ms? : Int) -> @buf.Decoder
+pub async fn BrokerConnection::request_raw(Self, Int, Int, Bytes, timeout_ms? : Int, flexible? : Bool) -> @buf.Decoder
 
 pub struct BrokerInfo {
   node_id : Int
@@ -124,7 +140,7 @@ pub struct CommonConfig {
   sasl : SaslConfig?
 } derive(@debug.Debug)
 pub fn CommonConfig::bootstrap_addresses(Self) -> Array[HostPort] raise ProtocolError
-pub fn CommonConfig::new(Array[String], request_timeout_ms? : Int) -> Self raise
+pub fn CommonConfig::new(Array[String], request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?) -> Self raise
 pub fn CommonConfig::validate(Self) -> Unit raise ProtocolError
 
 pub struct Consumer {
@@ -132,6 +148,7 @@ pub struct Consumer {
   start_from : StartFrom
   request_timeout_ms : Int
   bootstrap : BootstrapServers
+  sasl : SaslConfig?
   mut meta_conn : BrokerConnection
   mut brokers : Map[Int, BrokerInfo]
   leader_conns : Map[Int, BrokerConnection]
@@ -148,7 +165,7 @@ pub struct ConsumerConfig {
   topic : String
   start_from : StartFrom
 } derive(@debug.Debug)
-pub fn ConsumerConfig::new(Array[String], String, start_from? : StartFrom, request_timeout_ms? : Int) -> Self raise
+pub fn ConsumerConfig::new(Array[String], String, start_from? : StartFrom, request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?) -> Self raise
 
 pub struct Deadline {
   at_ms : Int64
@@ -197,6 +214,7 @@ pub struct Producer {
   retry_backoff_ms : Int
   retry_backoff_max_ms : Int
   bootstrap : BootstrapServers
+  sasl : SaslConfig?
   mut meta_conn : BrokerConnection
   mut brokers : Map[Int, BrokerInfo]
   leader_conns : Map[Int, BrokerConnection]
@@ -214,7 +232,7 @@ pub struct ProducerConfig {
   topic : String
   acks : Int
 } derive(@debug.Debug)
-pub fn ProducerConfig::new(Array[String], String, acks? : Int, request_timeout_ms? : Int) -> Self raise
+pub fn ProducerConfig::new(Array[String], String, acks? : Int, request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?) -> Self raise
 
 pub(all) struct Record {
   offset : Int64
@@ -223,11 +241,23 @@ pub(all) struct Record {
   value : Bytes?
 }
 
+pub(all) struct SaslAuthenticateResult {
+  error_code : Int
+  error_message : String?
+  auth_bytes : Bytes?
+  session_lifetime_ms : Int64
+}
+
 pub(all) struct SaslConfig {
   mechanism : SaslMechanism
   username : String
   password : String
 } derive(@debug.Debug)
+
+pub(all) struct SaslHandshakeResult {
+  error_code : Int
+  mechanisms : Array[String]
+}
 
 pub(all) enum SaslMechanism {
   Plain

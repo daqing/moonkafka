@@ -164,6 +164,8 @@ pub struct CommonConfig {
 pub fn CommonConfig::new(
   bootstrap_servers : Array[String],
   request_timeout_ms? : Int = 30000,
+  security_protocol? : SecurityProtocol = Plaintext,
+  sasl? : SaslConfig? = None,
 ) -> CommonConfig raise {
   let config : CommonConfig = {
     bootstrap_servers,
@@ -173,8 +175,8 @@ pub fn CommonConfig::new(
     retries: 10,
     retry_backoff_ms: 100,
     retry_backoff_max_ms: 1000,
-    security_protocol: Plaintext,
-    sasl: None,
+    security_protocol,
+    sasl,
   }
   config.validate()
   config
@@ -249,6 +251,8 @@ pub fn ProducerConfig::new(
   topic : String,
   acks? : Int = 1,
   request_timeout_ms? : Int = 30000,
+  security_protocol? : SecurityProtocol = Plaintext,
+  sasl? : SaslConfig? = None,
 ) -> ProducerConfig raise {
   if acks != 1 && acks != -1 {
     raise ProtocolError::ProtocolError(
@@ -259,7 +263,12 @@ pub fn ProducerConfig::new(
     raise ProtocolError::ProtocolError("topic must not be empty")
   }
   {
-    common: CommonConfig::new(bootstrap_servers, request_timeout_ms~),
+    common: CommonConfig::new(
+      bootstrap_servers,
+      request_timeout_ms~,
+      security_protocol~,
+      sasl~,
+    ),
     topic,
     acks,
   }
@@ -278,12 +287,19 @@ pub fn ConsumerConfig::new(
   topic : String,
   start_from? : StartFrom = Earliest,
   request_timeout_ms? : Int = 30000,
+  security_protocol? : SecurityProtocol = Plaintext,
+  sasl? : SaslConfig? = None,
 ) -> ConsumerConfig raise {
   if topic.length() == 0 {
     raise ProtocolError::ProtocolError("topic must not be empty")
   }
   {
-    common: CommonConfig::new(bootstrap_servers, request_timeout_ms~),
+    common: CommonConfig::new(
+      bootstrap_servers,
+      request_timeout_ms~,
+      security_protocol~,
+      sasl~,
+    ),
     topic,
     start_from,
   }

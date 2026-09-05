@@ -19,6 +19,7 @@ pub struct Consumer {
   start_from : StartFrom
   request_timeout_ms : Int
   bootstrap : BootstrapServers
+  sasl : SaslConfig?
   mut meta_conn : BrokerConnection
   mut brokers : Map[Int, BrokerInfo]
   leader_conns : Map[Int, BrokerConnection]
@@ -44,10 +45,16 @@ pub async fn Consumer::connect(
 /// meta connection lands on the first bootstrap server that accepts.
 pub async fn Consumer::connect_with_config(config : ConsumerConfig) -> Consumer {
   let bootstrap = BootstrapServers::new(config.common.bootstrap_addresses())
+  // SASL credentials only apply on SASL security protocols.
+  let sasl = match config.common.security_protocol {
+    SaslPlaintext | SaslSsl => config.common.sasl
+    _ => None
+  }
   let meta_conn = connect_bootstrap(
     bootstrap,
     config.common.client_id,
     timeout_ms=config.common.request_timeout_ms,
+    sasl~,
   )
   meta_conn.check_api_versions(timeout_ms=config.common.request_timeout_ms)
   let consumer = {
@@ -55,6 +62,7 @@ pub async fn Consumer::connect_with_config(config : ConsumerConfig) -> Consumer 
     start_from: config.start_from,
     request_timeout_ms: config.common.request_timeout_ms,
     bootstrap,
+    sasl,
     meta_conn,
     brokers: Map([]),
     leader_conns: Map([]),
@@ -91,6 +99,7 @@ async fn Consumer::recover(self : Consumer) -> Unit {
     self.bootstrap,
     self.meta_conn.client_id,
     timeout_ms=self.request_timeout_ms,
+    sasl=self.sasl,
   )
   self.refresh_metadata()
 }
@@ -136,6 +145,8 @@ async fn Consumer::refresh_metadata(self : Consumer) -> Unit {
             broker.host,
             broker.port,
             client_id=self.meta_conn.client_id,
+            sasl=self.sasl,
+            timeout_ms=self.request_timeout_ms,
           )
         None =>
           raise ProtocolError::ProtocolError(

@@ -14,7 +14,8 @@ pub async fn BrokerConnection::check_api_versions(
     encode_api_versions_request(),
     timeout_ms~,
   )
-  decode_api_versions_response(d)
+  let throttle = decode_api_versions_response(d)
+  self.note_throttle(throttle)
 }
 
 ///|
@@ -29,7 +30,9 @@ pub async fn BrokerConnection::fetch_metadata(
     encode_metadata_request(topic),
     timeout_ms~,
   )
-  decode_metadata_response(d)
+  let (metadata, throttle) = decode_metadata_response(d)
+  self.note_throttle(throttle)
+  metadata
 }
 
 ///|
@@ -46,7 +49,9 @@ pub async fn BrokerConnection::list_offsets(
     encode_list_offsets_request(topic, partitions, timestamp),
     timeout_ms~,
   )
-  decode_list_offsets_response(d)
+  let (offsets, throttle) = decode_list_offsets_response(d)
+  self.note_throttle(throttle)
+  offsets
 }
 
 ///|
@@ -63,7 +68,9 @@ pub async fn BrokerConnection::produce(
     encode_produce_request(topic, partitions, acks, timeout_ms),
     timeout_ms~,
   )
-  decode_produce_response(d)
+  let (results, throttle) = decode_produce_response(d)
+  self.note_throttle(throttle)
+  results
 }
 
 ///|
@@ -81,5 +88,7 @@ pub async fn BrokerConnection::fetch(
     encode_fetch_request(topic, partitions, max_wait_ms, max_bytes),
     timeout_ms~,
   )
-  decode_fetch_response(d)
+  let (results, throttle) = decode_fetch_response(d)
+  self.note_throttle(throttle)
+  results
 }

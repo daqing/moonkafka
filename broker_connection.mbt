@@ -24,6 +24,9 @@ pub struct BrokerConnection {
   mut correlation_id : Int
   mut closed : Bool
   in_flight : @async.Semaphore
+  /// Wall-clock deadline set by the broker's last throttle hint; requests
+  /// started before it wait out the remainder.
+  mut throttled_until_ms : Int64
 }
 
 ///|
@@ -32,9 +35,11 @@ pub async fn BrokerConnection::connect(
   port : Int,
   client_id? : String = "moonkafka",
   max_in_flight? : Int = 5,
+  sasl? : SaslConfig? = None,
+  timeout_ms? : Int = 30000,
 ) -> BrokerConnection {
   let tcp = @socket.Tcp::connect_to_host(host, port~)
-  {
+  let conn : BrokerConnection = {
     tcp,
     client_id,
     write_lock: @async.Mutex(),
@@ -43,6 +48,27 @@ pub async fn BrokerConnection::connect(
     correlation_id: 0,
     closed: false,
     in_flight: @async.Semaphore(max_in_flight, initial_value=max_in_flight),
+    throttled_until_ms: 0L,
+  }
+  // SASL runs before any other API on the connection.
+  match sasl {
+    Some(sasl) => conn.authenticate(sasl, timeout_ms~)
+    None => ()
+  }
+  conn
+}
+
+///|
+/// Record the broker's latest throttle hint, keeping the furthest deadline.
+pub fn BrokerConnection::note_throttle(
+  self : BrokerConnection,
+  throttle_ms : Int,
+) -> Unit {
+  if throttle_ms > 0 {
+    let until = @async.now() + throttle_ms.to_int64()
+    if until > self.throttled_until_ms {
+      self.throttled_until_ms = until
+    }
   }
 }
 
@@ -67,11 +93,29 @@ pub async fn BrokerConnection::request(
   body : Bytes,
   timeout_ms? : Int = 30000,
 ) -> @buf.Decoder {
+  self.request_raw(api_key, api_version, body, timeout_ms~, flexible=true)
+}
+
+///|
+/// Like request, but for APIs whose chosen version is not flexible
+/// (request header v1, response header v0): SaslHandshake v1 today.
+pub async fn BrokerConnection::request_raw(
+  self : BrokerConnection,
+  api_key : Int,
+  api_version : Int,
+  body : Bytes,
+  timeout_ms? : Int = 30000,
+  flexible? : Bool = true,
+) -> @buf.Decoder {
   if self.closed {
     raise TransportError::ConnectionClosed("connection is closed")
   }
+  let remaining_throttle_ms = self.throttled_until_ms - @async.now()
+  if remaining_throttle_ms > 0 {
+    @async.sleep(remaining_throttle_ms.to_int())
+  }
   let result = @async.with_timeout(timeout_ms, () => {
-    self.exchange(api_key, api_version, body)
+    self.exchange(api_key, api_version, body, flexible)
   }) catch {
     // The byte stream can no longer be trusted once a read is abandoned:
     // a cancelled read may have consumed part of a frame. Close so later
@@ -96,11 +140,12 @@ async fn BrokerConnection::exchange(
   api_key : Int,
   api_version : Int,
   body : Bytes,
+  flexible : Bool,
 ) -> @buf.Decoder {
   self.in_flight.acquire()
   defer self.in_flight.release()
-  let corr = self.issue_request(api_key, api_version, body)
-  self.await_response(corr, api_key)
+  let corr = self.issue_request(api_key, api_version, body, flexible)
+  self.await_response(corr, api_key, flexible)
 }
 
 ///|
@@ -112,13 +157,14 @@ async fn BrokerConnection::issue_request(
   api_key : Int,
   api_version : Int,
   body : Bytes,
+  flexible : Bool,
 ) -> Int {
   self.write_lock.acquire()
   defer self.write_lock.release()
   self.correlation_id += 1
   let corr = self.correlation_id
   self.tcp.write(
-    encode_request(api_key, api_version, corr, self.client_id, body),
+    encode_request(api_key, api_version, corr, self.client_id, body, flexible~),
   )
   corr
 }
@@ -130,15 +176,17 @@ async fn BrokerConnection::await_response(
   self : BrokerConnection,
   corr : Int,
   api_key : Int,
+  flexible : Bool,
 ) -> @buf.Decoder {
   self.read_lock.acquire()
   defer self.read_lock.release()
   let frame = self.demux(corr)
-  // Frame layout after the size prefix: correlation id, then the v1
-  // response header tag buffer (absent for ApiVersions), then the body.
+  // Frame layout after the size prefix: correlation id, then — for
+  // flexible responses except ApiVersions, whose response header stays
+  // v0 — the tag buffer, then the body.
   let d = @buf.Decoder::new(frame)
   ignore(d.read_i32())
-  if api_key != API_API_VERSIONS {
+  if flexible && api_key != API_API_VERSIONS {
     d.skip_tag_buffer()
   }
   d

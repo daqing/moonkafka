@@ -48,13 +48,16 @@ pub fn encode_request(
   correlation_id : Int,
   client_id : String,
   body : Bytes,
+  flexible? : Bool = true,
 ) -> Bytes {
   let header = @buf.Encoder::new()
   header.write_i16(api_key)
   header.write_i16(api_version)
   header.write_i32(correlation_id)
   header.write_nullable_string(Some(client_id))
-  header.write_tag_buffer()
+  if flexible {
+    header.write_tag_buffer()
+  }
   let frame = @buf.Encoder::new()
   frame.write_i32(header.buf.length() + body.length())
   frame.write_bytes(header.to_bytes())
@@ -74,7 +77,8 @@ pub fn encode_api_versions_request() -> Bytes {
 ///|
 /// Check the ApiVersions v3 response; response header is v0 (no tag buffer).
 /// Raises unless the broker supports the API versions this client uses.
-pub fn decode_api_versions_response(d : @buf.Decoder) -> Unit raise {
+/// Returns the throttle hint in milliseconds.
+pub fn decode_api_versions_response(d : @buf.Decoder) -> Int raise {
   let error_code = d.read_i16()
   if error_code != 0 {
     raise BrokerError(error_code, "ApiVersions failed")
@@ -99,8 +103,9 @@ pub fn decode_api_versions_response(d : @buf.Decoder) -> Unit raise {
     }
   }
   // throttle_time_ms, top-level tag buffer
-  d.skip(4)
+  let throttle = d.read_i32()
   d.skip_tag_buffer()
+  throttle
 }
 
 ///|
@@ -144,8 +149,9 @@ pub fn encode_metadata_request(topic : String) -> Bytes {
 
 ///|
 /// Decode a Metadata v12 response (after the v1 response header).
-pub fn decode_metadata_response(d : @buf.Decoder) -> Metadata raise {
-  d.skip(4) // throttle_time_ms
+/// Returns the metadata and the throttle hint in milliseconds.
+pub fn decode_metadata_response(d : @buf.Decoder) -> (Metadata, Int) raise {
+  let throttle = d.read_i32() // throttle_time_ms
   let broker_count = d.read_compact_len()
   let brokers : Map[Int, BrokerInfo] = Map([])
   for _ in 0..<broker_count {
@@ -192,7 +198,7 @@ pub fn decode_metadata_response(d : @buf.Decoder) -> Metadata raise {
     topics.push({ name, partitions, })
   }
   d.skip_tag_buffer()
-  { brokers, topics, }
+  ({ brokers, topics, }, throttle)
 }
 
 ///|
@@ -219,9 +225,12 @@ pub fn encode_list_offsets_request(
 }
 
 ///|
-/// Decode a ListOffsets v7 response; returns partition index -> offset.
-pub fn decode_list_offsets_response(d : @buf.Decoder) -> Map[Int, Int64] raise {
-  d.skip(4) // throttle_time_ms
+/// Decode a ListOffsets v7 response; returns partition index -> offset
+/// plus the throttle hint in milliseconds.
+pub fn decode_list_offsets_response(
+  d : @buf.Decoder,
+) -> (Map[Int, Int64], Int) raise {
+  let throttle = d.read_i32() // throttle_time_ms
   let offsets : Map[Int, Int64] = Map([])
   let topic_count = d.read_compact_len()
   for _ in 0..<topic_count {
@@ -245,7 +254,7 @@ pub fn decode_list_offsets_response(d : @buf.Decoder) -> Map[Int, Int64] raise {
     d.skip_tag_buffer()
   }
   d.skip_tag_buffer()
-  offsets
+  (offsets, throttle)
 }
 
 ///|
@@ -286,7 +295,7 @@ pub struct ProducePartitionResult {
 /// Decode a Produce v11 response (after the v1 response header).
 pub fn decode_produce_response(
   d : @buf.Decoder,
-) -> Array[ProducePartitionResult] raise {
+) -> (Array[ProducePartitionResult], Int) raise {
   let results : Array[ProducePartitionResult] = []
   let topic_count = d.read_compact_len()
   for _ in 0..<topic_count {
@@ -310,9 +319,9 @@ pub fn decode_produce_response(
     }
     d.skip_tag_buffer()
   }
-  d.skip(4) // throttle_time_ms
+  let throttle = d.read_i32() // throttle_time_ms
   d.skip_tag_buffer()
-  results
+  (results, throttle)
 }
 
 ///|
@@ -362,8 +371,8 @@ pub struct FetchPartitionResult {
 /// Decode a Fetch v12 response (after the v1 response header).
 pub fn decode_fetch_response(
   d : @buf.Decoder,
-) -> Array[FetchPartitionResult] raise {
-  d.skip(4) // throttle_time_ms
+) -> (Array[FetchPartitionResult], Int) raise {
+  let throttle = d.read_i32() // throttle_time_ms
   let error_code = d.read_i16()
   if error_code != 0 {
     raise BrokerError(error_code, "Fetch failed")
@@ -405,7 +414,7 @@ pub fn decode_fetch_response(
     d.skip_tag_buffer()
   }
   d.skip_tag_buffer()
-  results
+  (results, throttle)
 }
 
 ///|
