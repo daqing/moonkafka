@@ -411,14 +411,24 @@ callback path unit-tested against a mock broker.
       topic-id addressing. Note for Phase 3 transactions: per the 4.3
       schema comment, a producer without txn v2 must cap at v11 inside
       transactions — the txn manager needs its own version choice.
-- [ ] **Fetch**: v12 (names) + v13–v16 (topic-ids; v15 drops replica_id,
-      v16 `node_endpoints`); **incremental fetch sessions** — session
-      acquisition (epoch 0 → id), incremental updates (added/forgotten
-      partitions), session eviction handling (`FETCH_SESSION_ID_NOT_FOUND`
-      → re-establish full request); `last_fetched_epoch`/leader-epoch
-      validation; truncated-batch handling with `max_bytes` and
-      `MaxBytesExceeded`-style backoff (current code drops the tail batch —
-      keep, but make it explicit and offset-safe).
+- [x] **Fetch**: DONE (commit 84447fd): codecs in `fetch.mbt` cover the
+      whole implemented range — v12 (names), v13+ (topic ids), v15
+      (replica_id dropped from the mandatory fields, KIP-903), v16
+      (tagged NodeEndpoints skipped); `last_fetched_epoch` is encoded
+      (-1 until the P4 epoch tracking lands). **Incremental fetch
+      sessions** (KIP-227) via `FetchSession`: full request (epoch 0) →
+      adopt the granted session id → incremental requests carrying only
+      changed positions and forgotten partitions; eviction
+      (`FETCH_SESSION_ID_NOT_FOUND` / `INVALID_FETCH_SESSION_EPOCH`),
+      broker-closed sessions (id 0 reply), and epoch wrap all restart
+      from a full request. The consumer polls through one session per
+      leader, re-establishes once after eviction, and drops sessions on
+      metadata refresh. Truncated-batch handling is explicit:
+      `decode_record_batches_ex` reports a max_bytes-split trailing
+      batch, results carry `records_complete`, and the read position
+      stays offset-safe. Leader-epoch validation
+      (`OffsetForLeaderEpoch`, diverging-epoch tagged fields) stays
+      queued for P4 as planned.
 - [ ] **ListOffsets** v10/v11 with `timeout_ms`; timestamp queries
       (`OffsetForTimestamp`) exposed.
 - [ ] **Record layer** (`record.mbt`): decode **and** encode record headers;
