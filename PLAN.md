@@ -337,9 +337,12 @@ lands on the same partitions as the Java/librdkafka clients on the same topic.
       the parsed `throttle_time_ms`; the connection records the furthest
       deadline and delays subsequent requests. Tested via the fake broker
       serving a 400ms hint.
-- [ ] **TLS.** `security_protocol=ssl` via `moonbitlang/async/tls`
-      (`Tls::client` over the TCP stream, SNI + trust store config);
-      connection type becomes an enum `Plain(Tcp) | Tls(@tls.Tls)`.
+- [x] **TLS.** DONE (commit after 738dad9): `BrokerStream` enum
+      (`Plain(Tcp) | Secure(Tls)`), `TlsClientOptions` (server name for
+      SNI/verification, optional custom CA PEM file), wired through config
+      and both clients for Ssl / SaslSsl; the fake broker serves TLS from a
+      committed self-signed test certificate, and integration tests produce
+      over verified TLS and over SASL_SSL.
 - [~] **SASL.** Handshake/Authenticate flow (SaslHandshake v1 + non-flexible
       framing, SaslAuthenticate v2) DONE for PLAIN (commit 738dad9), wired
       through config (`security_protocol` + `sasl` credentials) onto every
@@ -599,8 +602,12 @@ concurrently; acks release records for redelivery after timeout.
 - **Classic vs KIP-848 feature parity**: regex subscription for classic
   groups is client-side (metadata scan) and works differently from 848's
   server-side regex; document differences rather than force-unify.
-- **SCRAM pure-MoonBit crypto**: verify HMAC-SHA256/512 + PBKDF2
-  availability in core/x early (Phase 1 spike); C FFI fallback otherwise.
+- ~~**SCRAM pure-MoonBit crypto**~~ SPIKED (Phase 1): `moonbitlang/x@0.5.1`
+  provides `sha256`/`sha512` and `hmac` over a `CryptoHasher` trait, so
+  SCRAM-SHA-256/512 needs only a thin PBKDF2-HMAC loop (~15 lines) plus
+  RFC 5802/7677 test vectors; no C FFI required. Client nonces need
+  uniqueness, not CSPRNG (hash of timestamp + counter + client id).
+  CSPRNG for KIP-848 member ids remains open (x/uuid is format-only).
 - **Client-side CSPRNG for member ids**: KIP-848 membership needs
   client-generated random member ids; `moonbitlang/async`'s `rand_bytes`
   lives in the tls package and is marked internal-use. Pick a randomness
