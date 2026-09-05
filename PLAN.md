@@ -435,12 +435,14 @@ callback path unit-tested against a mock broker.
       public constants and a timestamp query is this API with a
       wall-clock timestamp (`OffsetForTimestamp`). The fake broker
       advertises v11.
-- [ ] **Record layer** (`record.mbt`): decode **and** encode record headers;
-      expose headers on `Record`; `is_control`/`is_transactional` flags;
-      aborted-transaction filter primitive for read_committed
-      (aborted-tx list from Fetch + producerId/firstOffset bookkeeping);
-      batch builder API for the accumulator (append records, size accounting,
-      finalize + crc).
+- [x] **Record layer** DONE (commit 60d07c5): `Record` carries its
+      `headers` array through encode and decode; `decode_record_batches_detailed`
+      exposes per-batch `producer_id`/`producer_epoch`/`base_sequence` and the
+      `is_control`/`is_transactional` flags (flat views still hide control
+      batches from consumers); `collect_committed` is the read_committed
+      primitive (drop control batches + records of aborted transactions by
+      producerId/firstOffset); `RecordBatchBuilder` does incremental append,
+      size accounting, and CRC finalizing for the Phase 3 accumulator.
 - [ ] **Compression** (`compression/`): interface
       `Codec { compress(Bytes) -> Bytes; decompress(Bytes) -> Bytes raise }` +
       attr-bit mapping; implementations gzip (async/gzip wrapper), snappy
