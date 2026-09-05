@@ -304,8 +304,20 @@ fn fake_fetch_response(
   session_id : Int,
 ) -> Bytes {
   let batch = @moonkafka.encode_record_batch([
-    { offset: 0L, timestamp: 1000L, key: None, value: Some(b"one"), },
-    { offset: 0L, timestamp: 2000L, key: None, value: Some(b"two"), },
+    {
+      offset: 0L,
+      timestamp: 1000L,
+      key: None,
+      value: Some(b"one"),
+      headers: [],
+    },
+    {
+      offset: 0L,
+      timestamp: 2000L,
+      key: None,
+      value: Some(b"two"),
+      headers: [],
+    },
   ])
   let patched_arr : Array[Byte] = [
     b'\x00', b'\x00', b'\x00', b'\x00', b'\x00', b'\x00', b'\x00', b'\x2a',

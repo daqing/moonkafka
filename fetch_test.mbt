@@ -156,7 +156,7 @@ test "fetch v12 response decodes topics by name" {
 ///|
 test "fetch v13 response decodes topics by id with records" {
   let batch = @moonkafka.encode_record_batch([
-    { offset: 0L, timestamp: 1L, key: None, value: Some(b"x"), },
+    { offset: 0L, timestamp: 1L, key: None, value: Some(b"x"), headers: [], },
   ])
   let d = @buf.Decoder::new(
     fetch_response_body(by_id=true, records=Some(batch)),
@@ -176,8 +176,8 @@ test "fetch v13 response decodes topics by id with records" {
 ///|
 test "fetch response reports a truncated trailing batch" {
   let batch = @moonkafka.encode_record_batch([
-    { offset: 0L, timestamp: 1L, key: None, value: Some(b"x"), },
-    { offset: 0L, timestamp: 2L, key: None, value: Some(b"y"), },
+    { offset: 0L, timestamp: 1L, key: None, value: Some(b"x"), headers: [], },
+    { offset: 0L, timestamp: 2L, key: None, value: Some(b"y"), headers: [], },
   ])
   let cut = batch.length() - 5
   let partial : Array[Byte] = []

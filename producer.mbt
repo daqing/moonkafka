@@ -216,7 +216,9 @@ pub async fn Producer::send(
   timestamp? : Int64,
 ) -> Int64 {
   let timestamp = timestamp.unwrap_or(@async.now())
-  let batch = encode_record_batch([{ offset: 0L, timestamp, key, value, }])
+  let batch = encode_record_batch([
+    { offset: 0L, timestamp, key, value, headers: [], },
+  ])
   let backoff = Backoff::new(
     base_ms=self.retry_backoff_ms,
     max_ms=self.retry_backoff_max_ms,
