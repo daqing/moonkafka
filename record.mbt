@@ -40,25 +40,44 @@ const ATTR_CONTROL : Int = 0x20
 ///|
 /// Decode all record batches concatenated in `data` (as found in a Fetch
 /// response's records field). Compressed and control batches are skipped.
-/// A truncated trailing batch (possible when max_bytes splits a batch) is
-/// silently dropped; the caller refetches from the last good offset + 1.
-pub fn decode_record_batches(
+/// Returns the decoded records and whether the input had a truncated
+/// trailing batch (possible when max_bytes splits a batch): the caller
+/// must treat the position as the last complete record's offset + 1 and
+/// refetch from there.
+pub fn decode_record_batches_ex(
   data : Bytes,
-) -> Array[Record] raise @buf.DecodeError {
+) -> (Array[Record], Bool) raise @buf.DecodeError {
   let records : Array[Record] = []
   let mut pos = 0
-  while pos + 12 <= data.length() {
+  let mut truncated = false
+  while pos < data.length() {
+    if pos + 12 > data.length() {
+      truncated = true
+      break
+    }
     let batch_length = @buf.Decoder::new(data, start=pos + 8).read_i32() catch {
-      _ => break
+      _ => {
+        truncated = true
+        break
+      }
     }
     let batch_end = pos + 12 + batch_length
     if batch_length < RECORD_BATCH_HEADER_SIZE - 12 || batch_end > data.length() {
+      truncated = true
       break // truncated tail
     }
     decode_one_batch(data, pos, batch_end, records)
     pos = batch_end
   }
-  records
+  (records, truncated)
+}
+
+///|
+/// Decode all record batches, ignoring any truncated trailing batch.
+pub fn decode_record_batches(
+  data : Bytes,
+) -> Array[Record] raise @buf.DecodeError {
+  decode_record_batches_ex(data).0
 }
 
 ///|

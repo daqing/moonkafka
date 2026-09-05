@@ -28,6 +28,12 @@ pub const API_SASL_AUTHENTICATE : Int = 36
 
 pub const API_SASL_HANDSHAKE : Int = 17
 
+pub const FETCH_FULL_EPOCH : Int = 0
+
+pub const FETCH_SESSION_ID_NOT_FOUND : Int = 70
+
+pub const INVALID_FETCH_SESSION_EPOCH : Int = 71
+
 pub fn backoff_ms(Int, Int, Int) -> Int
 
 pub async fn connect_bootstrap(BootstrapServers, String, timeout_ms? : Int, sasl? : SaslConfig?, use_tls? : Bool, tls? : TlsClientOptions?) -> BrokerConnection
@@ -36,7 +42,7 @@ pub fn decode_api_versions_response(@buf.Decoder) -> (BrokerVersions, Int) raise
 
 pub fn decode_describe_topic_partitions_response(@buf.Decoder) -> (DescribeTopicPartitions, Int) raise
 
-pub fn decode_fetch_response(@buf.Decoder) -> (Array[FetchPartitionResult], Int) raise
+pub fn decode_fetch_response(Int, @buf.Decoder) -> (FetchResult, Int) raise
 
 pub fn decode_list_offsets_response(@buf.Decoder) -> (Map[Int, Int64], Int) raise
 
@@ -45,6 +51,8 @@ pub fn decode_metadata_response(Int, @buf.Decoder) -> (Metadata, Int) raise
 pub fn decode_produce_response(Int, @buf.Decoder) -> (Array[ProducePartitionResult], Int) raise
 
 pub fn decode_record_batches(Bytes) -> Array[Record] raise @buf.DecodeError
+
+pub fn decode_record_batches_ex(Bytes) -> (Array[Record], Bool) raise @buf.DecodeError
 
 pub fn decode_sasl_authenticate_response(@buf.Decoder) -> SaslAuthenticateResult raise
 
@@ -56,7 +64,7 @@ pub fn encode_api_versions_request() -> Bytes
 
 pub fn encode_describe_topic_partitions_request(Array[String], Int, cursor? : TopicPartitionCursor?) -> Bytes
 
-pub fn encode_fetch_request(String, Array[(PartitionInfo, Int64)], Int, Int) -> Bytes
+pub fn encode_fetch_request(Int, Array[FetchTopicReq], session~ : FetchSessionReq, max_wait_ms~ : Int, min_bytes? : Int, max_bytes? : Int, isolation_level? : Int, rack_id? : String) -> Bytes raise
 
 pub fn encode_list_offsets_request(String, Array[PartitionInfo], Int64) -> Bytes
 
@@ -154,7 +162,7 @@ pub async fn BrokerConnection::authenticate(Self, SaslConfig, timeout_ms? : Int)
 pub fn BrokerConnection::close(Self) -> Unit
 pub async fn BrokerConnection::connect(String, Int, client_id? : String, max_in_flight? : Int, timeout_ms? : Int, tls? : TlsClientOptions?) -> Self
 pub async fn BrokerConnection::describe_topic_partitions(Self, Array[String], response_partition_limit? : Int, cursor? : TopicPartitionCursor?, timeout_ms? : Int) -> DescribeTopicPartitions
-pub async fn BrokerConnection::fetch(Self, String, Array[(PartitionInfo, Int64)], max_wait_ms~ : Int, max_bytes~ : Int, timeout_ms? : Int) -> Array[FetchPartitionResult]
+pub async fn BrokerConnection::fetch(Self, Array[FetchTopicReq], session~ : FetchSessionReq, max_wait_ms~ : Int, min_bytes? : Int, max_bytes? : Int, timeout_ms? : Int) -> FetchResult
 pub async fn BrokerConnection::fetch_metadata(Self, String, timeout_ms? : Int) -> Metadata
 pub async fn BrokerConnection::list_offsets(Self, String, Array[PartitionInfo], Int64, timeout_ms? : Int) -> Map[Int, Int64]
 pub async fn BrokerConnection::negotiate_api_versions(Self, timeout_ms? : Int) -> Unit
@@ -207,7 +215,9 @@ pub struct Consumer {
   sasl : SaslConfig?
   mut meta_conn : BrokerConnection
   mut brokers : Map[Int, BrokerInfo]
+  mut topic_id : Uuid
   leader_conns : Map[Int, BrokerConnection]
+  fetch_sessions : Map[Int, FetchSession]
   partitions : Array[PartitionState]
   mut closed : Bool
 }
@@ -235,11 +245,63 @@ pub struct DescribeTopicPartitions {
   next_cursor : TopicPartitionCursor?
 }
 
+pub(all) struct FetchPartitionReq {
+  index : Int
+  leader_epoch : Int
+  fetch_offset : Int64
+  max_bytes : Int
+} derive(@debug.Debug)
+
 pub struct FetchPartitionResult {
   partition : Int
   error_code : Int
   high_watermark : Int64
+  last_stable_offset : Int64
+  log_start_offset : Int64
   records : Array[Record]
+  records_complete : Bool
+}
+
+pub struct FetchResult {
+  top_error_code : Int
+  session_id : Int
+  topics : Array[FetchTopicResult]
+}
+
+pub struct FetchSession {
+  mut session_id : Int
+  mut next_epoch : Int
+  mut sent : Map[Int, (Int64, Int)]
+} derive(@debug.Debug)
+pub fn FetchSession::established(Self) -> Bool
+pub fn FetchSession::handle_response(Self, Int, Int) -> Unit
+pub fn FetchSession::invalidate(Self) -> Unit
+pub fn FetchSession::new() -> Self
+pub fn FetchSession::prepare(Self, String, Uuid, Map[Int, (Int64, Int)], Int) -> FetchSessionReq
+
+pub(all) struct FetchSessionReq {
+  session_id : Int
+  session_epoch : Int
+  partitions : Array[FetchPartitionReq]
+  forgotten : Array[FetchTopicForgotten]
+} derive(@debug.Debug)
+
+pub(all) struct FetchTopicForgotten {
+  name : String
+  topic_id : Uuid
+  partitions : Array[Int]
+} derive(@debug.Debug)
+
+pub(all) struct FetchTopicReq {
+  name : String
+  topic_id : Uuid
+  partitions : Array[FetchPartitionReq]
+} derive(@debug.Debug)
+
+pub struct FetchTopicResult {
+  name : String
+  topic_id : Uuid
+  partitions : Array[FetchPartitionResult]
 }
 
 pub(all) struct HostPort {

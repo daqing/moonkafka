@@ -120,22 +120,34 @@ pub async fn BrokerConnection::produce(
 }
 
 ///|
+/// Fetch records from one or more topics with fetch-session fields.
+/// The negotiated version shapes the wire format; the caller drives the
+/// session (FetchSession::prepare / handle_response) and owns recovery
+/// from session eviction.
 pub async fn BrokerConnection::fetch(
   self : BrokerConnection,
-  topic : String,
-  partitions : Array[(PartitionInfo, Int64)],
+  topics : Array[FetchTopicReq],
+  session~ : FetchSessionReq,
   max_wait_ms~ : Int,
-  max_bytes~ : Int,
+  min_bytes? : Int = 1,
+  max_bytes? : Int = 0x7fffffff,
   timeout_ms? : Int = 30000,
-) -> Array[FetchPartitionResult] {
+) -> FetchResult {
   let version = self.api_version(API_FETCH)
   let d = self.request(
     API_FETCH,
     version,
-    encode_fetch_request(topic, partitions, max_wait_ms, max_bytes),
+    encode_fetch_request(
+      version,
+      topics,
+      session~,
+      max_wait_ms~,
+      min_bytes~,
+      max_bytes~,
+    ),
     timeout_ms~,
   )
-  let (results, throttle) = decode_fetch_response(d)
+  let (result, throttle) = decode_fetch_response(version, d)
   self.note_throttle(throttle)
-  results
+  result
 }
