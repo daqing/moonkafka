@@ -333,15 +333,18 @@ lands on the same partitions as the Java/librdkafka clients on the same topic.
       delivery.timeout arrives in Phase 3); consumer `poll` recovers and
       keeps read positions across metadata refreshes. `REBOOTSTRAP_REQUIRED`
       handling arrives with the Phase 2 version-negotiation rework.
-- [ ] **Throttling.** Parse `throttle_time_ms` everywhere (currently
-      skipped); delay subsequent requests to that broker accordingly. The
-      fake-broker testkit (commit 6d1ff1a) can serve non-zero throttle
-      values to test this.
+- [x] **Throttling.** DONE (commit 738dad9): every response decoder returns
+      the parsed `throttle_time_ms`; the connection records the furthest
+      deadline and delays subsequent requests. Tested via the fake broker
+      serving a 400ms hint.
 - [ ] **TLS.** `security_protocol=ssl` via `moonbitlang/async/tls`
       (`Tls::client` over the TCP stream, SNI + trust store config);
       connection type becomes an enum `Plain(Tcp) | Tls(@tls.Tls)`.
-- [ ] **SASL.** Handshake/Authenticate flow (SaslHandshake v1 +
-      SaslAuthenticate v2) before any other API when configured:
+- [~] **SASL.** Handshake/Authenticate flow (SaslHandshake v1 + non-flexible
+      framing, SaslAuthenticate v2) DONE for PLAIN (commit 738dad9), wired
+      through config (`security_protocol` + `sasl` credentials) onto every
+      connection the clients dial; failure raises `SaslError` and closes the
+      connection. Fake-broker tests cover success and rejection. Remaining:
       - PLAIN (trivial)
       - SCRAM-SHA-256/512: pure-MoonBit client (HMAC-SHA256/512 + PBKDF2 +
         SHA-256/512 — check `moonbitlang/core`/`x` crypto coverage; fall back
