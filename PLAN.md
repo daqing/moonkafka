@@ -343,11 +343,14 @@ lands on the same partitions as the Java/librdkafka clients on the same topic.
       and both clients for Ssl / SaslSsl; the fake broker serves TLS from a
       committed self-signed test certificate, and integration tests produce
       over verified TLS and over SASL_SSL.
-- [~] **SASL.** Handshake/Authenticate flow (SaslHandshake v1 + non-flexible
-      framing, SaslAuthenticate v2) DONE for PLAIN (commit 738dad9), wired
-      through config (`security_protocol` + `sasl` credentials) onto every
-      connection the clients dial; failure raises `SaslError` and closes the
-      connection. Fake-broker tests cover success and rejection. Remaining:
+- [x] **SASL.** DONE (commit 7f0d5a4 and follow-ups): SaslHandshake v1
+      (non-flexible framing) + SaslAuthenticate v2, mechanisms PLAIN,
+      SCRAM-SHA-256, SCRAM-SHA-512 (PBKDF2 built on moonbitlang/x crypto,
+      RFC 7914/4231 + RFC 7677 vectors), and OAUTHBEARER via a
+      user-supplied token provider. Wired through config onto every
+      connection (bootstrap, leaders, brokers from metadata); failures
+      raise `SaslError` and close the connection. Re-authentication on
+      session_lifetime_ms is tracked for Phase 2.
       - PLAIN (trivial)
       - SCRAM-SHA-256/512: pure-MoonBit client (HMAC-SHA256/512 + PBKDF2 +
         SHA-256/512 — check `moonbitlang/core`/`x` crypto coverage; fall back
