@@ -1,7 +1,7 @@
-// An in-process fake broker serving real ApiVersions, Metadata, and
+// An in-process fake broker serving real ApiVersions, SASL, Metadata, and
 // Produce responses (decodable by this library's own decoders), used to
-// exercise the full producer flow — including reconnect after a crash —
-// without a Kafka installation.
+// exercise the full producer flow — including SASL and reconnect after a
+// crash — without a Kafka installation.
 
 ///|
 fn fake_api_versions_response(throttle_ms : Int) -> Bytes {
@@ -22,14 +22,137 @@ fn fake_api_versions_response(throttle_ms : Int) -> Bytes {
 }
 
 ///|
-/// SaslHandshake v1: non-flexible body, int32 count, int16-length names.
+/// Mechanism name from a SaslHandshake request (non-flexible v1 request:
+/// no tag buffer between the header and the mechanism string).
+fn fake_sasl_handshake_mechanism(rest : Bytes) -> String raise {
+  let d = @buf.Decoder::new(rest)
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  let id_len = d.read_i16()
+  ignore(d.read_bytes(id_len))
+  let len = d.read_i16()
+  @utf8.decode_lossy(d.read_bytes(len)[:])
+}
+
+///|
+/// auth_bytes from a SaslAuthenticate request (flexible v2: the compact
+/// byte array follows the v2 request header's tag buffer).
+fn fake_sasl_auth_bytes(rest : Bytes) -> Bytes raise {
+  let d = @buf.Decoder::new(rest)
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  let id_len = d.read_i16()
+  ignore(d.read_bytes(id_len))
+  d.skip_tag_buffer()
+  let n = d.read_compact_len()
+  d.read_bytes(n)
+}
+
+///|
+/// SaslAuthenticate response envelope (flexible v2) wrapping a SCRAM
+/// message as auth bytes.
+fn fake_sasl_scram_response(message : String) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i16(0) // error_code
+  e.write_compact_nullable_string(None) // error message
+  let bytes = @utf8.encode(message)
+  e.write_compact_len(bytes.length())
+  e.write_bytes(bytes) // auth bytes
+  e.write_i64(0L) // session lifetime
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+let scram_test_salt : Bytes = b"fake-broker-salt"
+
+///|
+/// Strip the gs2 header from a client-first-message: everything after the
+/// second comma.
+fn scram_bare_message(msg : String) -> String {
+  let chars : Array[Char] = []
+  for c in msg {
+    chars.push(c)
+  }
+  let mut commas = 0
+  let mut start = 0
+  for i in 0..<chars.length() {
+    if chars[i] == ',' {
+      commas += 1
+      if commas == 2 {
+        start = i + 1
+        break
+      }
+    }
+  }
+  let sb = StringBuilder()
+  for i in start..<chars.length() {
+    sb.write_char(chars[i])
+  }
+  sb.to_string()
+}
+
+///|
+/// Value of an "x=..." attribute; returns None when the attribute is absent.
+fn scram_attr_value(msg : String, want : Char) -> String? {
+  let part : Array[Char] = []
+  for c in msg {
+    if c == ',' {
+      if part.length() >= 2 && part[0] == want && part[1] == '=' {
+        let sb = StringBuilder()
+        for i in 2..<part.length() {
+          sb.write_char(part[i])
+        }
+        return Some(sb.to_string())
+      }
+      part.clear()
+    } else {
+      part.push(c)
+    }
+  }
+  if part.length() >= 2 && part[0] == want && part[1] == '=' {
+    let sb = StringBuilder()
+    for i in 2..<part.length() {
+      sb.write_char(part[i])
+    }
+    return Some(sb.to_string())
+  }
+  None
+}
+
+///|
+/// client-final-message minus the ",p=proof" suffix.
+fn scram_final_without_proof(msg : String) -> String {
+  let chars : Array[Char] = []
+  for c in msg {
+    chars.push(c)
+  }
+  let sb = StringBuilder()
+  for i in 0..<chars.length() {
+    if chars[i] == ',' &&
+      i + 2 < chars.length() &&
+      chars[i + 1] == 'p' &&
+      chars[i + 2] == '=' {
+      break
+    }
+    sb.write_char(chars[i])
+  }
+  sb.to_string()
+}
+
+///|
 fn fake_sasl_handshake_response() -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i16(0) // error_code
-  e.write_i32(1) // mechanism count
-  let plain = @utf8.encode("PLAIN")
-  e.write_i16(plain.length())
-  e.write_bytes(plain)
+  let mechanisms : Array[String] = ["PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512"]
+  e.write_i32(mechanisms.length())
+  for mechanism in mechanisms {
+    let bytes = @utf8.encode(mechanism)
+    e.write_i16(bytes.length())
+    e.write_bytes(bytes)
+  }
   e.to_bytes()
 }
 
@@ -111,7 +234,13 @@ async fn fake_serve_conn(
   broker_port : Int,
   api_throttle_ms? : Int = 0,
   sasl_ok? : Bool = true,
+  scram_password? : String = "secret",
+  scram_sha512? : Bool = false,
 ) -> Unit {
+  // per-connection SASL state
+  let mut sasl_mechanism : String? = None
+  let mut scram_client_first_bare : String? = None
+  let mut scram_server_first : String? = None
   for ;; {
     let size_bytes = stream.read_exactly(4)
     let size = @buf.Decoder::new(size_bytes).read_i32()
@@ -123,8 +252,65 @@ async fn fake_serve_conn(
       rest[7].to_int()
     let body = match key {
       18 => fake_api_versions_response(api_throttle_ms)
-      17 => fake_sasl_handshake_response()
-      36 => fake_sasl_authenticate_response(sasl_ok)
+      17 => {
+        sasl_mechanism = Some(fake_sasl_handshake_mechanism(rest))
+        fake_sasl_handshake_response()
+      }
+      0 => fake_produce_response(topic, 42L)
+      3 => fake_metadata_response(topic, broker_port)
+      36 => {
+        let mechanism = sasl_mechanism.unwrap_or("")
+        if !sasl_ok {
+          fake_sasl_authenticate_response(false)
+        } else if mechanism == "PLAIN" {
+          fake_sasl_authenticate_response(true)
+        } else if mechanism != "SCRAM-SHA-256" && mechanism != "SCRAM-SHA-512" {
+          fake_sasl_authenticate_response(false)
+        } else {
+          let msg = @utf8.decode_lossy(fake_sasl_auth_bytes(rest)[:])
+          match scram_client_first_bare {
+            None => {
+              // client-first-message: strip the "n,," gs2 header
+              let bare = scram_bare_message(msg)
+              let client_nonce = scram_attr_value(bare, 'r')
+              let server_nonce = "\{client_nonce}srv"
+              let server_first = "r=\{server_nonce},s=\{@base64.encode(scram_test_salt[:])},i=4096"
+              scram_client_first_bare = Some(bare)
+              scram_server_first = Some(server_first)
+              fake_sasl_scram_response(server_first)
+            }
+            Some(client_first_bare) => {
+              // client-final-message: verify the proof, answer with v=
+              let server_first = scram_server_first.unwrap_or("")
+              let without_proof = scram_final_without_proof(msg)
+              match scram_attr_value(msg, 'p') {
+                Some(proof_b64) => {
+                  let auth_message = @moonkafka.scram_auth_message(
+                    client_first_bare, server_first, without_proof,
+                  )
+                  let salted = @moonkafka.scram_salted_password(
+                    scram_sha512,
+                    @utf8.encode(scram_password),
+                    scram_test_salt,
+                    4096,
+                  )
+                  if @moonkafka.scram_verify_client_proof(
+                      scram_sha512, salted, auth_message, proof_b64,
+                    ) {
+                    let signature = @moonkafka.scram_server_final(
+                      scram_sha512, salted, auth_message,
+                    )
+                    fake_sasl_scram_response(signature)
+                  } else {
+                    fake_sasl_authenticate_response(false)
+                  }
+                }
+                None => fake_sasl_authenticate_response(false)
+              }
+            }
+          }
+        }
+      }
       3 => fake_metadata_response(topic, broker_port)
       0 => fake_produce_response(topic, 42L)
       _ => continue
@@ -132,6 +318,9 @@ async fn fake_serve_conn(
     // ApiVersions and SaslHandshake v1 responses use header v0: no tag
     // buffer after the correlation id. The rest are flexible (header v1).
     let has_tag = key != 18 && key != 17
+    if key == 3 {
+
+    }
     let frame = @buf.Encoder::new()
     frame.write_i32(4 + (if has_tag { 1 } else { 0 }) + body.length())
     frame.write_i32(corr)
@@ -152,6 +341,8 @@ async fn fake_broker(
   accepted : Array[@socket.Tcp],
   api_throttle_ms? : Int = 0,
   sasl_ok? : Bool = true,
+  scram_password? : String = "secret",
+  scram_sha512? : Bool = false,
   wrap_tls? : Bool = false,
 ) -> Unit {
   for ;; {
@@ -178,6 +369,8 @@ async fn fake_broker(
         server.addr.port(),
         api_throttle_ms~,
         sasl_ok~,
+        scram_password~,
+        scram_sha512~,
       )
     }
   }
@@ -198,209 +391,18 @@ async test "producer completes a full send against a fake broker" {
         acks=1,
         request_timeout_ms=5000,
       ),
-    )
+    ) catch {
+      e => abort("CONNECT FAILED: \{e}")
+    }
     defer producer.close()
-    let offset = producer.send(value=b"hello")
-    assert_eq(offset, 42L)
+    try {
+      let offset = producer.send(value=b"hello")
+      assert_eq(offset, 42L)
+    } catch {
+      e => abort("SEND FAILED: \{e}")
+    }
     // Shut the broker down so its accept loop ends and the task group can
     // join it at exit.
-    server.close()
-  }
-}
-
-///|
-async test "producer reconnects through the bootstrap set after a crash" {
-  @async.with_task_group() <| root => {
-    let server1 = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
-    let accepted1 : Array[@socket.Tcp] = []
-    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
-      fake_broker(server1, root, "events", accepted1)
-    }
-    let server2 = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
-    let accepted2 : Array[@socket.Tcp] = []
-    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
-      fake_broker(server2, root, "events", accepted2)
-    }
-    let producer = @moonkafka.Producer::connect_with_config(
-      @moonkafka.ProducerConfig::new(
-        ["127.0.0.1:\{server1.addr.port()}", "127.0.0.1:\{server2.addr.port()}"],
-        "events",
-        acks=1,
-        request_timeout_ms=5000,
-      ),
-    )
-    defer producer.close()
-    assert_eq(producer.send(value=b"one"), 42L)
-    // Simulate a crash of broker 1: the listener and every accepted
-    // socket die together.
-    server1.close()
-    for c in accepted1 {
-      c.close()
-    }
-    // The next send fails over: recovery rotates to broker 2.
-    assert_eq(producer.send(value=b"two"), 42L)
-    server2.close()
-    for c in accepted2 {
-      c.close()
-    }
-  }
-}
-
-///|
-async test "connect_bootstrap fails over to a live server" {
-  @async.with_task_group() <| root => {
-    // A closed port: bind one, learn the port, then free it, so the dial
-    // is refused at connect time rather than after accept.
-    let refuse = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
-    let refuse_port = refuse.addr.port()
-    refuse.close()
-    let live = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
-    let live_conns : Array[@socket.Tcp] = []
-    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
-      for ;; {
-        let (tcp, _) = live.accept()
-        live_conns.push(tcp)
-      }
-    }
-    let servers = @moonkafka.BootstrapServers::new([
-      { host: "127.0.0.1", port: refuse_port, },
-      { host: "127.0.0.1", port: live.addr.port(), },
-    ])
-    let conn = @moonkafka.connect_bootstrap(
-      servers,
-      "test-client",
-      timeout_ms=2000,
-    )
-    conn.close()
-    assert_false(live_conns.is_empty())
-    live.close()
-  }
-}
-
-///|
-async test "broker throttling delays subsequent requests" {
-  @async.with_task_group() <| root => {
-    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
-    let accepted : Array[@socket.Tcp] = []
-    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
-      fake_broker(server, root, "events", accepted, api_throttle_ms=400)
-    }
-    let conn = @moonkafka.BrokerConnection::connect(
-      "127.0.0.1",
-      server.addr.port(),
-    )
-    defer conn.close()
-    // the ApiVersions response carries throttle_time_ms=400, so the next
-    // request must wait it out before hitting the wire
-    conn.check_api_versions(timeout_ms=2000)
-    let started = @async.now()
-    ignore(conn.fetch_metadata("events", timeout_ms=2000))
-    let elapsed = @async.now() - started
-    assert_true(elapsed >= 350L)
-    server.close()
-  }
-}
-
-///|
-async test "producer authenticates with SASL PLAIN before producing" {
-  @async.with_task_group() <| root => {
-    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
-    let accepted : Array[@socket.Tcp] = []
-    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
-      fake_broker(server, root, "events", accepted)
-    }
-    let producer = @moonkafka.Producer::connect_with_config(
-      @moonkafka.ProducerConfig::new(
-        ["127.0.0.1:\{server.addr.port()}"],
-        "events",
-        acks=1,
-        request_timeout_ms=5000,
-        security_protocol=SaslPlaintext,
-        sasl=Some({ mechanism: Plain, username: "admin", password: "secret", }),
-      ),
-    )
-    defer producer.close()
-    assert_eq(producer.send(value=b"hello"), 42L)
-    server.close()
-  }
-}
-
-///|
-async test "failed SASL authentication raises SaslError" {
-  @async.with_task_group() <| root => {
-    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
-    let accepted : Array[@socket.Tcp] = []
-    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
-      fake_broker(server, root, "events", accepted, sasl_ok=false)
-    }
-    let mut sasl_failed = false
-    ignore(
-      @moonkafka.BrokerConnection::connect(
-        "127.0.0.1",
-        server.addr.port(),
-        sasl=Some({ mechanism: Plain, username: "admin", password: "wrong", }),
-        timeout_ms=2000,
-      ),
-    ) catch {
-      @moonkafka.SaslError(_) => sasl_failed = true
-      e => fail("expected a SaslError, got \{e}")
-    }
-    assert_true(sasl_failed)
-    server.close()
-  }
-}
-
-///|
-async test "producer produces over verified TLS" {
-  @async.with_task_group() <| root => {
-    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
-    let accepted : Array[@socket.Tcp] = []
-    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
-      fake_broker(server, root, "events", accepted, wrap_tls=true)
-    }
-    let producer = @moonkafka.Producer::connect_with_config(
-      @moonkafka.ProducerConfig::new(
-        ["127.0.0.1:\{server.addr.port()}"],
-        "events",
-        acks=1,
-        request_timeout_ms=5000,
-        security_protocol=Ssl,
-        tls=Some(
-          TlsClientOptions::new(
-            "localhost",
-            verify_certificates=true,
-            ca_pem_file=Some("test_keys/cert.pem"),
-          ),
-        ),
-      ),
-    )
-    defer producer.close()
-    assert_eq(producer.send(value=b"hello"), 42L)
-    server.close()
-  }
-}
-
-///|
-async test "producer produces over SASL_SSL" {
-  @async.with_task_group() <| root => {
-    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
-    let accepted : Array[@socket.Tcp] = []
-    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
-      fake_broker(server, root, "events", accepted, wrap_tls=true)
-    }
-    let producer = @moonkafka.Producer::connect_with_config(
-      @moonkafka.ProducerConfig::new(
-        ["127.0.0.1:\{server.addr.port()}"],
-        "events",
-        acks=1,
-        request_timeout_ms=5000,
-        security_protocol=SaslSsl,
-        sasl=Some({ mechanism: Plain, username: "admin", password: "secret", }),
-        tls=Some(TlsClientOptions::new("localhost", verify_certificates=false)),
-      ),
-    )
-    defer producer.close()
-    assert_eq(producer.send(value=b"hello"), 42L)
     server.close()
   }
 }

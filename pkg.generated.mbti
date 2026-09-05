@@ -8,6 +8,7 @@ import {
   "moonbitlang/async/socket",
   "moonbitlang/async/tls",
   "moonbitlang/core/debug",
+  "moonbitlang/x/crypto",
 }
 
 // Values
@@ -62,6 +63,22 @@ pub fn encode_sasl_handshake_request(String) -> Bytes
 pub fn error_name(Int) -> String
 
 pub fn error_retriable(Int) -> Bool
+
+pub fn scram_auth_message(String, String, String) -> String
+
+pub fn scram_client_proof_b64(Bool, Bytes, String) -> String
+
+pub fn scram_escape_username(String) -> String
+
+pub fn[H : @crypto.CryptoHasher] scram_pbkdf2_hmac(H, Bytes, Bytes, Int, Int) -> Bytes
+
+pub fn scram_salted_password(Bool, Bytes, Bytes, Int) -> Bytes
+
+pub fn scram_server_final(Bool, Bytes, String) -> String
+
+pub fn scram_server_signature_b64(Bool, Bytes, String) -> String
+
+pub fn scram_verify_client_proof(Bool, Bytes, String, String) -> Bool
 
 // Errors
 pub(all) suberror BrokerError {
@@ -135,6 +152,7 @@ pub(all) enum BrokerStream {
   Secure(@tls.Tls)
 }
 pub async fn BrokerStream::read_exactly(Self, Int) -> Bytes
+pub fn BrokerStream::shutdown(Self) -> Unit
 pub async fn BrokerStream::write(Self, Bytes) -> Unit
 
 pub struct CommonConfig {
@@ -275,7 +293,15 @@ pub(all) enum SaslMechanism {
   Plain
   ScramSha256
   ScramSha512
+  OAuthBearer
 } derive(@debug.Debug)
+
+pub(all) struct ScramServerFirst {
+  nonce : String
+  salt : Bytes
+  iterations : Int
+} derive(@debug.Debug)
+pub fn ScramServerFirst::parse(String) -> Self raise
 
 pub(all) enum SecurityProtocol {
   Plaintext
