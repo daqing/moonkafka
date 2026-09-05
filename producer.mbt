@@ -13,6 +13,7 @@ pub struct Producer {
   retry_backoff_ms : Int
   retry_backoff_max_ms : Int
   bootstrap : BootstrapServers
+  sasl : SaslConfig?
   mut meta_conn : BrokerConnection
   mut brokers : Map[Int, BrokerInfo]
   leader_conns : Map[Int, BrokerConnection]
@@ -47,10 +48,16 @@ pub async fn Producer::connect(
 /// meta connection lands on the first bootstrap server that accepts.
 pub async fn Producer::connect_with_config(config : ProducerConfig) -> Producer {
   let bootstrap = BootstrapServers::new(config.common.bootstrap_addresses())
+  // SASL credentials only apply on SASL security protocols.
+  let sasl = match config.common.security_protocol {
+    SaslPlaintext | SaslSsl => config.common.sasl
+    _ => None
+  }
   let meta_conn = connect_bootstrap(
     bootstrap,
     config.common.client_id,
     timeout_ms=config.common.request_timeout_ms,
+    sasl~,
   )
   meta_conn.check_api_versions(timeout_ms=config.common.request_timeout_ms)
   let producer = {
@@ -61,6 +68,7 @@ pub async fn Producer::connect_with_config(config : ProducerConfig) -> Producer 
     retry_backoff_ms: config.common.retry_backoff_ms,
     retry_backoff_max_ms: config.common.retry_backoff_max_ms,
     bootstrap,
+    sasl,
     meta_conn,
     brokers: Map([]),
     leader_conns: Map([]),
@@ -181,6 +189,7 @@ pub async fn Producer::send(
   // unbounded) must not overflow the loop bound.
   let attempts = if self.retries > 1000 { 1000 } else { self.retries + 1 }
   for attempt in 0..<attempts {
+    let _ = attempt
     let p = self.pick_partition(key)
     match self.attempt_send(p, batch) {
       Some(offset) => return offset

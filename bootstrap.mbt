@@ -34,6 +34,7 @@ pub async fn connect_bootstrap(
   servers : BootstrapServers,
   client_id : String,
   timeout_ms? : Int = 10000,
+  sasl? : SaslConfig? = None,
 ) -> BrokerConnection {
   let n = servers.addrs.length()
   let mut last_error : Error = ProtocolError::ProtocolError(
@@ -41,7 +42,7 @@ pub async fn connect_bootstrap(
   )
   for _ in 0..<n {
     let addr = servers.next()
-    match dial(addr, client_id, timeout_ms) {
+    match dial(addr, client_id, timeout_ms, sasl) {
       Ok(conn) => return conn
       Err(e) => last_error = e
     }
@@ -58,10 +59,17 @@ async fn dial(
   addr : HostPort,
   client_id : String,
   timeout_ms : Int,
+  sasl : SaslConfig?,
 ) -> Result[BrokerConnection, Error] {
   try
     @async.with_timeout(timeout_ms, () => {
-      BrokerConnection::connect(addr.host, addr.port, client_id~)
+      BrokerConnection::connect(
+        addr.host,
+        addr.port,
+        client_id~,
+        sasl~,
+        timeout_ms~,
+      )
     })
     |> Ok
   catch {

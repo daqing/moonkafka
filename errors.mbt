@@ -12,6 +12,12 @@ pub(all) suberror BrokerError {
 }
 
 ///|
+/// SASL negotiation or authentication failure. The connection is closed.
+pub(all) suberror SaslError {
+  SaslError(String)
+}
+
+///|
 /// Transport-level failure. The affected connection has been closed when
 /// either variant is raised; callers reconnect rather than retry in place.
 pub(all) suberror TransportError {
