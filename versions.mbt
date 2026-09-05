@@ -21,6 +21,9 @@ pub const API_LIST_OFFSETS : Int = 2
 pub const API_METADATA : Int = 3
 
 ///|
+pub const API_DESCRIBE_TOPIC_PARTITIONS : Int = 75
+
+///|
 pub const API_SASL_HANDSHAKE : Int = 17
 
 ///|
@@ -56,7 +59,14 @@ pub fn driver_api_range(api_key : Int) -> ApiRange? {
     API_LIST_OFFSETS =>
       Some({ key: API_LIST_OFFSETS, name: "ListOffsets", min: 7, max: 7, })
     API_METADATA =>
-      Some({ key: API_METADATA, name: "Metadata", min: 12, max: 12, })
+      Some({ key: API_METADATA, name: "Metadata", min: 12, max: 13, })
+    API_DESCRIBE_TOPIC_PARTITIONS =>
+      Some({
+        key: API_DESCRIBE_TOPIC_PARTITIONS,
+        name: "DescribeTopicPartitions",
+        min: 0,
+        max: 0,
+      })
     API_API_VERSIONS =>
       Some({ key: API_API_VERSIONS, name: "ApiVersions", min: 3, max: 3, })
     API_SASL_HANDSHAKE =>

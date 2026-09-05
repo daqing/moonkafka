@@ -81,7 +81,7 @@ test "pick raises when no version overlaps" {
   }
   assert_true(msg.contains("no common Metadata version"))
   assert_true(msg.contains("broker supports 0-11"))
-  assert_true(msg.contains("moonkafka implements 12-12"))
+  assert_true(msg.contains("moonkafka implements 12-13"))
 }
 
 ///|

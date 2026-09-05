@@ -1,6 +1,8 @@
-// Kafka RPC layer: request framing and the four APIs used by the simple
-// consumer. Targets Kafka 4.x brokers (flexible message versions only).
-// API keys and the implemented-version matrix live in versions.mbt.
+// Kafka RPC layer: request framing and the data-plane APIs used by the
+// simple producer and consumer. Targets Kafka 4.x brokers (flexible
+// message versions only). API keys and the implemented-version matrix
+// live in versions.mbt; the Metadata and DescribeTopicPartitions codecs
+// live in metadata.mbt.
 
 ///|
 pub(all) suberror ProtocolError {
@@ -68,99 +70,6 @@ pub fn decode_api_versions_response(
   let throttle = d.read_i32()
   d.skip_tag_buffer()
   ({ ranges, }, throttle)
-}
-
-///|
-pub struct BrokerInfo {
-  node_id : Int
-  host : String
-  port : Int
-}
-
-///|
-pub struct PartitionInfo {
-  index : Int
-  leader : Int
-  leader_epoch : Int
-}
-
-///|
-pub struct TopicMetadata {
-  name : String
-  partitions : Array[PartitionInfo]
-}
-
-///|
-pub struct Metadata {
-  brokers : Map[Int, BrokerInfo]
-  topics : Array[TopicMetadata]
-}
-
-///|
-pub fn encode_metadata_request(topic : String) -> Bytes {
-  let body = @buf.Encoder::new()
-  body.write_compact_len(1) // one topic
-  body.write_bytes(Bytes::make(16, b'\x00')) // topic_id: unused
-  body.write_compact_nullable_string(Some(topic))
-  body.write_tag_buffer()
-  body.write_bool(true) // allow_auto_topic_creation
-  body.write_bool(false) // include_topic_authorized_operations
-  body.write_tag_buffer()
-  body.to_bytes()
-}
-
-///|
-/// Decode a Metadata v12 response (after the v1 response header).
-/// Returns the metadata and the throttle hint in milliseconds.
-pub fn decode_metadata_response(d : @buf.Decoder) -> (Metadata, Int) raise {
-  let throttle = d.read_i32() // throttle_time_ms
-  let broker_count = d.read_compact_len()
-  let brokers : Map[Int, BrokerInfo] = Map([])
-  for _ in 0..<broker_count {
-    let node_id = d.read_i32()
-    let host = d.read_compact_string()
-    let port = d.read_i32()
-    let _rack = d.read_compact_nullable_string()
-    d.skip_tag_buffer()
-    brokers[node_id] = { node_id, host, port, }
-  }
-  let _cluster_id = d.read_compact_nullable_string()
-  let _controller_id = d.read_i32()
-  let topic_count = d.read_compact_len()
-  let topics : Array[TopicMetadata] = []
-  for _ in 0..<topic_count {
-    let error_code = d.read_i16()
-    let name = match d.read_compact_nullable_string() {
-      Some(name) => name
-      None => raise @buf.Malformed("metadata topic name is null")
-    }
-    d.skip(16) // topic_id
-    let _is_internal = d.read_bool()
-    let partition_count = d.read_compact_len()
-    let partitions : Array[PartitionInfo] = []
-    for _ in 0..<partition_count {
-      let partition_error = d.read_i16()
-      let index = d.read_i32()
-      let leader = d.read_i32()
-      let leader_epoch = d.read_i32()
-      for _ in 0..<3 { // replica_nodes, isr_nodes, offline_replicas
-        let n = d.read_compact_len()
-        d.skip(n * 4)
-      }
-      d.skip_tag_buffer()
-      if partition_error == 0 {
-        partitions.push({ index, leader, leader_epoch, })
-      }
-    }
-    d.skip(4) // topic_authorized_operations
-    d.skip_tag_buffer()
-    if error_code != 0 {
-      raise BrokerError(error_code, "Metadata failed for topic \{name}")
-    }
-    topics.push({ name, partitions, })
-  }
-  d.skip_tag_buffer()
-  ({ brokers, topics, }, throttle)
 }
 
 ///|
