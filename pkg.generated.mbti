@@ -48,6 +48,8 @@ pub const OFFSET_MAX_TIMESTAMP : Int64 = -3
 
 pub fn backoff_ms(Int, Int, Int) -> Int
 
+pub fn collect_committed(Array[DecodedBatch], Array[AbortedTx]) -> Array[Record]
+
 pub async fn connect_bootstrap(BootstrapServers, String, timeout_ms? : Int, sasl? : SaslConfig?, use_tls? : Bool, tls? : TlsClientOptions?) -> BrokerConnection
 
 pub fn decode_api_versions_response(@buf.Decoder) -> (BrokerVersions, Int) raise
@@ -63,6 +65,8 @@ pub fn decode_metadata_response(Int, @buf.Decoder) -> (Metadata, Int) raise
 pub fn decode_produce_response(Int, @buf.Decoder) -> (Array[ProducePartitionResult], Int) raise
 
 pub fn decode_record_batches(Bytes) -> Array[Record] raise @buf.DecodeError
+
+pub fn decode_record_batches_detailed(Bytes) -> (Array[DecodedBatch], Bool) raise @buf.DecodeError
 
 pub fn decode_record_batches_ex(Bytes) -> (Array[Record], Bool) raise @buf.DecodeError
 
@@ -85,6 +89,8 @@ pub fn encode_metadata_request(Array[String]?) -> Bytes
 pub fn encode_produce_request(Int, String, Uuid, Array[(Int, Bytes)], transactional_id? : String?, acks~ : Int, timeout_ms~ : Int) -> Bytes raise
 
 pub fn encode_record_batch(Array[Record]) -> Bytes
+
+pub fn encode_record_batch_with_base_offset(Int64, Array[Record]) -> Bytes
 
 pub fn encode_request(Int, Int, Int, String, Bytes, flexible? : Bool) -> Bytes
 
@@ -133,6 +139,11 @@ pub(all) suberror TransportError {
 }
 
 // Types and methods
+pub(all) struct AbortedTx {
+  producer_id : Int64
+  first_offset : Int64
+} derive(@debug.Debug)
+
 pub(all) struct ApiRange {
   key : Int
   name : String
@@ -251,6 +262,16 @@ pub struct Deadline {
 pub fn Deadline::after_ms(Int64) -> Self
 pub fn Deadline::expired(Self) -> Bool
 pub fn Deadline::remaining_ms(Self) -> Int64
+
+pub(all) struct DecodedBatch {
+  records : Array[Record]
+  producer_id : Int64
+  producer_epoch : Int
+  base_sequence : Int
+  is_control : Bool
+  is_transactional : Bool
+  truncated : Bool
+} derive(@debug.Debug)
 
 pub struct DescribeTopicPartitions {
   topics : Array[TopicMetadata]
@@ -386,7 +407,23 @@ pub(all) struct Record {
   timestamp : Int64
   key : Bytes?
   value : Bytes?
-}
+  headers : Array[(Bytes, Bytes)]
+} derive(@debug.Debug)
+
+pub struct RecordBatchBuilder {
+  base_offset : Int64
+  bodies : Array[Bytes]
+  mut body_bytes : Int
+  mut base_timestamp : Int64
+  mut max_timestamp : Int64
+  mut last_offset : Int64
+} derive(@debug.Debug)
+pub fn RecordBatchBuilder::append(Self, Int64, key? : Bytes?, value? : Bytes?, headers? : Array[(Bytes, Bytes)]) -> Unit
+pub fn RecordBatchBuilder::count(Self) -> Int
+pub fn RecordBatchBuilder::estimated_size(Self) -> Int
+pub fn RecordBatchBuilder::last_assigned_offset(Self) -> Int64
+pub fn RecordBatchBuilder::new(base_offset? : Int64) -> Self
+pub fn RecordBatchBuilder::to_bytes(Self) -> Bytes
 
 pub(all) struct SaslAuthenticateResult {
   error_code : Int

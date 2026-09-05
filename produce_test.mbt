@@ -78,7 +78,7 @@ test "produce decode refuses versions without codecs" {
 ///|
 test "produce v12 request encodes topic name and null transactional id" {
   let batch = @moonkafka.encode_record_batch([
-    { offset: 0L, timestamp: 1L, key: None, value: Some(b"x"), },
+    { offset: 0L, timestamp: 1L, key: None, value: Some(b"x"), headers: [], },
   ])
   let req = @moonkafka.encode_produce_request(
     12,
