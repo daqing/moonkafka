@@ -1,5 +1,6 @@
 import {
   "daqing/moonkafka/buf",
+  "daqing/moonkafka/compression",
   "daqing/moonkafka/internal",
   "moonbitlang/async",
   "moonbitlang/async/socket",
@@ -11,3 +12,7 @@ import {
 }
 
 supported_targets = "+native"
+
+options(
+  link: { "native": { "cc-link-flags": "-lz" } },
+)
