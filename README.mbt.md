@@ -22,11 +22,18 @@ the API surface below reflects the intended design and may change before the fir
 Working today:
 
 - Kafka wire protocol codecs (compact types, zig-zag varints, tagged fields)
-- RecordBatch v2 decoding with CRC32C verification, and encoding for producing
-- ApiVersions v3, Produce v11, Metadata v12, ListOffsets v7, Fetch v12
+- Per-request API version negotiation against the broker's advertised ranges
+- RecordBatch v2 (CRC32C-verified): record headers, control/transactional
+  flags, read_committed filtering primitive, incremental batch builder, and
+  whole-batch decompression for gzip, snappy, lz4, and zstd
+- Data-plane APIs: Produce v12/v13 (topic-id addressing, per-record errors),
+  Fetch v12-v16 with incremental fetch sessions (KIP-227), Metadata v12/v13,
+  DescribeTopicPartitions v0 (paginated), ListOffsets v10/v11
 - Simple producer: per-leader connections, Kafka-compatible murmur2
   key-partitioning (round-robin for keyless messages), metadata refresh on
-  leadership changes
+  leadership changes, REBOOTSTRAP_REQUIRED recovery
+- Simple consumer: incremental fetch sessions with eviction recovery,
+  offset resolution by sentinel or timestamp
 - Pipelined broker connections: request timeouts, in-flight cap, reconnect
   through bootstrap servers, broker throttling
 - TLS (including verified certificates via a custom CA) and SASL
@@ -34,9 +41,8 @@ Working today:
 
 Planned:
 
-- Batched/async producer
+- Batched/async producer (accumulator, idempotence, transactions)
 - Consumer groups with the new KIP-848 consumer rebalance protocol
-- Compressed batches (gzip/snappy/lz4/zstd)
 - Admin client and share groups
 
 ## Requirements
