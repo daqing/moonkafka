@@ -314,21 +314,29 @@ lands on the same partitions as the Java/librdkafka clients on the same topic.
 
 ### Phase 1 — Transport hardening
 
-- [~] **BrokerConnection v2** — DONE at root scope (commit aee0edc; the
-      `net/` package move folds into the later protocol/ split): pipelining
-      via write-lock + frame-level read-lock + pooled out-of-order responses
-      (proven by a fake-broker test that answers request 2 first);
-      per-request `with_timeout` that closes the connection on timeout;
-      EOF/corrupt-frame failures raise `TransportError` and close; max
-      in-flight via semaphore. Design notes: cancellation errors must pass
-      through untranslated inside frame reads, and the write lock's scope
-      must end before awaiting responses (defer-in-helper pattern) — both
-      caught by tests. TODO: migrate producer/consumer onto it.
-- [ ] **Reconnect & bootstrap set.** Connect to any of `bootstrap_servers`
-      (round-robin); automatic reconnect with jittered backoff; surface
-      `REBOOTSTRAP_REQUIRED` up to the cluster layer which re-bootstraps.
+- [x] **BrokerConnection v2** — DONE at root scope (commits aee0edc,
+      197b36b; the `net/` package move folds into the later protocol/
+      split): pipelining via write-lock + frame-level read-lock + pooled
+      out-of-order responses; per-request `with_timeout` closing the
+      connection on timeout; EOF/corrupt-frame failures raise
+      `TransportError` and close; max in-flight via semaphore. Producer and
+      consumer migrated onto it; the old serial `Connection` is deleted.
+      Design notes: cancellation errors must pass through untranslated
+      inside frame reads; the write lock's scope must end before awaiting
+      responses (defer-in-helper); `with_task_group` JOINS spawned tasks at
+      exit — infinite accept loops need `spawn_bg(no_wait=true)`.
+- [x] **Reconnect & bootstrap set.** DONE (commit 6d1ff1a):
+      `BootstrapServers` rotates round-robin; `connect_bootstrap` fails
+      over at dial time; producer `send` recovers from `TransportError` and
+      leadership errors by re-dialing, refreshing metadata, and retrying
+      with backoff (bounded by `retries`, default now 10 until
+      delivery.timeout arrives in Phase 3); consumer `poll` recovers and
+      keeps read positions across metadata refreshes. `REBOOTSTRAP_REQUIRED`
+      handling arrives with the Phase 2 version-negotiation rework.
 - [ ] **Throttling.** Parse `throttle_time_ms` everywhere (currently
-      skipped); delay subsequent requests to that broker accordingly.
+      skipped); delay subsequent requests to that broker accordingly. The
+      fake-broker testkit (commit 6d1ff1a) can serve non-zero throttle
+      values to test this.
 - [ ] **TLS.** `security_protocol=ssl` via `moonbitlang/async/tls`
       (`Tls::client` over the TCP stream, SNI + trust store config);
       connection type becomes an enum `Plain(Tcp) | Tls(@tls.Tls)`.
