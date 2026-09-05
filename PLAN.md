@@ -332,7 +332,9 @@ lands on the same partitions as the Java/librdkafka clients on the same topic.
       with backoff (bounded by `retries`, default now 10 until
       delivery.timeout arrives in Phase 3); consumer `poll` recovers and
       keeps read positions across metadata refreshes. `REBOOTSTRAP_REQUIRED`
-      handling arrives with the Phase 2 version-negotiation rework.
+      handling landed with the Phase 2 version-negotiation rework
+      (commit e8afa08): produce errors 5/6/129 all route to recovery,
+      which re-dials the bootstrap set.
 - [x] **Throttling.** DONE (commit 738dad9): every response decoder returns
       the parsed `throttle_time_ms`; the connection records the furthest
       deadline and delays subsequent requests. Tested via the fake broker
@@ -372,11 +374,18 @@ callback path unit-tested against a mock broker.
 
 ### Phase 2 — Protocol completeness (data plane)
 
-- [ ] **Version negotiation matrix.** `protocol/versions.mbt`: per API key
-      the implemented floor/ceiling; `ApiVersions` handshake stores the
-      broker's ranges; helper `pick(api, want) -> Int` centralizing the
-      choose-highest-common logic; the current hard failure in
-      `decode_api_versions_response` becomes negotiation.
+- [x] **Version negotiation matrix.** DONE (commit e8afa08): `versions.mbt`
+      (root scope; folds into the later `protocol/` split) holds the API
+      key constants and the driver's per-API floor/ceiling matrix;
+      `decode_api_versions_response` now parses the broker's ranges into
+      `BrokerVersions`, stored on every connection (the handshake runs in
+      `connect_bootstrap` and on leader dials, like the Java client);
+      `BrokerVersions::pick` / `BrokerConnection::api_version` centralize
+      the choose-highest-common logic and raise clear no-overlap errors
+      (the old hard failure). Requests in `client.mbt` negotiate their
+      version per call. This also delivered the deferred
+      `REBOOTSTRAP_REQUIRED` (129) handling: the producer's recovery path
+      re-bootstraps on it.
 - [ ] **Metadata**: implement v12 **and** v13; add
       `DescribeTopicPartitions` v0 (paginated, cursor-based) used by admin and
       for regex subscription expansion.
