@@ -412,6 +412,16 @@ pub fn ProducerConfig::new(
 }
 
 ///|
+/// Where to move the read position when a fetch reports
+/// OFFSET_OUT_OF_RANGE (Java's auto.offset.reset). ResetNone surfaces
+/// the error to the caller instead of silently repositioning.
+pub(all) enum AutoOffsetReset {
+  ResetEarliest
+  ResetLatest
+  ResetNone
+} derive(@debug.Debug)
+
+///|
 pub struct ConsumerConfig {
   common : CommonConfig
   topic : String
@@ -423,6 +433,17 @@ pub struct ConsumerConfig {
   /// more on close; requires a group id.
   enable_auto_commit : Bool
   auto_commit_interval_ms : Int
+  /// Out-of-range recovery policy; defaults to following `start_from`.
+  auto_offset_reset : AutoOffsetReset
+  /// Upper bound on records one poll returns; extra records stay in the
+  /// log and the position rewinds to the first unconsumed record.
+  max_poll_records : Int
+  /// Per-partition byte cap carried in each fetch request (Java's
+  /// max.partition.fetch.bytes).
+  max_partition_fetch_bytes : Int
+  /// Fetch with READ_COMMITTED isolation and filter aborted
+  /// transactions out of polled records.
+  enable_read_committed : Bool
 } derive(@debug.Debug)
 
 ///|
@@ -438,6 +459,10 @@ pub fn ConsumerConfig::new(
   group_id? : String? = None,
   enable_auto_commit? : Bool = true,
   auto_commit_interval_ms? : Int = 5000,
+  auto_offset_reset? : AutoOffsetReset? = None,
+  max_poll_records? : Int = 500,
+  max_partition_fetch_bytes? : Int = 1048576,
+  enable_read_committed? : Bool = false,
 ) -> ConsumerConfig raise {
   if topic.length() == 0 {
     raise ProtocolError::ProtocolError("topic must not be empty")
@@ -452,6 +477,16 @@ pub fn ConsumerConfig::new(
   if auto_commit_interval_ms <= 0 {
     raise ProtocolError::ProtocolError(
       "auto_commit_interval_ms must be positive, got \{auto_commit_interval_ms}",
+    )
+  }
+  if max_poll_records <= 0 {
+    raise ProtocolError::ProtocolError(
+      "max_poll_records must be positive, got \{max_poll_records}",
+    )
+  }
+  if max_partition_fetch_bytes <= 0 {
+    raise ProtocolError::ProtocolError(
+      "max_partition_fetch_bytes must be positive, got \{max_partition_fetch_bytes}",
     )
   }
   // Auto-commit without a group is inert (nothing to commit to); the
@@ -470,5 +505,14 @@ pub fn ConsumerConfig::new(
     group_id,
     enable_auto_commit,
     auto_commit_interval_ms,
+    auto_offset_reset: auto_offset_reset.unwrap_or(
+      match start_from {
+        Earliest => ResetEarliest
+        Latest => ResetLatest
+      },
+    ),
+    max_poll_records,
+    max_partition_fetch_bytes,
+    enable_read_committed,
   }
 }

@@ -7,7 +7,7 @@
 fn fake_api_versions_response(throttle_ms : Int) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i16(0) // error_code
-  e.write_compact_len(14)
+  e.write_compact_len(15)
   let apis : Array[(Int, Int)] = [
     (0, 13),
     (1, 16),
@@ -16,6 +16,7 @@ fn fake_api_versions_response(throttle_ms : Int) -> Bytes {
     (8, 10),
     (9, 10),
     (10, 4),
+    (23, 4),
     (18, 3),
     (22, 5),
     (24, 3),
@@ -422,6 +423,85 @@ fn fake_fetch_request_session_epoch(rest : Bytes) -> Int raise {
 }
 
 ///|
+/// Isolation level of a Fetch request (0 read_uncommitted, 1
+/// read_committed).
+fn fake_fetch_request_isolation(rest : Bytes) -> Int raise {
+  let d = @buf.Decoder::new(rest)
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  ignore(d.read_compact_string()) // client id
+  d.skip_tag_buffer()
+  ignore(d.read_i32()) // max_wait_ms
+  ignore(d.read_i32()) // min_bytes
+  ignore(d.read_i32()) // max_bytes
+  d.read_i8() // isolation level
+}
+
+///|
+/// A READ_COMMITTED fetch response: the two records ride in a
+/// transactional batch from producer 500, reported aborted from offset
+/// 42 — read_committed consumers must filter both out.
+fn fake_fetch_response_committed(
+  topic : String,
+  version : Int,
+  session_id : Int,
+) -> Bytes {
+  let builder = @moonkafka.RecordBatchBuilder::new(base_offset=42L)
+  builder.set_idempotence(500L, 0, 0)
+  builder.set_transactional()
+  builder.append(1000L, value=Some(b"one"))
+  builder.append(2000L, value=Some(b"two"))
+  let batch = builder.to_bytes()
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_i16(0) // top-level error
+  e.write_i32(session_id)
+  e.write_compact_len(1) // one topic
+  if version >= 13 {
+    e.write_bytes(fake_topic_id)
+  } else {
+    e.write_compact_string(topic)
+  }
+  e.write_compact_len(1) // one partition
+  e.write_i32(0) // index
+  e.write_i16(0) // no error
+  e.write_i64(100L) // high watermark
+  e.write_i64(44L) // last stable offset
+  e.write_i64(-1L) // log start offset
+  e.write_compact_len(1) // aborted transactions
+  e.write_i64(500L) // producer id
+  e.write_i64(42L) // first offset
+  e.write_tag_buffer()
+  e.write_i32(-1) // preferred read replica
+  e.write_compact_len(batch.length()) // records
+  e.write_bytes(batch)
+  e.write_tag_buffer()
+  e.write_tag_buffer()
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// OffsetForLeaderEpoch v4 response body: one partition at the given
+/// epoch end offset.
+fn fake_offset_for_leader_epoch_response(end_offset : Int64) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(1) // one topic
+  e.write_compact_string("events")
+  e.write_compact_len(1) // one partition
+  e.write_i16(0) // no error
+  e.write_i32(0) // partition
+  e.write_i32(0) // leader epoch
+  e.write_i64(end_offset)
+  e.write_tag_buffer()
+  e.write_tag_buffer()
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
 /// Fetch offset of the first requested partition (same for v12-v16: the
 /// offset sits after the partition index and current leader epoch).
 fn fake_fetch_request_first_offset(rest : Bytes) -> Int64 raise {
@@ -453,6 +533,7 @@ fn fake_fetch_response(
   topic : String,
   version : Int,
   session_id : Int,
+  error_code? : Int = 0,
 ) -> Bytes {
   let batch = @moonkafka.encode_record_batch([
     {
@@ -489,7 +570,7 @@ fn fake_fetch_response(
   }
   e.write_compact_len(1) // one partition
   e.write_i32(0) // index
-  e.write_i16(0) // no error
+  e.write_i16(error_code)
   e.write_i64(100L) // high watermark
   e.write_i64(-1L) // last stable offset
   e.write_i64(-1L) // log start offset
@@ -894,6 +975,9 @@ async fn fake_serve_conn(
   committed_store? : Map[Int, Int64] = Map([]),
   offset_commit_error_rounds? : Int = 0,
   fetch_offsets? : Array[Int64] = [],
+  fetch_error_rounds? : Int = 0,
+  fetch_error_code? : Int = 0,
+  epoch_end_offset? : Int64 = 42L,
 ) -> Unit {
   // per-connection SASL state
   let mut sasl_mechanism : String? = None
@@ -949,8 +1033,15 @@ async fn fake_serve_conn(
       1 => {
         fetch_epochs.push(fake_fetch_request_session_epoch(rest))
         fetch_offsets.push(fake_fetch_request_first_offset(rest))
-        fake_fetch_response(topic, version, 7)
+        if fake_fetch_request_isolation(rest) == 1 {
+          fake_fetch_response_committed(topic, version, 7)
+        } else if fetch_offsets.length() <= fetch_error_rounds {
+          fake_fetch_response(topic, version, 7, error_code=fetch_error_code)
+        } else {
+          fake_fetch_response(topic, version, 7)
+        }
       }
+      23 => fake_offset_for_leader_epoch_response(epoch_end_offset)
       3 => {
         metadata_requests.push(1)
         fake_metadata_response(topic, broker_port, version)
@@ -1142,6 +1233,9 @@ async fn fake_broker(
   committed_store? : Map[Int, Int64] = Map([]),
   offset_commit_error_rounds? : Int = 0,
   fetch_offsets? : Array[Int64] = [],
+  fetch_error_rounds? : Int = 0,
+  fetch_error_code? : Int = 0,
+  epoch_end_offset? : Int64 = 42L,
 ) -> Unit {
   for ;; {
     let (tcp, _) = server.accept()
@@ -1188,6 +1282,9 @@ async fn fake_broker(
         committed_store~,
         offset_commit_error_rounds~,
         fetch_offsets~,
+        fetch_error_rounds~,
+        fetch_error_code~,
+        epoch_end_offset~,
       )
     }
   }
@@ -2084,6 +2181,150 @@ async test "autocommit commits on the interval and on close" {
     }
     assert_eq(offset_commit_requests.length(), 2)
     assert_eq(committed_store.get(0), Some(44L))
+    server.close()
+  }
+}
+
+///|
+async test "pause skips partitions until resume" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let fetch_offsets : Array[Int64] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, fetch_offsets~)
+    }
+    let consumer = @moonkafka.Consumer::connect_with_config(
+      group=root,
+      @moonkafka.ConsumerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        request_timeout_ms=10000,
+      ),
+    )
+    defer consumer.close()
+    // Paused partitions are not fetched at all.
+    consumer.pause()
+    assert_eq(consumer.paused(), [0])
+    let empty = consumer.poll(max_wait_ms=50)
+    assert_eq(empty.length(), 0)
+    assert_eq(fetch_offsets.length(), 0)
+    // Resume puts the partition back on the wire at its kept position.
+    consumer.resume()
+    assert_eq(consumer.paused().length(), 0)
+    let records = consumer.poll(max_wait_ms=50)
+    assert_eq(records.length(), 2)
+    assert_eq(fetch_offsets.length(), 1)
+    server.close()
+  }
+}
+
+///|
+async test "max_poll_records caps the delivery and rewinds the position" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let fetch_offsets : Array[Int64] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, fetch_offsets~)
+    }
+    let consumer = @moonkafka.Consumer::connect_with_config(
+      group=root,
+      @moonkafka.ConsumerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        request_timeout_ms=10000,
+        max_poll_records=1,
+      ),
+    )
+    defer consumer.close()
+    // The fake's two records (42/43) arrive in one batch; the cap takes
+    // one per poll and rewinds the position to the unconsumed record.
+    let first = consumer.poll(max_wait_ms=50)
+    assert_eq(first.length(), 1)
+    assert_eq(first[0].offset, 42L)
+    let second = consumer.poll(max_wait_ms=50)
+    assert_eq(second.length(), 1)
+    assert_eq(second[0].offset, 42L)
+    // The second fetch asked for position 43, not 44: the rewind kept
+    // the capped record from being skipped.
+    assert_eq(fetch_offsets, [42L, 43L])
+    server.close()
+  }
+}
+
+///|
+async test "read_committed filters the aborted transactional batch" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted)
+    }
+    // Without the flag the records arrive untouched.
+    let plain = @moonkafka.Consumer::connect_with_config(
+      group=root,
+      @moonkafka.ConsumerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        request_timeout_ms=10000,
+      ),
+    )
+    defer plain.close()
+    assert_eq(plain.poll(max_wait_ms=50).length(), 2)
+    plain.close()
+    // With read_committed the same fetch comes back empty: the fake
+    // answers READ_COMMITTED requests with an aborted transactional
+    // batch (producer 500, aborted from offset 42).
+    let committed = @moonkafka.Consumer::connect_with_config(
+      group=root,
+      @moonkafka.ConsumerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        request_timeout_ms=10000,
+        enable_read_committed=true,
+      ),
+    )
+    defer committed.close()
+    assert_eq(committed.poll(max_wait_ms=50).length(), 0)
+    server.close()
+  }
+}
+
+///|
+async test "leader epoch errors validate the position and rewind on truncation" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let fetch_offsets : Array[Int64] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(
+        server,
+        root,
+        "events",
+        accepted,
+        fetch_offsets~,
+        fetch_error_rounds=1,
+        fetch_error_code=75, // UNKNOWN_LEADER_EPOCH
+        epoch_end_offset=30L,
+      )
+    }
+    let consumer = @moonkafka.Consumer::connect_with_config(
+      group=root,
+      @moonkafka.ConsumerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        request_timeout_ms=10000,
+      ),
+    )
+    defer consumer.close()
+    // The first fetch (position 42 after the earliest reset) answers
+    // UNKNOWN_LEADER_EPOCH; the epoch check learns the epoch ends at 30
+    // and rewinds, so the retry fetches from 30.
+    let _ = consumer.poll(max_wait_ms=50)
+    let records = consumer.poll(max_wait_ms=50)
+    assert_eq(fetch_offsets, [42L, 30L])
+    assert_eq(records.length(), 2)
     server.close()
   }
 }

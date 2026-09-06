@@ -21,6 +21,9 @@ pub const API_OFFSET_COMMIT : Int = 8
 pub const API_OFFSET_FETCH : Int = 9
 
 ///|
+pub const API_OFFSET_FOR_LEADER_EPOCH : Int = 23
+
+///|
 pub const API_LIST_OFFSETS : Int = 2
 
 ///|
@@ -86,6 +89,13 @@ pub fn driver_api_range(api_key : Int) -> ApiRange? {
       Some({ key: API_OFFSET_COMMIT, name: "OffsetCommit", min: 8, max: 10, })
     API_OFFSET_FETCH =>
       Some({ key: API_OFFSET_FETCH, name: "OffsetFetch", min: 8, max: 10, })
+    API_OFFSET_FOR_LEADER_EPOCH =>
+      Some({
+        key: API_OFFSET_FOR_LEADER_EPOCH,
+        name: "OffsetForLeaderEpoch",
+        min: 4,
+        max: 4,
+      })
     API_LIST_OFFSETS =>
       Some({ key: API_LIST_OFFSETS, name: "ListOffsets", min: 10, max: 11, })
     API_METADATA =>

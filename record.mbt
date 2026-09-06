@@ -47,6 +47,9 @@ const ATTR_CONTROL : Int = 0x20
 /// byte stream ended mid-batch (max_bytes split).
 pub(all) struct DecodedBatch {
   records : Array[Record]
+  /// Absolute offset of the batch's last record (base + lastOffsetDelta);
+  /// the fetcher advances read positions past whole batches with it.
+  last_offset : Int64
   producer_id : Int64
   producer_epoch : Int
   base_sequence : Int
@@ -186,6 +189,7 @@ fn decode_one_batch(
   if magic != 2 {
     return { // not a v2 batch: skip like the old formats' bytes
       records: [],
+      last_offset: -1L,
       producer_id: -1L,
       producer_epoch: -1,
       base_sequence: -1,
@@ -205,7 +209,7 @@ fn decode_one_batch(
   let base_offset = header.read_i64()
   header.skip(4 + 4 + 1 + 4) // batchLength, leaderEpoch, magic, crc
   let attributes = header.read_i16()
-  header.skip(4) // lastOffsetDelta
+  let last_offset_delta = header.read_i32()
   let base_timestamp = header.read_i64()
   let max_timestamp = header.read_i64()
   let producer_id = header.read_i64()
@@ -227,6 +231,7 @@ fn decode_one_batch(
       None =>
         return {
           records,
+          last_offset: base_offset + last_offset_delta.to_int64(),
           producer_id,
           producer_epoch,
           base_sequence,
@@ -257,6 +262,7 @@ fn decode_one_batch(
   }
   {
     records,
+    last_offset: base_offset + last_offset_delta.to_int64(),
     producer_id,
     producer_epoch,
     base_sequence,
@@ -340,6 +346,9 @@ pub struct RecordBatchBuilder {
   mut producer_id : Int64
   mut producer_epoch : Int
   mut base_sequence : Int
+  /// Marks the batch transactional (attributes bit 4); read_committed
+  /// consumers filter it against the aborted-transactions list.
+  mut transactional : Bool
 } derive(@debug.Debug)
 
 ///|
@@ -354,6 +363,7 @@ pub fn RecordBatchBuilder::new(base_offset? : Int64 = 0L) -> RecordBatchBuilder 
     producer_id: -1L,
     producer_epoch: -1,
     base_sequence: -1,
+    transactional: false,
   }
 }
 
@@ -370,6 +380,12 @@ pub fn RecordBatchBuilder::set_idempotence(
   self.producer_id = producer_id
   self.producer_epoch = producer_epoch
   self.base_sequence = base_sequence
+}
+
+///|
+/// Mark the batch transactional (attributes bit 4).
+pub fn RecordBatchBuilder::set_transactional(self : RecordBatchBuilder) -> Unit {
+  self.transactional = true
 }
 
 ///|
@@ -486,7 +502,7 @@ pub fn RecordBatchBuilder::to_bytes(self : RecordBatchBuilder) -> Bytes {
   batch.write_i32(-1) // partitionLeaderEpoch: unknown to the producer
   batch.write_i8(2) // magic
   batch.write_i32(0) // crc: patched below
-  batch.write_i16(0) // attributes: no compression, create-time
+  batch.write_i16(if self.transactional { ATTR_TRANSACTIONAL } else { 0 })
   batch.write_i32(count - 1) // lastOffsetDelta (-1 when empty)
   batch.write_i64(base_timestamp)
   batch.write_i64(max_timestamp)
