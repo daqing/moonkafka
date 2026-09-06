@@ -185,6 +185,7 @@ pub struct BrokerConnection {
   mut closed : Bool
   in_flight : @semaphore.Semaphore
   mut throttled_until_ms : Int64
+  mut throttle_total_ms : Int64
   mut versions : BrokerVersions?
 }
 pub fn BrokerConnection::api_version(Self, Int, want? : Int?) -> Int raise
@@ -202,6 +203,7 @@ pub async fn BrokerConnection::produce(Self, String, topic_id? : Uuid, partition
 pub async fn BrokerConnection::request(Self, Int, Int, Bytes, timeout_ms? : Int) -> @buf.Decoder
 pub async fn BrokerConnection::request_raw(Self, Int, Int, Bytes, timeout_ms? : Int, flexible? : Bool) -> @buf.Decoder
 pub async fn BrokerConnection::send_only(Self, Int, Int, Bytes) -> Unit
+pub fn BrokerConnection::throttle_total_ms(Self) -> Int64
 
 pub struct BrokerInfo {
   node_id : Int
@@ -251,6 +253,7 @@ pub async fn ClusterClient::refresh_if_stale(Self) -> Unit
 pub async fn ClusterClient::refresh_metadata(Self, Array[String]?) -> Unit
 pub fn ClusterClient::topic(Self, String) -> TopicMetadata?
 pub fn ClusterClient::topic_name(Self, Uuid) -> String?
+pub fn ClusterClient::total_throttle_ms(Self) -> Int64
 
 pub struct CommonConfig {
   bootstrap_servers : Array[String]
@@ -444,6 +447,7 @@ pub struct Producer {
 pub fn Producer::close(Self) -> Unit
 pub async fn Producer::connect(group~ : @async.TaskGroup[Unit], host~ : String, port~ : Int, topic~ : String, acks? : Int, timeout_ms? : Int) -> Self
 pub async fn Producer::connect_with_config(group~ : @async.TaskGroup[Unit], ProducerConfig) -> Self
+pub async fn Producer::metrics(Self) -> ProducerMetrics
 pub async fn Producer::send(Self, key? : Bytes, value? : Bytes, timestamp? : Int64, partition? : Int, headers? : Array[(Bytes, Bytes)]) -> Int64
 pub async fn Producer::send_all(Self, Array[SendRecord]) -> Array[SendHandle]
 pub async fn Producer::send_handle(Self, key? : Bytes, value? : Bytes, timestamp? : Int64, partition? : Int, headers? : Array[(Bytes, Bytes)]) -> SendHandle
@@ -460,6 +464,17 @@ pub struct ProducerConfig {
   delivery_timeout_ms : Int
 } derive(@debug.Debug)
 pub fn ProducerConfig::new(Array[String], String, acks? : Int, request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?, tls? : TlsClientOptions?, partitioner? : Partitioner, batch_size? : Int, linger_ms? : Int, buffer_memory? : Int, metadata_max_age_ms? : Int, max_in_flight? : Int, delivery_timeout_ms? : Int) -> Self raise
+
+pub struct ProducerMetrics {
+  records_queued : Int
+  bytes_queued : Int
+  batches_in_flight : Int
+  records_sent : Int
+  records_failed : Int
+  batches_sent : Int
+  batches_failed : Int
+  throttle_time_ms : Int64
+} derive(@debug.Debug)
 
 pub(all) struct Record {
   offset : Int64

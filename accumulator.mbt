@@ -57,6 +57,13 @@ priv struct RecordAccumulator {
   /// Sum of queued batches' size estimates, capped by buffer_memory.
   mut pool_bytes : Int
   mut next_id : Int
+  /// Batches popped for sending and not yet resolved.
+  mut in_flight : Int
+  /// Delivery counters, maintained by resolve_locked.
+  mut records_sent : Int
+  mut records_failed : Int
+  mut batches_sent : Int
+  mut batches_failed : Int
 }
 
 ///|
@@ -73,6 +80,11 @@ fn RecordAccumulator::new(
     batches: Map([]),
     pool_bytes: 0,
     next_id: 0,
+    in_flight: 0,
+    records_sent: 0,
+    records_failed: 0,
+    batches_sent: 0,
+    batches_failed: 0,
   }
 }
 
@@ -215,6 +227,7 @@ async fn RecordAccumulator::drain_ready(
     if batch.closed || now_ms >= batch.ready_at(self.linger_ms) {
       batch.closed = true
       ignore(queue.remove(0))
+      self.in_flight += 1
       out.push(batch)
     }
   }
@@ -255,9 +268,49 @@ fn RecordAccumulator::resolve_locked(
 ) -> Unit {
   batch.result = Some(result)
   self.pool_bytes -= batch.size_estimate
+  self.in_flight -= 1
+  match result {
+    BatchOk(_) => {
+      self.records_sent += batch.builder.count()
+      self.batches_sent += 1
+    }
+    BatchError(_) => {
+      self.records_failed += batch.builder.count()
+      self.batches_failed += 1
+    }
+  }
   // Waiters never re-register once the result is set.
   for waiter in batch.waiters {
     waiter.release()
+  }
+}
+
+///|
+/// Snapshot the counters. `throttle_time_ms` comes from the cluster
+/// client's connections and is passed in.
+async fn RecordAccumulator::metrics(
+  self : RecordAccumulator,
+  throttle_time_ms : Int64,
+) -> ProducerMetrics {
+  self.lock.acquire()
+  defer self.lock.release()
+  let mut queued = 0
+  let mut bytes = 0
+  for _, queue in self.batches {
+    for batch in queue {
+      queued += batch.builder.count()
+      bytes += batch.size_estimate
+    }
+  }
+  {
+    records_queued: queued,
+    bytes_queued: bytes,
+    batches_in_flight: self.in_flight,
+    records_sent: self.records_sent,
+    records_failed: self.records_failed,
+    batches_sent: self.batches_sent,
+    batches_failed: self.batches_failed,
+    throttle_time_ms,
   }
 }
 

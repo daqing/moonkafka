@@ -154,3 +154,35 @@ async test "ready_at adds the linger window to the creation time" {
   let (b2, _, _) = zero.append(5_000L, 0, 0L, None, Some(b"x"), [])
   assert_eq(b2.ready_at(zero.linger_ms), 5_000L)
 }
+
+///|
+async test "metrics count queued, in-flight, sent, and failed records" {
+  let a = acc(batch_size=1000, buffer_memory=10_000)
+  let m0 = a.metrics(0L)
+  assert_eq(m0.records_queued, 0)
+  assert_eq(m0.batches_in_flight, 0)
+  let _ = a.append(0L, 0, 0L, None, Some(b"x"), [])
+  let _ = a.append(1L, 0, 1L, None, Some(b"y"), [])
+  let m1 = a.metrics(0L)
+  assert_eq(m1.records_queued, 2)
+  assert_true(m1.bytes_queued > 0)
+  // drain puts the batch in flight; an ack moves the counters to sent
+  let ready = a.drain_ready(1L, 100_000)
+  assert_eq(ready.length(), 1)
+  assert_eq(a.metrics(0L).batches_in_flight, 1)
+  a.release(ready[0], BatchOk(42L))
+  let m2 = a.metrics(5L)
+  assert_eq(m2.records_queued, 0)
+  assert_eq(m2.batches_in_flight, 0)
+  assert_eq(m2.records_sent, 2)
+  assert_eq(m2.batches_sent, 1)
+  assert_eq(m2.records_failed, 0)
+  assert_eq(m2.throttle_time_ms, 5L)
+  // a failed batch counts as failed
+  let (b, _, _) = a.append(2L, 0, 2L, None, Some(b"z"), [])
+  a.release(b, BatchError("terminal"))
+  let m3 = a.metrics(0L)
+  assert_eq(m3.records_failed, 1)
+  assert_eq(m3.batches_failed, 1)
+  assert_eq(m3.records_sent, 2)
+}
