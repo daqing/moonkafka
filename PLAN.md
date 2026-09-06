@@ -204,7 +204,7 @@ P6 = share/telemetry.
 | DescribeTopicPartitions | 0 | v0 | P2/P5 | paginated, cursor-based; used by admin + regex subscription |
 | OffsetCommit | 10 | v9 (names) + v10 (topic-id) | P4 | |
 | OffsetFetch | 10 | v8 (multi-group) + v9 (member fields) + v10 | P4 | v9 carries member_id/member_epoch for 848 |
-| FindCoordinator | 6 | v4 (batched `coordinator_keys`) / v5 | P4 | |
+| FindCoordinator | 6 | v4 (batched `coordinator_keys`) | P1 (done), used in P4 | |
 | DescribeQuorum | 2 | v2 | P5 | admin: metadata quorum health |
 | UpdateFeatures | 2 | v2 | P5 | admin |
 | ApiVersions | 4 | v3 (v4 opportunistic) | done | handshake becomes negotiation in P2 |
@@ -362,10 +362,19 @@ lands on the same partitions as the Java/librdkafka clients on the same topic.
         era) deferred unless requested
       - re-authentication: honor `session_lifetime_ms` from
         SaslAuthenticate; schedule transparent re-auth.
-- [ ] **Cluster layer** (`cluster/`): `ClusterClient` owning a pool of
-      BrokerConnections keyed by node id, bootstrap logic, metadata fetch +
-      refresh scheduling (expiry + error-triggered), topic-id map,
-      coordinator lookup helper (FindCoordinator v4 batched).
+- [x] **Cluster layer**: DONE (commit pending, root scope `cluster.mbt`;
+      the plan's `cluster/` package move takes it once the sender task and
+      fetcher depend on it): `ClusterClient` owns the bootstrap set, a
+      BrokerConnection pool keyed by node id (dialed on demand with SASL +
+      ApiVersions negotiation), metadata caching with refresh scheduling
+      (expiry via `metadata_max_age_ms` + `refresh_if_stale`, error trigger
+      via `invalidate_metadata`/explicit refresh), the topic-id map
+      (KIP-516), and a batched `FindCoordinator` v4 helper (KIP-699,
+      `coordinator.mbt`, group/txn/share types). Producer and consumer
+      migrated onto it — their duplicated `meta_conn`/`brokers`/
+      `leader_conns`/recover flows deleted; the consumer additionally
+      gained TLS/SASL leader connections it never had (its pool dials now
+      go through the same SASL/TLS wiring as everyone else).
 
 **Acceptance:** against a local 4.3 broker in Docker: pipelined parallel
 requests; kill/restart broker mid-test → clients recover; TLS + SCRAM
