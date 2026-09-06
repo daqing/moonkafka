@@ -451,6 +451,10 @@ pub struct ConsumerConfig {
   /// session timeout or the coordinator evicts the member.
   heartbeat_interval_ms : Int
   session_timeout_ms : Int
+  /// The longest allowed gap between poll() calls; exceeding it makes
+  /// the consumer leave its group and surface the error (Java's
+  /// max.poll.interval.ms).
+  max_poll_interval_ms : Int
 } derive(@debug.Debug)
 
 ///|
@@ -473,6 +477,7 @@ pub fn ConsumerConfig::new(
   group_instance_id? : String? = None,
   heartbeat_interval_ms? : Int = 3000,
   session_timeout_ms? : Int = 45000,
+  max_poll_interval_ms? : Int = 300000,
 ) -> ConsumerConfig raise {
   if topic.length() == 0 {
     raise ProtocolError::ProtocolError("topic must not be empty")
@@ -497,6 +502,11 @@ pub fn ConsumerConfig::new(
   if heartbeat_interval_ms <= 0 {
     raise ProtocolError::ProtocolError(
       "heartbeat_interval_ms must be positive, got \{heartbeat_interval_ms}",
+    )
+  }
+  if max_poll_interval_ms <= 0 {
+    raise ProtocolError::ProtocolError(
+      "max_poll_interval_ms must be positive, got \{max_poll_interval_ms}",
     )
   }
   if session_timeout_ms < heartbeat_interval_ms {
@@ -537,5 +547,6 @@ pub fn ConsumerConfig::new(
     group_instance_id,
     heartbeat_interval_ms,
     session_timeout_ms,
+    max_poll_interval_ms,
   }
 }

@@ -16,6 +16,21 @@ struct PartitionState {
 }
 
 ///|
+/// True when the manual assignment list contains (topic, partition).
+fn manual_has(
+  parts : Array[(String, Int)],
+  topic : String,
+  partition : Int,
+) -> Bool {
+  for pair in parts {
+    if pair.0 == topic && pair.1 == partition {
+      return true
+    }
+  }
+  false
+}
+
+///|
 /// One leader's poll outcome, gathered concurrently and applied
 /// sequentially afterwards (cooperative scheduling keeps the swap safe).
 priv enum PollOutcome {
@@ -61,6 +76,10 @@ pub struct Consumer {
   priv mut member_spawned : Bool
   priv mut member_left : Bool
   priv mut member_error : String?
+  /// Manual assignment (assign()); None while group-driven.
+  priv mut manual_assignment : Array[(String, Int)]?
+  mut last_poll_ms : Int64
+  max_poll_interval_ms : Int
   /// Classic-protocol membership state.
   priv mut generation_id : Int
   priv mut classic_assignors : Array[Assignor]
@@ -147,6 +166,9 @@ pub async fn Consumer::connect_with_config(
     classic_assignors: [RangeAssignor],
     member_kind: Kip848Member,
     rebalance_listener: None,
+    manual_assignment: None,
+    last_poll_ms: 0L,
+    max_poll_interval_ms: config.max_poll_interval_ms,
     cluster,
     topic_id: Uuid::zero(),
     fetch_sessions: Map([]),
@@ -274,6 +296,7 @@ pub async fn Consumer::poll(
   max_wait_ms? : Int = 500,
   max_bytes? : Int = 1048576,
 ) -> Array[Record] {
+  self.enforce_poll_interval()
   // Group unpauseed partitions by leader so each leader connection gets
   // one concurrent fetch.
   let by_leader : Map[Int, Map[Int, (Int64, Int)]] = Map([])
@@ -285,6 +308,13 @@ pub async fn Consumer::poll(
       // Group membership drives the fetch set: partitions the
       // coordinator has not assigned stay untouched.
       continue
+    }
+    match self.manual_assignment {
+      Some(parts) =>
+        if !manual_has(parts, self.topic, p.info.index) {
+          continue
+        }
+      None => ()
     }
     let wanted = by_leader.get_or_init(p.info.leader, fn() { Map([]) })
     wanted[p.info.index] = (p.next_offset, p.info.leader_epoch)
@@ -389,7 +419,27 @@ pub async fn Consumer::poll(
   if refresh {
     self.recover()
   }
+  self.last_poll_ms = @async.now()
   out
+}
+
+///|
+/// max_poll_interval_ms enforcement: a gap between polls past the
+/// window means the application stopped making progress — leave the
+/// group (if any) and surface the error instead of ghosting.
+async fn Consumer::enforce_poll_interval(self : Consumer) -> Unit {
+  let last = self.last_poll_ms
+  if last > 0L {
+    let gap = @async.now() - last
+    if gap > self.max_poll_interval_ms.to_int64() {
+      if self.member_active {
+        self.unsubscribe()
+      }
+      raise ProtocolError::ProtocolError(
+        "poll gap of \{gap}ms exceeded max_poll_interval_ms (\{self.max_poll_interval_ms}); the group membership was released",
+      )
+    }
+  }
 }
 
 ///|

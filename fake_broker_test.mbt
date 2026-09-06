@@ -861,6 +861,27 @@ fn fake_offset_for_leader_epoch_response(end_offset : Int64) -> Bytes {
 }
 
 ///|
+/// Partition index of the first requested partition.
+fn fake_fetch_request_first_partition(rest : Bytes) -> Int raise {
+  let d = @buf.Decoder::new(rest)
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  ignore(d.read_compact_string()) // client id
+  d.skip_tag_buffer()
+  ignore(d.read_i32()) // max_wait_ms
+  ignore(d.read_i32()) // min_bytes
+  ignore(d.read_i32()) // max_bytes
+  ignore(d.read_i8()) // isolation level
+  ignore(d.read_i32()) // session id
+  ignore(d.read_i32()) // session epoch
+  ignore(d.read_compact_len()) // topics
+  d.skip(16) // topic id
+  ignore(d.read_compact_len()) // partitions
+  d.read_i32() // partition index
+}
+
+///|
 /// Fetch offset of the first requested partition (same for v12-v16: the
 /// offset sits after the partition index and current leader epoch).
 fn fake_fetch_request_first_offset(rest : Bytes) -> Int64 raise {
@@ -893,6 +914,7 @@ fn fake_fetch_response(
   version : Int,
   session_id : Int,
   error_code? : Int = 0,
+  partition_index? : Int = 0,
 ) -> Bytes {
   let batch = @moonkafka.encode_record_batch([
     {
@@ -928,7 +950,7 @@ fn fake_fetch_response(
     e.write_compact_string(topic)
   }
   e.write_compact_len(1) // one partition
-  e.write_i32(0) // index
+  e.write_i32(partition_index)
   e.write_i16(error_code)
   e.write_i64(100L) // high watermark
   e.write_i64(-1L) // last stable offset
@@ -1406,9 +1428,20 @@ async fn fake_serve_conn(
         if fake_fetch_request_isolation(rest) == 1 {
           fake_fetch_response_committed(topic, version, 7)
         } else if fetch_offsets.length() <= fetch_error_rounds {
-          fake_fetch_response(topic, version, 7, error_code=fetch_error_code)
+          fake_fetch_response(
+            topic,
+            version,
+            7,
+            error_code=fetch_error_code,
+            partition_index=fake_fetch_request_first_partition(rest),
+          )
         } else {
-          fake_fetch_response(topic, version, 7)
+          fake_fetch_response(
+            topic,
+            version,
+            7,
+            partition_index=fake_fetch_request_first_partition(rest),
+          )
         }
       }
       23 => fake_offset_for_leader_epoch_response(epoch_end_offset)
@@ -3319,6 +3352,173 @@ async test "cooperative sticky revokes first and assigns in a second round" {
     assert_true(a.assignment()[0].1 != b.assignment()[0].1)
     assert_true(a.membership_error() is None)
     assert_true(b.membership_error() is None)
+    server.close()
+  }
+}
+
+///|
+async test "assign pins the fetch set and position tracks reads" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let fetch_offsets : Array[Int64] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(
+        server,
+        root,
+        "events",
+        accepted,
+        fetch_offsets~,
+        metadata_partitions=2,
+      )
+    }
+    let consumer = @moonkafka.Consumer::connect_with_config(
+      group=root,
+      @moonkafka.ConsumerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        request_timeout_ms=10000,
+      ),
+    )
+    defer consumer.close()
+    // Group-less manual assignment of one partition.
+    consumer.assign([("events", 1)])
+    let records = consumer.poll(max_wait_ms=50)
+    assert_eq(records.length(), 2)
+    // Only partition 1 went out on the wire.
+    assert_eq(fetch_offsets.length(), 1)
+    assert_eq(fetch_offsets[0], 42L)
+    assert_eq(consumer.position(1), Some(44L))
+    // Unassigning drops the restriction: the whole topic is fetched again.
+    consumer.unassign()
+    assert_eq(consumer.poll(max_wait_ms=50).length(), 2)
+    assert_eq(fetch_offsets.length(), 2)
+    server.close()
+  }
+}
+
+///|
+async test "group metadata tracks the member identity" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let coord = FakeCoordinator::new()
+    let assigned : Array[(String, Int)] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, coordinator=Some(coord))
+    }
+    let consumer = @moonkafka.Consumer::connect_with_config(
+      group=root,
+      @moonkafka.ConsumerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        request_timeout_ms=10000,
+        group_id=Some("gid-c9"),
+        enable_auto_commit=false,
+        heartbeat_interval_ms=20,
+      ),
+    )
+    defer consumer.close()
+    // Before subscribing: the group is known, membership is not.
+    let empty_metadata : @moonkafka.GroupMetadata? = consumer.group_metadata()
+    guard empty_metadata is Some(before) else {
+      abort("group_metadata must report the configured group")
+    }
+    assert_eq(before.group_id, "gid-c9")
+    assert_eq(before.member_id, "")
+    assert_eq(before.generation_id, -1)
+    consumer.subscribe_classic(["events"])
+    for _ in 0..<1000 {
+      if assigned.length() == 1 {
+        break
+      }
+      @async.sleep(5)
+    }
+    guard consumer.group_metadata() is Some(after) else {
+      abort("group_metadata must stay present after subscribing")
+    }
+    assert_eq(after.group_id, "gid-c9")
+    assert_eq(after.member_id, consumer.member_identity())
+    assert_eq(after.generation_id, 1)
+    server.close()
+  }
+}
+
+///|
+async test "poll gap past max_poll_interval leaves the group and raises" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let coord = FakeCoordinator::new()
+    let assigned : Array[(String, Int)] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, coordinator=Some(coord))
+    }
+    let consumer = @moonkafka.Consumer::connect_with_config(
+      group=root,
+      @moonkafka.ConsumerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        request_timeout_ms=10000,
+        group_id=Some("gid-c10"),
+        enable_auto_commit=false,
+        heartbeat_interval_ms=20,
+        max_poll_interval_ms=100,
+      ),
+    )
+    defer consumer.close()
+    consumer.subscribe_classic(["events"])
+    for _ in 0..<1000 {
+      if assigned.length() == 1 {
+        break
+      }
+      @async.sleep(5)
+    }
+    // A poll gap past the window releases the membership and raises:
+    // one poll anchors the interval, the long gap blows it.
+    let _ = consumer.poll(max_wait_ms=50)
+    @async.sleep(200)
+    let mut raised = false
+    try {
+      let _ = consumer.poll(max_wait_ms=50)
+    } catch {
+      @moonkafka.ProtocolError(_) => raised = true
+      e => raise e
+    }
+    assert_true(raised)
+    for _ in 0..<1000 {
+      if coord.leaves.length() == 1 {
+        break
+      }
+      @async.sleep(5)
+    }
+    assert_eq(coord.leaves.length(), 1)
+    server.close()
+  }
+}
+
+///|
+async test "records decode through the utf8 helpers" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted)
+    }
+    let consumer = @moonkafka.Consumer::connect_with_config(
+      group=root,
+      @moonkafka.ConsumerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        request_timeout_ms=10000,
+      ),
+    )
+    defer consumer.close()
+    let records = consumer.poll(max_wait_ms=50)
+    assert_eq(records.length(), 2)
+    assert_eq(records[0].value_utf8(), Some("one"))
+    assert_eq(records[1].value_utf8(), Some("two"))
+    assert_true(records[0].key_utf8() is None)
     server.close()
   }
 }
