@@ -694,10 +694,21 @@ same PID/sequence (mock broker test).
       and protocol assertions, two-member range split with rebalance on
       join, and the cooperative two-round revoke-then-assign converge
       (order-agnostic, convergence-based assertions).
-- [ ] **Consumer surface**: `subscribe(topics | regex)` vs `assign(...)`
-      split; `poll` with `max_poll_interval_ms` enforcement; position()/
-      committed(); assignment(); group_metadata(); deserializer hooks
-      (default identity `Bytes?`, optional typed helpers for utf8 etc.).
+- [x] **Consumer surface**: DONE (commit 598d46d, root scope
+      `consumer_surface.mbt`): `subscribe(topics)` / `subscribe_regex`
+      / `subscribe_classic` versus `assign(partitions)` / `unassign()`
+      are mutually exclusive paths (assign raises while a membership is
+      active; positions start from committed offsets when a group is
+      configured, else the auto-offset-reset sentinel). `poll` enforces
+      `max_poll_interval_ms`: a gap past the window gracefully leaves
+      the group (LeaveGroup / epoch -1 heartbeat) and raises instead of
+      ghosting. `position(partition)`, `committed(partitions?)` (P4.1),
+      `assignment()`, and `group_metadata()` (group id, member id,
+      generation) report state. Deserializers: records carry their
+      `Bytes?` natively (identity) with `key_utf8`/`value_utf8` typed
+      helpers; generic parameterized decoders are deferred to the
+      API-stability pass, where making the consumer generic can be
+      judged against real usage.
 - [ ] **`group_protocol` config**: `consumer` (KIP-848, default) | `classic`
       | fallback ordering; document interop caveats.
 
