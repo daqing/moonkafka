@@ -59,6 +59,10 @@ Working today:
   max_partition_fetch_bytes caps, per-partition pause/resume,
   auto-offset-reset policies, leader-epoch truncation detection, and
   read_committed filtering of aborted transactions
+- KIP-848 consumer groups (primary path): ConsumerGroupHeartbeat
+  membership with client-generated member ids, server-driven assignment
+  applied atomically around rebalance listener hooks, static membership,
+  regex subscription, graceful leave, and fencing recovery
 - Pipelined broker connections: request timeouts, in-flight cap, reconnect
   through bootstrap servers, broker throttling
 - TLS (including verified certificates via a custom CA) and SASL
@@ -66,7 +70,7 @@ Working today:
 
 Planned:
 
-- Consumer groups with the new KIP-848 consumer rebalance protocol
+- Classic consumer groups (JoinGroup/SyncGroup compat path)
 - Admin client and share groups
 
 ## Requirements
