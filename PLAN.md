@@ -665,17 +665,35 @@ same PID/sequence (mock broker test).
       on the way out; poll fetches only assigned partitions. E2E:
       join/reconcile/leave with listener hooks and epoch progression,
       fenced-epoch restart, static instance id, regex expansion.
-- [ ] **Classic member** (`consumer/group_classic.mbt`) — compat path:
-      FindCoordinator v4 → JoinGroup v9 → SyncGroup v5 → Heartbeat v4 loop;
-      protocol negotiation (subscription → assignment strategy set);
-      `ConsumerProtocolSubscription`/`Assignment` binary encoding (the
-      embedded protocol structures, hand-coded);
-      assignment strategies: RangeAssignor + RoundRobinAssignor first, then
-      **StickyAssignor** and **CooperativeStickyAssignor** (incremental
-      cooperative rebalancing: revoke-set sync protocol, `IN_PROGRESS`
-      two-round handling); static membership (`group_instance_id`);
-      LeaveGroup on close; rebalance listener integration; `require_stable`
-      offsets (`UNSTABLE_OFFSET_COMMIT` retry).
+- [x] **Classic member**: DONE (commit 3652d1c, root scope
+      `consumer_group_classic.mbt` + `classic_group.mbt` +
+      `consumer_protocol.mbt` + `assignment.mbt`): JoinGroup v9 →
+      SyncGroup v5 → Heartbeat v4 loop with LeaveGroup v5 on exit, all
+      pinned from the 4.3 schemas. Protocol negotiation: the member
+      offers its configured assignment strategies as named protocol
+      entries; the coordinator settles one and the leader computes the
+      assignment over every member's ConsumerProtocolSubscription (the
+      embedded int16-framed binary protocol, hand-coded) using fresh
+      metadata partition counts, then hands out
+      ConsumerProtocolAssignment bytes. Assignors: RangeAssignor
+      (contiguous per-topic chunks), RoundRobinAssignor (one sorted
+      circle), StickyAssignor (keep prior assignments, fill gaps
+      least-loaded-first, then balance to a minimal spread — same
+      balance/stickiness properties as Java with deterministic
+      id-ordered tie-breaking instead of its random order), and
+      CooperativeStickyAssignor running the KIP-429 two-round protocol:
+      owned partitions ride the subscription userData, the leader's
+      first round sends keep-sets (revocations), the revoking member
+      rejoins, and the second round delivers the additions. Static
+      membership (`group_instance_id`) rides every request; REBALANCE_
+      IN_PROGRESS heartbeats rejoin, UNKNOWN_MEMBER_ID /
+      ILLEGAL_GENERATION restart the join, FENCED_INSTANCE_ID is fatal;
+      LeaveGroup on close/unsubscribe; rebalance listeners fire around
+      each assignment change. E2E against a stateful mini-coordinator
+      in the fake broker: single-member join/sync/leave with generation
+      and protocol assertions, two-member range split with rebalance on
+      join, and the cooperative two-round revoke-then-assign converge
+      (order-agnostic, convergence-based assertions).
 - [ ] **Consumer surface**: `subscribe(topics | regex)` vs `assign(...)`
       split; `poll` with `max_poll_interval_ms` enforcement; position()/
       committed(); assignment(); group_metadata(); deserializer hooks
