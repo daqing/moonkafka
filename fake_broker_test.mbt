@@ -7,12 +7,14 @@
 fn fake_api_versions_response(throttle_ms : Int) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i16(0) // error_code
-  e.write_compact_len(12)
+  e.write_compact_len(14)
   let apis : Array[(Int, Int)] = [
     (0, 13),
     (1, 16),
     (2, 11),
     (3, 13),
+    (8, 10),
+    (9, 10),
     (10, 4),
     (18, 3),
     (22, 5),
@@ -420,6 +422,30 @@ fn fake_fetch_request_session_epoch(rest : Bytes) -> Int raise {
 }
 
 ///|
+/// Fetch offset of the first requested partition (same for v12-v16: the
+/// offset sits after the partition index and current leader epoch).
+fn fake_fetch_request_first_offset(rest : Bytes) -> Int64 raise {
+  let d = @buf.Decoder::new(rest)
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  ignore(d.read_compact_string()) // client id
+  d.skip_tag_buffer()
+  ignore(d.read_i32()) // max_wait_ms
+  ignore(d.read_i32()) // min_bytes
+  ignore(d.read_i32()) // max_bytes
+  ignore(d.read_i8()) // isolation level
+  ignore(d.read_i32()) // session id
+  ignore(d.read_i32()) // session epoch
+  ignore(d.read_compact_len()) // topics
+  d.skip(16) // topic id
+  ignore(d.read_compact_len()) // partitions
+  ignore(d.read_i32()) // partition index
+  ignore(d.read_i32()) // current leader epoch
+  d.read_i64() // fetch offset
+}
+
+///|
 /// A Fetch response body (any v12-v16: the shape matches) carrying two
 /// records at base_offset 42 and the given session id. The record batch's
 /// base offset is patched after encoding (it is outside the CRC).
@@ -725,6 +751,120 @@ fn fake_end_txn_response(
 }
 
 ///|
+/// Parse an OffsetCommit v10 request (topic-id addressing): (group id,
+/// generation/epoch, member id, (partition, offset) commits).
+fn fake_offset_commit_request(
+  rest : Bytes,
+) -> (String, Int, String, Array[(Int, Int64)]) raise {
+  let d = @buf.Decoder::new(rest)
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  ignore(d.read_compact_string()) // client id
+  d.skip_tag_buffer()
+  let group_id = d.read_compact_string()
+  let generation = d.read_i32()
+  let member_id = d.read_compact_string()
+  ignore(d.read_compact_nullable_string()) // group instance id
+  let commits : Array[(Int, Int64)] = []
+  let n = d.read_compact_len()
+  for _ in 0..<n {
+    d.skip(16) // topic id
+    let parts = d.read_compact_len()
+    for _ in 0..<parts {
+      let partition = d.read_i32()
+      let offset = d.read_i64()
+      ignore(d.read_i32()) // committed leader epoch
+      ignore(d.read_compact_nullable_string()) // metadata
+      d.skip_tag_buffer()
+      commits.push((partition, offset))
+    }
+    d.skip_tag_buffer()
+  }
+  (group_id, generation, member_id, commits)
+}
+
+///|
+/// OffsetCommit v10 response body: one topic entry with the given
+/// per-partition error code.
+fn fake_offset_commit_response(
+  commits : Array[(Int, Int64)],
+  error_code : Int,
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(1) // one topic
+  e.write_bytes(fake_topic_id)
+  e.write_compact_len(commits.length())
+  for entry in commits {
+    let (partition, _) = entry
+    e.write_i32(partition)
+    e.write_i16(error_code)
+    e.write_tag_buffer()
+  }
+  e.write_tag_buffer()
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse an OffsetFetch v10 request: (group id, wanted partitions).
+fn fake_offset_fetch_request(rest : Bytes) -> (String, Array[Int]) raise {
+  let d = @buf.Decoder::new(rest)
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  ignore(d.read_compact_string()) // client id
+  d.skip_tag_buffer()
+  ignore(d.read_compact_len()) // groups
+  let group_id = d.read_compact_string()
+  ignore(d.read_compact_nullable_string()) // member id
+  ignore(d.read_i32()) // member epoch
+  let partitions : Array[Int] = []
+  let n = d.read_compact_len()
+  for _ in 0..<n {
+    d.skip(16) // topic id
+    let parts = d.read_compact_len()
+    for _ in 0..<parts {
+      partitions.push(d.read_i32())
+    }
+    d.skip_tag_buffer()
+  }
+  ignore(d.read_bool()) // require stable
+  (group_id, partitions)
+}
+
+///|
+/// OffsetFetch v10 response body: the group's committed offsets from the
+/// fake's store (-1 when none).
+fn fake_offset_fetch_response(
+  group_id : String,
+  partitions : Array[Int],
+  committed : Map[Int, Int64],
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(1) // groups
+  e.write_compact_string(group_id)
+  e.write_compact_len(1) // topics
+  e.write_bytes(fake_topic_id)
+  e.write_compact_len(partitions.length())
+  for p in partitions {
+    e.write_i32(p)
+    e.write_i64(committed.get(p).unwrap_or(-1L))
+    e.write_i32(-1) // leader epoch
+    e.write_compact_nullable_string(None) // metadata
+    e.write_i16(0) // no error
+    e.write_tag_buffer()
+  }
+  e.write_tag_buffer()
+  e.write_i16(0) // group error
+  e.write_tag_buffer()
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
 /// Answer requests forever on one client connection; exits when the client
 /// goes away. Every API answers with offset 42.
 async fn fake_serve_conn(
@@ -750,6 +890,10 @@ async fn fake_serve_conn(
   end_txn_error_code? : Int = 0,
   end_txn_error_rounds? : Int = 0,
   produce_error_code? : Int = 0,
+  offset_commit_requests? : Array[(String, Int, Int64)] = [],
+  committed_store? : Map[Int, Int64] = Map([]),
+  offset_commit_error_rounds? : Int = 0,
+  fetch_offsets? : Array[Int64] = [],
 ) -> Unit {
   // per-connection SASL state
   let mut sasl_mechanism : String? = None
@@ -804,6 +948,7 @@ async fn fake_serve_conn(
       2 => fake_list_offsets_response(topic, 42L)
       1 => {
         fetch_epochs.push(fake_fetch_request_session_epoch(rest))
+        fetch_offsets.push(fake_fetch_request_first_offset(rest))
         fake_fetch_response(topic, version, 7)
       }
       3 => {
@@ -849,6 +994,28 @@ async fn fake_serve_conn(
         let (tid, group, _, _, offsets) = fake_txn_offset_commit_request(rest)
         txn_offset_requests.push((tid, group, offsets))
         fake_txn_offset_commit_response(offsets, 0)
+      }
+      8 => {
+        let (group, _, _, commits) = fake_offset_commit_request(rest)
+        for entry in commits {
+          let (partition, offset) = entry
+          offset_commit_requests.push((group, partition, offset))
+          committed_store[partition] = offset
+        }
+        // The shared array doubles as the round counter: the first
+        // `offset_commit_error_rounds` commits answer
+        // COORDINATOR_LOAD_IN_PROGRESS — retriable for the consumer.
+        let code = if offset_commit_requests.length() <=
+          offset_commit_error_rounds {
+          14
+        } else {
+          0
+        }
+        fake_offset_commit_response(commits, code)
+      }
+      9 => {
+        let (group, partitions) = fake_offset_fetch_request(rest)
+        fake_offset_fetch_response(group, partitions, committed_store)
       }
       75 =>
         // Two pages: a fresh request returns partition 0 with a cursor at
@@ -971,6 +1138,10 @@ async fn fake_broker(
   end_txn_error_code? : Int = 0,
   end_txn_error_rounds? : Int = 0,
   produce_error_code? : Int = 0,
+  offset_commit_requests? : Array[(String, Int, Int64)] = [],
+  committed_store? : Map[Int, Int64] = Map([]),
+  offset_commit_error_rounds? : Int = 0,
+  fetch_offsets? : Array[Int64] = [],
 ) -> Unit {
   for ;; {
     let (tcp, _) = server.accept()
@@ -1013,6 +1184,10 @@ async fn fake_broker(
         end_txn_error_code~,
         end_txn_error_rounds~,
         produce_error_code~,
+        offset_commit_requests~,
+        committed_store~,
+        offset_commit_error_rounds~,
+        fetch_offsets~,
       )
     }
   }
@@ -1108,6 +1283,7 @@ async test "consumer polls over an incremental fetch session" {
       fake_broker(server, root, "events", accepted, fetch_epochs~)
     }
     let consumer = @moonkafka.Consumer::connect_with_config(
+      group=root,
       @moonkafka.ConsumerConfig::new(
         ["127.0.0.1:\{server.addr.port()}"],
         "events",
@@ -1700,6 +1876,214 @@ async test "transactional offset commits register the group and land at it" {
     assert_eq(txn_offset_requests, [("tid-5", "gid-1", [(0, 42L)])])
     producer.commit_transaction()
     assert_eq(end_txn_requests, [("tid-5", 500L, 0, true)])
+    server.close()
+  }
+}
+
+///|
+async test "consumer commits positions and fetches them back" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let offset_commit_requests : Array[(String, Int, Int64)] = []
+    let committed_store : Map[Int, Int64] = Map([])
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(
+        server,
+        root,
+        "events",
+        accepted,
+        offset_commit_requests~,
+        committed_store~,
+      )
+    }
+    let consumer = @moonkafka.Consumer::connect_with_config(
+      group=root,
+      @moonkafka.ConsumerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        request_timeout_ms=10000,
+        group_id=Some("gid-1"),
+        enable_auto_commit=false,
+      ),
+    )
+    defer consumer.close()
+    // Nothing committed yet: the fetch reports -1 per partition.
+    assert_eq(consumer.committed().get(0), Some(-1L))
+    // Poll resolves records at 42/43; the position lands on 44 and the
+    // explicit commit sends exactly that.
+    let records = consumer.poll(max_wait_ms=50)
+    assert_eq(records.length(), 2)
+    consumer.commit()
+    assert_eq(offset_commit_requests, [("gid-1", 0, 44L)])
+    assert_eq(consumer.committed_cached(0), Some(44L))
+    // The coordinator now answers 44 for partition 0.
+    assert_eq(consumer.committed().get(0), Some(44L))
+    // An explicit offset map overrides the positions.
+    let manual : Map[Int, Int64] = Map([(0, 30L)])
+    consumer.commit(offsets=manual)
+    assert_eq(offset_commit_requests.length(), 2)
+    assert_eq(offset_commit_requests[1], ("gid-1", 0, 30L))
+    server.close()
+  }
+}
+
+///|
+async test "commit retries coordinator load and async commit calls back" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let offset_commit_requests : Array[(String, Int, Int64)] = []
+    let committed_store : Map[Int, Int64] = Map([])
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(
+        server,
+        root,
+        "events",
+        accepted,
+        offset_commit_requests~,
+        committed_store~,
+        offset_commit_error_rounds=1,
+      )
+    }
+    let consumer = @moonkafka.Consumer::connect_with_config(
+      group=root,
+      @moonkafka.ConsumerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        request_timeout_ms=10000,
+        group_id=Some("gid-2"),
+        enable_auto_commit=false,
+      ),
+    )
+    defer consumer.close()
+    let _ = consumer.poll(max_wait_ms=50)
+    // The first commit answers COORDINATOR_LOAD_IN_PROGRESS; the retry
+    // succeeds without surfacing an error.
+    consumer.commit()
+    assert_eq(offset_commit_requests.length(), 2)
+    assert_eq(committed_store.get(0), Some(44L))
+    // The async commit runs in the consumer's task group and reports
+    // success through the callback.
+    let outcomes : Array[String?] = []
+    consumer.commit_async(on_complete=fn(msg) { outcomes.push(msg) })
+    for _ in 0..<1000 {
+      if outcomes.length() == 1 {
+        break
+      }
+      @async.sleep(5)
+    }
+    assert_eq(outcomes, [None])
+    server.close()
+  }
+}
+
+///|
+async test "seeks move the fetch position via offsets and sentinels" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let fetch_offsets : Array[Int64] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, fetch_offsets~)
+    }
+    let consumer = @moonkafka.Consumer::connect_with_config(
+      group=root,
+      @moonkafka.ConsumerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        request_timeout_ms=10000,
+      ),
+    )
+    defer consumer.close()
+    // Explicit seek: the next fetch asks for that offset.
+    consumer.seek(0, 100L)
+    let _ = consumer.poll(max_wait_ms=50)
+    assert_eq(fetch_offsets.length(), 1)
+    assert_eq(fetch_offsets[0], 100L)
+    // Seek by timestamp resolves through ListOffsets (fake: 42).
+    consumer.seek_by_timestamp(0, 1700000000000L)
+    let _ = consumer.poll(max_wait_ms=50)
+    assert_eq(fetch_offsets[1], 42L)
+    // A different explicit seek moves again (the incremental fetch
+    // session only re-sends partitions whose position changed).
+    consumer.seek(0, 1234L)
+    let _ = consumer.poll(max_wait_ms=50)
+    assert_eq(fetch_offsets.length(), 3)
+    assert_eq(fetch_offsets[2], 1234L)
+    // Seek to beginning resolves through ListOffsets to 42, which
+    // differs from the last-sent 1234, so the fetch goes out.
+    consumer.seek_to_beginning()
+    let records = consumer.poll(max_wait_ms=50)
+    assert_eq(fetch_offsets.length(), 4)
+    assert_eq(fetch_offsets[3], 42L)
+    assert_eq(records.length(), 2)
+    // Seek to end resolves to the same 42 the session already heard, so
+    // the next poll sends nothing (a broken seek would re-send and grow
+    // the log). The empty result proves the position moved to 42.
+    consumer.seek_to_end()
+    let empty = consumer.poll(max_wait_ms=50)
+    assert_eq(fetch_offsets.length(), 4)
+    assert_eq(empty.length(), 0)
+    // Unknown partitions are rejected before touching the wire.
+    try {
+      consumer.seek(3, 0L)
+      abort("seek to unknown partition must fail")
+    } catch {
+      _ => ()
+    }
+    server.close()
+  }
+}
+
+///|
+async test "autocommit commits on the interval and on close" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let offset_commit_requests : Array[(String, Int, Int64)] = []
+    let committed_store : Map[Int, Int64] = Map([])
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(
+        server,
+        root,
+        "events",
+        accepted,
+        offset_commit_requests~,
+        committed_store~,
+      )
+    }
+    let consumer = @moonkafka.Consumer::connect_with_config(
+      group=root,
+      @moonkafka.ConsumerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        request_timeout_ms=10000,
+        group_id=Some("gid-3"),
+        enable_auto_commit=true,
+        auto_commit_interval_ms=60,
+      ),
+    )
+    // Poll gives the loop something to commit.
+    let _ = consumer.poll(max_wait_ms=50)
+    // Wait out one interval: a background commit lands on its own.
+    for _ in 0..<1000 {
+      if offset_commit_requests.length() >= 1 {
+        break
+      }
+      @async.sleep(5)
+    }
+    assert_eq(offset_commit_requests.length(), 1)
+    // Close triggers the final commit before the cluster is torn down.
+    consumer.close()
+    for _ in 0..<1000 {
+      if offset_commit_requests.length() >= 2 {
+        break
+      }
+      @async.sleep(5)
+    }
+    assert_eq(offset_commit_requests.length(), 2)
+    assert_eq(committed_store.get(0), Some(44L))
     server.close()
   }
 }

@@ -32,6 +32,10 @@ pub const API_LIST_OFFSETS : Int = 2
 
 pub const API_METADATA : Int = 3
 
+pub const API_OFFSET_COMMIT : Int = 8
+
+pub const API_OFFSET_FETCH : Int = 9
+
 pub const API_PRODUCE : Int = 0
 
 pub const API_SASL_AUTHENTICATE : Int = 36
@@ -84,6 +88,10 @@ pub fn decode_list_offsets_response(@buf.Decoder) -> (Map[Int, Int64], Int) rais
 
 pub fn decode_metadata_response(Int, @buf.Decoder) -> (Metadata, Int) raise
 
+pub fn decode_offset_commit_response(Int, @buf.Decoder) -> (Array[OffsetCommitPartitionResult], Int) raise
+
+pub fn decode_offset_fetch_response(Int, @buf.Decoder) -> (Array[OffsetFetchGroupResult], Int) raise
+
 pub fn decode_produce_response(Int, @buf.Decoder) -> (Array[ProducePartitionResult], Int) raise
 
 pub fn decode_record_batches(Bytes) -> Array[Record] raise @buf.DecodeError
@@ -119,6 +127,10 @@ pub fn encode_init_producer_id_request(String?, Int, Int64, Int) -> Bytes
 pub fn encode_list_offsets_request(Int, String, Array[PartitionInfo], Int64, timeout_ms? : Int) -> Bytes raise
 
 pub fn encode_metadata_request(Array[String]?) -> Bytes
+
+pub fn encode_offset_commit_request(Int, String, Int, String, String?, Array[CommitTopic]) -> Bytes raise
+
+pub fn encode_offset_fetch_request(Int, String, String, Int, Array[FetchOffsetTopic], require_stable? : Bool) -> Bytes raise
 
 pub fn encode_produce_request(Int, String, Uuid, Array[(Int, Bytes)], transactional_id? : String?, acks~ : Int, timeout_ms~ : Int) -> Bytes raise
 
@@ -233,6 +245,8 @@ pub async fn BrokerConnection::init_producer_id(Self, transactional_id? : String
 pub async fn BrokerConnection::list_offsets(Self, String, Array[PartitionInfo], Int64, timeout_ms? : Int) -> Map[Int, Int64]
 pub async fn BrokerConnection::negotiate_api_versions(Self, timeout_ms? : Int) -> Unit
 pub fn BrokerConnection::note_throttle(Self, Int) -> Unit
+pub async fn BrokerConnection::offset_commit(Self, String, Int, String, group_instance_id? : String?, topics~ : Array[CommitTopic], timeout_ms? : Int) -> Array[OffsetCommitPartitionResult]
+pub async fn BrokerConnection::offset_fetch(Self, String, member_id? : String, member_epoch? : Int, topics~ : Array[FetchOffsetTopic], require_stable? : Bool, timeout_ms? : Int) -> Array[OffsetFetchGroupResult]
 pub async fn BrokerConnection::produce(Self, String, topic_id? : Uuid, transactional_id? : String?, partitions~ : Array[(Int, Bytes)], acks~ : Int, timeout_ms~ : Int) -> Array[ProducePartitionResult]
 pub async fn BrokerConnection::request(Self, Int, Int, Bytes, timeout_ms? : Int) -> @buf.Decoder
 pub async fn BrokerConnection::request_raw(Self, Int, Int, Bytes, timeout_ms? : Int, flexible? : Bool) -> @buf.Decoder
@@ -290,6 +304,20 @@ pub fn ClusterClient::topic(Self, String) -> TopicMetadata?
 pub fn ClusterClient::topic_name(Self, Uuid) -> String?
 pub fn ClusterClient::total_throttle_ms(Self) -> Int64
 
+pub(all) struct CommitTopic {
+  name : String
+  topic_id : Uuid
+  partitions : Array[(Int, Int64, Int)]
+} derive(@debug.Debug)
+
+pub(all) struct CommittedOffset {
+  topic : String
+  partition : Int
+  offset : Int64
+  leader_epoch : Int
+  error_code : Int
+} derive(@debug.Debug)
+
 pub struct CommonConfig {
   bootstrap_servers : Array[String]
   client_id : String
@@ -311,6 +339,12 @@ pub struct Consumer {
   topic : String
   start_from : StartFrom
   request_timeout_ms : Int
+  retries : Int
+  retry_backoff_ms : Int
+  retry_backoff_max_ms : Int
+  group : @async.TaskGroup[Unit]
+  enable_auto_commit : Bool
+  auto_commit_interval_ms : Int
   mut topic_id : Uuid
   fetch_sessions : Map[Int, FetchSession]
   partitions : Array[PartitionState]
@@ -318,16 +352,27 @@ pub struct Consumer {
   // private fields
 }
 pub fn Consumer::close(Self) -> Unit
-pub async fn Consumer::connect(host~ : String, port~ : Int, topic~ : String, start_from? : StartFrom) -> Self
-pub async fn Consumer::connect_with_config(ConsumerConfig) -> Self
+pub async fn Consumer::commit(Self, offsets? : Map[Int, Int64]) -> Unit
+pub fn Consumer::commit_async(Self, offsets? : Map[Int, Int64], on_complete? : (String?) -> Unit) -> Unit raise
+pub async fn Consumer::committed(Self, partitions? : Array[Int]?) -> Map[Int, Int64]
+pub fn Consumer::committed_cached(Self, Int) -> Int64?
+pub async fn Consumer::connect(group~ : @async.TaskGroup[Unit], host~ : String, port~ : Int, topic~ : String, start_from? : StartFrom) -> Self
+pub async fn Consumer::connect_with_config(group~ : @async.TaskGroup[Unit], ConsumerConfig) -> Self
 pub async fn Consumer::poll(Self, max_wait_ms? : Int, max_bytes? : Int) -> Array[Record]
+pub fn Consumer::seek(Self, Int, Int64) -> Unit raise
+pub async fn Consumer::seek_by_timestamp(Self, Int, Int64) -> Unit
+pub async fn Consumer::seek_to_beginning(Self, partitions? : Array[Int]?) -> Unit
+pub async fn Consumer::seek_to_end(Self, partitions? : Array[Int]?) -> Unit
 
 pub struct ConsumerConfig {
   common : CommonConfig
   topic : String
   start_from : StartFrom
+  group_id : String?
+  enable_auto_commit : Bool
+  auto_commit_interval_ms : Int
 } derive(@debug.Debug)
-pub fn ConsumerConfig::new(Array[String], String, start_from? : StartFrom, request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?, tls? : TlsClientOptions?, metadata_max_age_ms? : Int) -> Self raise
+pub fn ConsumerConfig::new(Array[String], String, start_from? : StartFrom, request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?, tls? : TlsClientOptions?, metadata_max_age_ms? : Int, group_id? : String?, enable_auto_commit? : Bool, auto_commit_interval_ms? : Int) -> Self raise
 
 pub struct CoordinatorInfo {
   key : String
@@ -370,6 +415,12 @@ pub struct EndTxnResult {
   error_code : Int
   producer_id : Int64
   producer_epoch : Int
+} derive(@debug.Debug)
+
+pub(all) struct FetchOffsetTopic {
+  name : String
+  topic_id : Uuid
+  partitions : Array[Int]
 } derive(@debug.Debug)
 
 pub(all) struct FetchPartitionReq {
@@ -447,6 +498,17 @@ pub struct Metadata {
   brokers : Map[Int, BrokerInfo]
   topics : Array[TopicMetadata]
 }
+
+pub struct OffsetCommitPartitionResult {
+  partition : Int
+  error_code : Int
+} derive(@debug.Debug)
+
+pub struct OffsetFetchGroupResult {
+  group_id : String
+  error_code : Int
+  partitions : Array[CommittedOffset]
+} derive(@debug.Debug)
 
 pub struct PartitionInfo {
   index : Int
