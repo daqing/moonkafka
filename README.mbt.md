@@ -28,7 +28,10 @@ Working today:
   whole-batch decompression for gzip, snappy, lz4, and zstd
 - Data-plane APIs: Produce v12/v13 (topic-id addressing, per-record errors),
   Fetch v12-v16 with incremental fetch sessions (KIP-227), Metadata v12/v13,
-  DescribeTopicPartitions v0 (paginated), ListOffsets v10/v11
+  DescribeTopicPartitions v0 (paginated), ListOffsets v10/v11,
+  FindCoordinator v4 (batched)
+- Cluster layer: shared connection pool keyed by node id, metadata caching
+  with expiry/error-triggered refresh, topic-id map, coordinator lookups
 - Simple producer: per-leader connections, partitioner strategies (Kafka-
   compatible murmur2 key-partitioning; sticky batching or round-robin for
   keyless messages; per-send manual partition override), record batching
