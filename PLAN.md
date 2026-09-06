@@ -594,12 +594,31 @@ same PID/sequence (mock broker test).
 
 ### Phase 4 — Full consumer
 
-- [ ] **Offset management** (`consumer/offsets.mbt`): committed-offset
-      cache; `commit` (sync + async) at OffsetCommit v9/v10 with
-      `COORDINATOR_LOAD_IN_PROGRESS`/`REBALANCE_IN_PROGRESS` retry semantics;
-      `committed()` fetch (OffsetFetch v8/v9/v10); seek/seek_to_beginning/
-      seek_to_end/seek_by_timestamp (ListOffsets); autocommit background
-      task (interval config, commit-on-close, commit-on-revoke).
+- [x] **Offset management**: DONE (commit 3604bf9, root scope
+      `offset_commit.mbt` + `consumer_offsets.mbt`; folds into the
+      `consumer/` split): OffsetCommit v8-v10 and OffsetFetch v8-v10
+      codecs pinned from the 4.3 schemas (v9 carries the KIP-848 member
+      identity, v10 addresses topics by id; error codes travel as values
+      for the manager to classify). The consumer gained a group-aware
+      config (`group_id`, `enable_auto_commit`,
+      `auto_commit_interval_ms`; auto-commit without a group is inert),
+      a committed-offset cache, `commit(offsets?)` — positions or
+      explicit — retrying COORDINATOR_LOAD_IN_PROGRESS /
+      COORDINATOR_NOT_AVAILABLE / NOT_COORDINATOR /
+      REBALANCE_IN_PROGRESS with backoff (the coordinator node caches
+      until NOT_COORDINATOR), `commit_async(on_complete)` spawning into
+      the consumer's task group, and `committed(partitions?)` refreshing
+      the cache from the coordinator. Seeks: `seek` (validated against
+      the assignment), `seek_to_beginning`/`seek_to_end`/`
+      seek_by_timestamp` over ListOffsets. Autocommit is a background
+      loop in the consumer's task group (connect now takes `group~`,
+      structured concurrency like the producer): commits every interval
+      at SENDER_TICK granularity and once more on close, then tears the
+      cluster down before the group joins it. Commit-on-revoke arrives
+      with the rebalance listeners (group membership below). E2E:
+      commit/read-back round-trip through the fake coordinator store,
+      load-retry, async callback, session-aware seek sequencing,
+      autocommit interval + close.
 - [ ] **Fetcher**: per-leader pipelined Fetch with sessions (P2); position
       validation (`OffsetOutOfRange` → auto-reset policy earliest/latest/
       none); leader-epoch truncation detection via OffsetForLeaderEpoch v4

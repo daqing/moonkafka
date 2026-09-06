@@ -52,7 +52,9 @@ Working today:
   coordinator retry/refind, fencing detection, and abort-on-error commit
   policy
 - Simple consumer: incremental fetch sessions with eviction recovery,
-  offset resolution by sentinel or timestamp
+  offset resolution by sentinel or timestamp, the seek family
+  (explicit/timestamp/beginning/end), committed-offset tracking with
+  sync/async commit and autocommit (interval + commit-on-close)
 - Pipelined broker connections: request timeouts, in-flight cap, reconnect
   through bootstrap servers, broker throttling
 - TLS (including verified certificates via a custom CA) and SASL
