@@ -29,8 +29,9 @@ Working today:
 - Data-plane APIs: Produce v12/v13 (topic-id addressing, per-record errors),
   Fetch v12-v16 with incremental fetch sessions (KIP-227), Metadata v12/v13,
   DescribeTopicPartitions v0 (paginated), ListOffsets v10/v11
-- Simple producer: per-leader connections, Kafka-compatible murmur2
-  key-partitioning (round-robin for keyless messages), metadata refresh on
+- Simple producer: per-leader connections, partitioner strategies (Kafka-
+  compatible murmur2 key-partitioning; sticky batching or round-robin for
+  keyless messages; per-send manual partition override), metadata refresh on
   leadership changes, REBOOTSTRAP_REQUIRED recovery
 - Simple consumer: incremental fetch sessions with eviction recovery,
   offset resolution by sentinel or timestamp
