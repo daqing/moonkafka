@@ -516,9 +516,6 @@ compression codec; `moon coverage analyze` shows codec branches covered.
       Sticky boundaries moved from per-pick to batch-close. E2E: two
       concurrent sends coalesce into one Produce request and take offsets
       base+0/base+1.
-- [ ] **Batching accumulator** (`producer/accumulator.mbt`): per-partition
-      batch deque; `linger_ms`, `batch_size`, `buffer_memory` accounting with
-      blocking/`BufferExhausted` error; append API the public `send` uses.
 - [x] **Sender task**: DONE (this commit, root scope `sender.mbt`; joins
       the `producer/` split with the accumulator): a per-producer drain
       loop spawned into the caller's task group (`connect`/`connect_with_config`
@@ -543,23 +540,50 @@ compression codec; `moon coverage analyze` shows codec branches covered.
       the sender ticks every 5ms instead of waking on first append, and
       terminal dial errors (SASL) retry until delivery timeout instead of
       failing fast.
-- [ ] **Public API**: `send` returns a cancelable future-like handle
-      (`SendHandle` with `await() -> Int64 raise`), plus a batched
-      `send_all`; callbacks optional via async closure.
-- [ ] **Idempotence** (`enable_idempotence`, default on when acks=all):
-      InitProducerId v5; per-partition queues enforce sequence order;
-      `DUPLICATE_SEQUENCE_NUMBER`/`OUT_OF_ORDER_SEQUENCE_NUMBER`/
-      `UNKNOWN_PRODUCER_ID` handling incl. epoch bump on
-      `UNKNOWN_PRODUCER_ID` with the Java client's reset rules; with
-      idempotence on, `max_in_flight ≤ 5` preserves ordering.
-- [ ] **Transactions**: `TransactionalProducer` (transactional_id config):
-      init-with-coordinator, `begin_transaction`, partitions-added tracking,
-      AddPartitionsToTxn, `send_offsets_to_transaction` (AddOffsetsToTxn +
-      TxnOffsetCommit), `commit`/`abort` (EndTxn), coordinator failover
-      (`COORDINATOR_LOAD_IN_PROGRESS` retry, epoch fencing), `abort`-on-error
-      policy; `transaction_timeout_ms`.
-- [ ] **Producer metrics/counters**: queue depth, in-flight, records sent/
-      failed, throttle time (simple counters struct, read on demand).
+- [x] **Public API**: DONE (commit 140051e): `send` is the await-everything
+      path over the new `send_handle`, which appends once and returns a
+      `SendHandle` (`await() -> Int64 raise` fast-pathing cancellation,
+      per-waiter completion semaphores so any number of coalesced senders
+      resolve; `cancel()` stops the wait without retracting the records).
+      `send_all` appends a batch of `SendRecord`s and returns one handle
+      per record; `on_complete` runs an async callback through the
+      producer's task group with `Sent(offset)`/`Failed(reason)`.
+- [x] **Idempotence** (`enable_idempotence`, default on when acks=all):
+      DONE (commit 1948abf): InitProducerId v5 pinned from the 4.3 schema
+      (fresh identity at connect for plain idempotent producers; epoch
+      bump reuses it with pid/epoch set); batches carry pid/epoch and a
+      per-partition sequence base stamped at append (every record consumes
+      one sequence, rewind on terminal failure); `UNKNOWN_PRODUCER_ID`
+      triggers the Java client's reset rules — bump the epoch, restart all
+      sequences from zero, re-stamp in-flight batches, retry. Config
+      validation: idempotence requires acks=-1 and `max_in_flight <= 5` to
+      preserve ordering.
+- [x] **Transactions**: DONE (commit 286ff08): `transactional_id` config
+      (idempotence required, so acks must be -1; `transaction_timeout_ms`
+      registered at connect) turns the Producer transactional — init runs
+      FindCoordinator(Transaction) + InitProducerId at the coordinator with
+      retries while it loads. `begin_transaction`/`commit_transaction`/
+      `abort_transaction` bracket sends; the sender registers each round's
+      new partitions with AddPartitionsToTxn v3 (client shape, KIP-890)
+      before producing, tracked in a per-transaction added-set.
+      `send_offsets_to_transaction` registers the group via AddOffsetsToTxn
+      v4 then lands offsets with TxnOffsetCommit v4 at the group
+      coordinator (v5 is wire-identical and the schema caps non-2PC
+      transactional clients at v4). EndTxn v5 commits/aborts and adopts the
+      coordinator-bumped identity (KIP-890 part 2: epoch up every
+      transaction, sequences continue). Coordinator hiccups
+      (COORDINATOR_LOAD_IN_PROGRESS/NOT_COORDINATOR/concurrent) retry with
+      backoff and re-resolve; fencing (INVALID_PRODUCER_EPOCH/
+      PRODUCER_FENCED) raises. Abort-on-error: a terminal send failure
+      inside the transaction poisons commit (it raises and requires
+      abort). Produce requests carry the transactional id. E2E against the
+      fake broker: commit/abort flows, identity continuation across
+      transactions, fenced produce poisoning the commit, NOT_COORDINATOR
+      retry, and transactional offset commits.
+- [x] **Producer metrics/counters**: DONE (commit e8f207d): `metrics()`
+      returns `ProducerMetrics` — queued records/bytes from the
+      accumulator snapshot, in-flight batches, sent/failed record and
+      batch counters, and the sum of connection throttle hints.
 
 **Acceptance:** integration tests vs Docker 4.3: throughput sanity (≥10k
 rec/s small records, uncompressed and gzip); ordering preserved under retries
