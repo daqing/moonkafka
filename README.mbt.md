@@ -39,6 +39,18 @@ Working today:
   task (pipelined Produce requests per leader, acks 0/1/-1, retries with
   backoff bounded by delivery timeout), metadata refresh on leadership
   changes, REBOOTSTRAP_REQUIRED recovery
+- Producer API: `send`, per-record `SendHandle`s (`await`/`cancel`/
+  `on_complete`), batched `send_all`, and on-demand metrics (queue depth,
+  in-flight, sent/failed counters, broker throttle time)
+- Idempotent producer (acks=all default): InitProducerId handshake,
+  per-partition sequence stamping with rewind on failure, epoch bump on
+  `UNKNOWN_PRODUCER_ID`
+- Transactions: `transactional_id` config with coordinator init,
+  `begin_transaction`/`commit_transaction`/`abort_transaction`,
+  AddPartitionsToTxn before produce, transactional offset commits
+  (AddOffsetsToTxn + TxnOffsetCommit), EndTxn with epoch adoption,
+  coordinator retry/refind, fencing detection, and abort-on-error commit
+  policy
 - Simple consumer: incremental fetch sessions with eviction recovery,
   offset resolution by sentinel or timestamp
 - Pipelined broker connections: request timeouts, in-flight cap, reconnect
@@ -48,7 +60,6 @@ Working today:
 
 Planned:
 
-- Batched/async producer (accumulator, idempotence, transactions)
 - Consumer groups with the new KIP-848 consumer rebalance protocol
 - Admin client and share groups
 
