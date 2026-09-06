@@ -18,6 +18,8 @@ pub const API_ADD_PARTITIONS_TO_TXN : Int = 24
 
 pub const API_API_VERSIONS : Int = 18
 
+pub const API_CONSUMER_GROUP_HEARTBEAT : Int = 68
+
 pub const API_DESCRIBE_TOPIC_PARTITIONS : Int = 75
 
 pub const API_END_TXN : Int = 26
@@ -76,6 +78,8 @@ pub fn decode_add_partitions_to_txn_response(@buf.Decoder) -> (Array[TxnPartitio
 
 pub fn decode_api_versions_response(@buf.Decoder) -> (BrokerVersions, Int) raise
 
+pub fn decode_consumer_group_heartbeat_response(@buf.Decoder) -> (ConsumerGroupHeartbeatResult, Int) raise
+
 pub fn decode_describe_topic_partitions_response(@buf.Decoder) -> (DescribeTopicPartitions, Int) raise
 
 pub fn decode_end_txn_response(@buf.Decoder) -> (EndTxnResult, Int) raise
@@ -117,6 +121,8 @@ pub fn encode_add_offsets_to_txn_request(String, Int64, Int, String) -> Bytes
 pub fn encode_add_partitions_to_txn_request(String, Int64, Int, Array[(String, Array[Int])]) -> Bytes
 
 pub fn encode_api_versions_request() -> Bytes
+
+pub fn encode_consumer_group_heartbeat_request(Int, String, String, Int, instance_id? : String?, rack_id? : String?, rebalance_timeout_ms? : Int, subscribed_topic_names? : Array[String]?, subscribed_topic_regex? : String?, server_assignor? : String?) -> Bytes raise
 
 pub fn encode_describe_topic_partitions_request(Array[String], Int, cursor? : TopicPartitionCursor?) -> Bytes
 
@@ -248,6 +254,7 @@ pub fn BrokerConnection::api_version(Self, Int, want? : Int?) -> Int raise
 pub async fn BrokerConnection::authenticate(Self, SaslConfig, timeout_ms? : Int) -> Unit
 pub fn BrokerConnection::close(Self) -> Unit
 pub async fn BrokerConnection::connect(String, Int, client_id? : String, max_in_flight? : Int, timeout_ms? : Int, tls? : TlsClientOptions?) -> Self
+pub async fn BrokerConnection::consumer_group_heartbeat(Self, String, String, Int, instance_id? : String?, rebalance_timeout_ms? : Int, subscribed_topic_names? : Array[String]?, subscribed_topic_regex? : String?, server_assignor? : String?, timeout_ms? : Int) -> ConsumerGroupHeartbeatResult
 pub async fn BrokerConnection::describe_topic_partitions(Self, Array[String], response_partition_limit? : Int, cursor? : TopicPartitionCursor?, timeout_ms? : Int) -> DescribeTopicPartitions
 pub async fn BrokerConnection::end_txn(Self, String, Int64, Int, Bool, timeout_ms? : Int) -> EndTxnResult
 pub async fn BrokerConnection::fetch(Self, Array[FetchTopicReq], session~ : FetchSessionReq, max_wait_ms~ : Int, min_bytes? : Int, max_bytes? : Int, isolation_level? : Int, timeout_ms? : Int) -> FetchResult
@@ -315,6 +322,7 @@ pub async fn ClusterClient::refresh_if_stale(Self) -> Unit
 pub async fn ClusterClient::refresh_metadata(Self, Array[String]?) -> Unit
 pub fn ClusterClient::topic(Self, String) -> TopicMetadata?
 pub fn ClusterClient::topic_name(Self, Uuid) -> String?
+pub fn ClusterClient::topics_snapshot(Self) -> Array[String]
 pub fn ClusterClient::total_throttle_ms(Self) -> Int64
 
 pub(all) struct CommitTopic {
@@ -362,12 +370,14 @@ pub struct Consumer {
   max_poll_records : Int
   max_partition_fetch_bytes : Int
   enable_read_committed : Bool
+  mut heartbeat_interval_ms : Int
   mut topic_id : Uuid
   fetch_sessions : Map[Int, FetchSession]
   partitions : Array[PartitionState]
   mut closed : Bool
   // private fields
 }
+pub fn Consumer::assignment(Self) -> Array[(String, Int)]
 pub fn Consumer::close(Self) -> Unit
 pub async fn Consumer::commit(Self, offsets? : Map[Int, Int64]) -> Unit
 pub fn Consumer::commit_async(Self, offsets? : Map[Int, Int64], on_complete? : (String?) -> Unit) -> Unit raise
@@ -375,6 +385,8 @@ pub async fn Consumer::committed(Self, partitions? : Array[Int]?) -> Map[Int, In
 pub fn Consumer::committed_cached(Self, Int) -> Int64?
 pub async fn Consumer::connect(group~ : @async.TaskGroup[Unit], host~ : String, port~ : Int, topic~ : String, start_from? : StartFrom) -> Self
 pub async fn Consumer::connect_with_config(group~ : @async.TaskGroup[Unit], ConsumerConfig) -> Self
+pub fn Consumer::member_identity(Self) -> String
+pub fn Consumer::membership_error(Self) -> String?
 pub fn Consumer::pause(Self, partitions? : Array[Int]) -> Unit
 pub fn Consumer::paused(Self) -> Array[Int]
 pub async fn Consumer::poll(Self, max_wait_ms? : Int, max_bytes? : Int) -> Array[Record]
@@ -383,6 +395,9 @@ pub fn Consumer::seek(Self, Int, Int64) -> Unit raise
 pub async fn Consumer::seek_by_timestamp(Self, Int, Int64) -> Unit
 pub async fn Consumer::seek_to_beginning(Self, partitions? : Array[Int]?) -> Unit
 pub async fn Consumer::seek_to_end(Self, partitions? : Array[Int]?) -> Unit
+pub fn Consumer::subscribe(Self, Array[String], listener? : RebalanceListener?) -> Unit raise
+pub async fn Consumer::subscribe_regex(Self, String, listener? : RebalanceListener?) -> Unit
+pub async fn Consumer::unsubscribe(Self) -> Unit
 
 pub struct ConsumerConfig {
   common : CommonConfig
@@ -395,8 +410,18 @@ pub struct ConsumerConfig {
   max_poll_records : Int
   max_partition_fetch_bytes : Int
   enable_read_committed : Bool
+  group_instance_id : String?
 } derive(@debug.Debug)
-pub fn ConsumerConfig::new(Array[String], String, start_from? : StartFrom, request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?, tls? : TlsClientOptions?, metadata_max_age_ms? : Int, group_id? : String?, enable_auto_commit? : Bool, auto_commit_interval_ms? : Int, auto_offset_reset? : AutoOffsetReset?, max_poll_records? : Int, max_partition_fetch_bytes? : Int, enable_read_committed? : Bool) -> Self raise
+pub fn ConsumerConfig::new(Array[String], String, start_from? : StartFrom, request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?, tls? : TlsClientOptions?, metadata_max_age_ms? : Int, group_id? : String?, enable_auto_commit? : Bool, auto_commit_interval_ms? : Int, auto_offset_reset? : AutoOffsetReset?, max_poll_records? : Int, max_partition_fetch_bytes? : Int, enable_read_committed? : Bool, group_instance_id? : String?) -> Self raise
+
+pub struct ConsumerGroupHeartbeatResult {
+  error_code : Int
+  error_message : String?
+  member_id : String
+  member_epoch : Int
+  heartbeat_interval_ms : Int
+  assignment : Array[HeartbeatTopicPartitions]
+} derive(@debug.Debug)
 
 pub struct CoordinatorInfo {
   key : String
@@ -516,6 +541,11 @@ pub struct FetchTopicResult {
   partitions : Array[FetchPartitionResult]
 }
 
+pub(all) struct HeartbeatTopicPartitions {
+  topic_id : Uuid
+  partitions : Array[Int]
+} derive(@debug.Debug)
+
 pub(all) struct HostPort {
   host : String
   port : Int
@@ -628,6 +658,13 @@ pub struct ProducerMetrics {
   batches_failed : Int
   throttle_time_ms : Int64
 } derive(@debug.Debug)
+
+pub struct RebalanceListener {
+  on_assign : (Array[(String, Int)]) -> Unit
+  on_revoke : (Array[(String, Int)]) -> Unit
+}
+pub fn RebalanceListener::default() -> Self
+pub fn RebalanceListener::new(on_assign~ : (Array[(String, Int)]) -> Unit, on_revoke~ : (Array[(String, Int)]) -> Unit) -> Self
 
 pub(all) struct Record {
   offset : Int64

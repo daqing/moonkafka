@@ -230,6 +230,17 @@ pub fn ClusterClient::topic_name(self : ClusterClient, id : Uuid) -> String? {
 }
 
 ///|
+/// Names of every topic in the cached metadata snapshot (subscription
+/// expansion for regex consumers).
+pub fn ClusterClient::topics_snapshot(self : ClusterClient) -> Array[String] {
+  let out : Array[String] = []
+  for name, _ in self.topics {
+    out.push(name)
+  }
+  out
+}
+
+///|
 /// Sum of the throttle hints received across the control connection and
 /// every pooled connection.
 pub fn ClusterClient::total_throttle_ms(self : ClusterClient) -> Int64 {

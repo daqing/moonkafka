@@ -24,6 +24,9 @@ pub const API_OFFSET_FETCH : Int = 9
 pub const API_OFFSET_FOR_LEADER_EPOCH : Int = 23
 
 ///|
+pub const API_CONSUMER_GROUP_HEARTBEAT : Int = 68
+
+///|
 pub const API_LIST_OFFSETS : Int = 2
 
 ///|
@@ -95,6 +98,14 @@ pub fn driver_api_range(api_key : Int) -> ApiRange? {
         name: "OffsetForLeaderEpoch",
         min: 4,
         max: 4,
+      })
+    // v1 carries SubscribedTopicRegex (KIP-848 GA).
+    API_CONSUMER_GROUP_HEARTBEAT =>
+      Some({
+        key: API_CONSUMER_GROUP_HEARTBEAT,
+        name: "ConsumerGroupHeartbeat",
+        min: 0,
+        max: 1,
       })
     API_LIST_OFFSETS =>
       Some({ key: API_LIST_OFFSETS, name: "ListOffsets", min: 10, max: 11, })

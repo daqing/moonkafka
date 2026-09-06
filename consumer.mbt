@@ -48,6 +48,19 @@ pub struct Consumer {
   /// Last known committed offset per partition (-1 = none), refreshed
   /// by commit() and committed().
   priv committed_offsets : Map[Int, Int64]
+  /// KIP-848 membership state, owned by the heartbeat loop.
+  priv group_instance_id : String?
+  priv mut member_id : String
+  priv mut member_epoch : Int
+  priv mut subscribed_names : Array[String]?
+  priv mut subscribed_regex : String?
+  priv mut assignment : Array[(String, Int)]
+  mut heartbeat_interval_ms : Int
+  priv mut member_active : Bool
+  priv mut member_spawned : Bool
+  priv mut member_left : Bool
+  priv mut member_error : String?
+  priv mut rebalance_listener : RebalanceListener?
   priv cluster : ClusterClient
   mut topic_id : Uuid
   /// Fetch session per leader, driving incremental fetches.
@@ -113,6 +126,18 @@ pub async fn Consumer::connect_with_config(
     max_partition_fetch_bytes: config.max_partition_fetch_bytes,
     enable_read_committed: config.enable_read_committed,
     committed_offsets: Map([]),
+    group_instance_id: config.group_instance_id,
+    member_id: "",
+    member_epoch: 0,
+    subscribed_names: None,
+    subscribed_regex: None,
+    assignment: [],
+    heartbeat_interval_ms: 0,
+    member_active: false,
+    member_spawned: false,
+    member_left: false,
+    member_error: None,
+    rebalance_listener: None,
     cluster,
     topic_id: Uuid::zero(),
     fetch_sessions: Map([]),
@@ -138,7 +163,10 @@ pub async fn Consumer::connect_with_config(
 pub fn Consumer::close(self : Consumer) -> Unit {
   if !self.closed {
     self.closed = true
-    if !self.autocommit_enabled() {
+    if !self.autocommit_enabled() && !self.member_spawned {
+      // A background loop (autocommit or membership) owns the teardown
+      // when one is running; it closes the cluster after its last wire
+      // work (final commit / graceful leave).
       self.cluster.close()
     }
   }
@@ -242,6 +270,11 @@ pub async fn Consumer::poll(
   let by_leader : Map[Int, Map[Int, (Int64, Int)]] = Map([])
   for p in self.partitions {
     if p.paused {
+      continue
+    }
+    if self.member_spawned && !self.is_assigned(p.info.index) {
+      // Group membership drives the fetch set: partitions the
+      // coordinator has not assigned stay untouched.
       continue
     }
     let wanted = by_leader.get_or_init(p.info.leader, fn() { Map([]) })

@@ -7,7 +7,7 @@
 fn fake_api_versions_response(throttle_ms : Int) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i16(0) // error_code
-  e.write_compact_len(15)
+  e.write_compact_len(16)
   let apis : Array[(Int, Int)] = [
     (0, 13),
     (1, 16),
@@ -17,6 +17,7 @@ fn fake_api_versions_response(throttle_ms : Int) -> Bytes {
     (9, 10),
     (10, 4),
     (23, 4),
+    (68, 1),
     (18, 3),
     (22, 5),
     (24, 3),
@@ -420,6 +421,67 @@ fn fake_fetch_request_session_epoch(rest : Bytes) -> Int raise {
   ignore(d.read_i8()) // isolation level
   ignore(d.read_i32()) // session id
   d.read_i32() // session epoch
+}
+
+///|
+/// Parse a ConsumerGroupHeartbeat v1 request: (group, member id, epoch,
+/// instance id, subscribed regex).
+fn fake_consumer_group_heartbeat_request(
+  rest : Bytes,
+) -> (String, String, Int, String?, String?) raise {
+  let d = @buf.Decoder::new(rest)
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  ignore(d.read_compact_string()) // client id
+  d.skip_tag_buffer()
+  let group_id = d.read_compact_string()
+  let member_id = d.read_compact_string()
+  let member_epoch = d.read_i32()
+  let instance_id = d.read_compact_nullable_string()
+  ignore(d.read_compact_nullable_string()) // rack id
+  ignore(d.read_i32()) // rebalance timeout
+  let names = d.read_compact_len()
+  for _ in 0..<names {
+    ignore(d.read_compact_string())
+  }
+  let regex = d.read_compact_nullable_string()
+  ignore(d.read_compact_nullable_string()) // server assignor
+  ignore(d.read_i8()) // owned topic partitions: null
+  (group_id, member_id, member_epoch, instance_id, regex)
+}
+
+///|
+/// ConsumerGroupHeartbeat response body: the confirmed identity, the
+/// next epoch, a 20ms heartbeat interval, and the configured assignment.
+fn fake_consumer_group_heartbeat_response(
+  error_code : Int,
+  member_id : String,
+  member_epoch : Int,
+  partitions : Array[Int],
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_i16(error_code)
+  e.write_compact_nullable_string(None) // error message
+  e.write_compact_string(member_id)
+  e.write_i32(member_epoch)
+  e.write_i32(20) // heartbeat interval
+  if error_code == 0 && !partitions.is_empty() {
+    e.write_i8(1) // assignment present
+    e.write_compact_len(1) // one topic
+    e.write_bytes(fake_topic_id)
+    e.write_compact_len(partitions.length())
+    for p in partitions {
+      e.write_i32(p)
+    }
+    e.write_tag_buffer()
+    e.write_tag_buffer()
+  } else {
+    e.write_i8(-1) // assignment null
+  }
+  e.write_tag_buffer()
+  e.to_bytes()
 }
 
 ///|
@@ -978,6 +1040,10 @@ async fn fake_serve_conn(
   fetch_error_rounds? : Int = 0,
   fetch_error_code? : Int = 0,
   epoch_end_offset? : Int64 = 42L,
+  heartbeat_requests? : Array[(String, String, Int, String?)] = [],
+  heartbeat_regexes? : Array[String?] = [],
+  heartbeat_errors? : Array[Int] = [],
+  heartbeat_partitions? : Array[Int] = [0],
 ) -> Unit {
   // per-connection SASL state
   let mut sasl_mechanism : String? = None
@@ -1042,6 +1108,26 @@ async fn fake_serve_conn(
         }
       }
       23 => fake_offset_for_leader_epoch_response(epoch_end_offset)
+      68 => {
+        let (group, member, epoch, instance, regex) = fake_consumer_group_heartbeat_request(
+          rest,
+        )
+        heartbeat_requests.push((group, member, epoch, instance))
+        heartbeat_regexes.push(regex)
+        if heartbeat_requests.length() <= heartbeat_errors.length() {
+          fake_consumer_group_heartbeat_response(
+            heartbeat_errors[heartbeat_requests.length() - 1],
+            member,
+            epoch,
+            [],
+          )
+        } else {
+          let next_epoch = if epoch >= 0 { epoch + 1 } else { epoch }
+          fake_consumer_group_heartbeat_response(
+            0, member, next_epoch, heartbeat_partitions,
+          )
+        }
+      }
       3 => {
         metadata_requests.push(1)
         fake_metadata_response(topic, broker_port, version)
@@ -1236,6 +1322,10 @@ async fn fake_broker(
   fetch_error_rounds? : Int = 0,
   fetch_error_code? : Int = 0,
   epoch_end_offset? : Int64 = 42L,
+  heartbeat_requests? : Array[(String, String, Int, String?)] = [],
+  heartbeat_regexes? : Array[String?] = [],
+  heartbeat_errors? : Array[Int] = [],
+  heartbeat_partitions? : Array[Int] = [0],
 ) -> Unit {
   for ;; {
     let (tcp, _) = server.accept()
@@ -1285,6 +1375,10 @@ async fn fake_broker(
         fetch_error_rounds~,
         fetch_error_code~,
         epoch_end_offset~,
+        heartbeat_requests~,
+        heartbeat_regexes~,
+        heartbeat_errors~,
+        heartbeat_partitions~,
       )
     }
   }
@@ -2325,6 +2419,246 @@ async test "leader epoch errors validate the position and rewind on truncation" 
     let records = consumer.poll(max_wait_ms=50)
     assert_eq(fetch_offsets, [42L, 30L])
     assert_eq(records.length(), 2)
+    server.close()
+  }
+}
+
+///|
+async test "KIP-848 member joins, reconciles assignment, and leaves" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let heartbeat_requests : Array[(String, String, Int, String?)] = []
+    let assigned : Array[(String, Int)] = []
+    let revoked : Array[(String, Int)] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, heartbeat_requests~)
+    }
+    let consumer = @moonkafka.Consumer::connect_with_config(
+      group=root,
+      @moonkafka.ConsumerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        request_timeout_ms=10000,
+        group_id=Some("gid-9"),
+        enable_auto_commit=false,
+      ),
+    )
+    defer consumer.close()
+    // The client generates the member id before the first heartbeat.
+    consumer.subscribe(
+      ["events"],
+      listener=Some(
+        @moonkafka.RebalanceListener::new(
+          on_assign=fn(pairs) {
+            for pair in pairs {
+              assigned.push(pair)
+            }
+          },
+          on_revoke=fn(pairs) {
+            for pair in pairs {
+              revoked.push(pair)
+            }
+          },
+        ),
+      ),
+    )
+    assert_true(consumer.member_identity().length() > 0)
+    // The coordinator's assignment lands through the heartbeat loop and
+    // fires on_assign.
+    for _ in 0..<1000 {
+      if assigned.length() == 1 {
+        break
+      }
+      @async.sleep(5)
+    }
+    assert_eq(assigned, [("events", 0)])
+    // Join rides epoch 0; the follow-ups carry the server's epochs and
+    // the same member id throughout. Wait out the first interval so the
+    // reconciliation heartbeat is on record.
+    for _ in 0..<1000 {
+      if heartbeat_requests.length() >= 2 {
+        break
+      }
+      @async.sleep(5)
+    }
+    let epochs = heartbeat_requests.map(fn(r) { r.2 })
+    assert_eq(epochs[0], 0)
+    assert_true(epochs[1] >= 1)
+    assert_eq(heartbeat_requests[0].1, heartbeat_requests[1].1)
+    // poll fetches only the assigned partition.
+    assert_eq(consumer.poll(max_wait_ms=50).length(), 2)
+    // Graceful leave: a final heartbeat with epoch -1 and the revoke.
+    consumer.unsubscribe()
+    for _ in 0..<1000 {
+      if heartbeat_requests[heartbeat_requests.length() - 1].2 == -1 {
+        break
+      }
+      @async.sleep(5)
+    }
+    assert_eq(heartbeat_requests[heartbeat_requests.length() - 1].2, -1)
+    assert_eq(revoked, [("events", 0)])
+    server.close()
+  }
+}
+
+///|
+async test "fenced member epoch restarts the join" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let heartbeat_requests : Array[(String, String, Int, String?)] = []
+    let assigned : Array[(String, Int)] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(
+        server,
+        root,
+        "events",
+        accepted,
+        heartbeat_requests~,
+        heartbeat_errors=[110], // FENCED_MEMBER_EPOCH on the first call
+      )
+    }
+    let consumer = @moonkafka.Consumer::connect_with_config(
+      group=root,
+      @moonkafka.ConsumerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        request_timeout_ms=10000,
+        group_id=Some("gid-10"),
+        enable_auto_commit=false,
+      ),
+    )
+    defer consumer.close()
+    consumer.subscribe(
+      ["events"],
+      listener=Some(
+        @moonkafka.RebalanceListener::new(
+          on_assign=fn(pairs) {
+            for pair in pairs {
+              assigned.push(pair)
+            }
+          },
+          on_revoke=fn(_pairs) { () },
+        ),
+      ),
+    )
+    for _ in 0..<1000 {
+      if heartbeat_requests.length() >= 3 {
+        break
+      }
+      @async.sleep(5)
+    }
+    assert_eq(assigned, [("events", 0)])
+    assert_true(consumer.membership_error() is None)
+    // The join restarted from epoch 0 after the fence and reconciled.
+    let epochs = heartbeat_requests.map(fn(r) { r.2 })
+    assert_eq(epochs, [0, 0, 1])
+    server.close()
+  }
+}
+
+///|
+async test "static membership rides the instance id" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let heartbeat_requests : Array[(String, String, Int, String?)] = []
+    let assigned : Array[(String, Int)] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, heartbeat_requests~)
+    }
+    let consumer = @moonkafka.Consumer::connect_with_config(
+      group=root,
+      @moonkafka.ConsumerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        request_timeout_ms=10000,
+        group_id=Some("gid-11"),
+        enable_auto_commit=false,
+        group_instance_id=Some("inst-9"),
+      ),
+    )
+    defer consumer.close()
+    consumer.subscribe(
+      ["events"],
+      listener=Some(
+        @moonkafka.RebalanceListener::new(
+          on_assign=fn(pairs) {
+            for pair in pairs {
+              assigned.push(pair)
+            }
+          },
+          on_revoke=fn(_pairs) { () },
+        ),
+      ),
+    )
+    for _ in 0..<1000 {
+      if assigned.length() == 1 {
+        break
+      }
+      @async.sleep(5)
+    }
+    assert_eq(assigned, [("events", 0)])
+    for request in heartbeat_requests {
+      assert_eq(request.3, Some("inst-9"))
+    }
+    server.close()
+  }
+}
+
+///|
+async test "regex subscription rides the heartbeat and expands locally" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let heartbeat_requests : Array[(String, String, Int, String?)] = []
+    let heartbeat_regexes : Array[String?] = []
+    let assigned : Array[(String, Int)] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(
+        server,
+        root,
+        "events",
+        accepted,
+        heartbeat_requests~,
+        heartbeat_regexes~,
+      )
+    }
+    let consumer = @moonkafka.Consumer::connect_with_config(
+      group=root,
+      @moonkafka.ConsumerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        request_timeout_ms=10000,
+        group_id=Some("gid-12"),
+        enable_auto_commit=false,
+      ),
+    )
+    defer consumer.close()
+    consumer.subscribe_regex(
+      "ev*",
+      listener=Some(
+        @moonkafka.RebalanceListener::new(
+          on_assign=fn(pairs) {
+            for pair in pairs {
+              assigned.push(pair)
+            }
+          },
+          on_revoke=fn(_pairs) { () },
+        ),
+      ),
+    )
+    for _ in 0..<1000 {
+      if assigned.length() == 1 {
+        break
+      }
+      @async.sleep(5)
+    }
+    // The raw pattern rides v1 heartbeats; the assignment for "events"
+    // (expanded from the cached catalog) still lands.
+    assert_true(heartbeat_regexes[0] == Some("ev*"))
+    assert_eq(assigned, [("events", 0)])
     server.close()
   }
 }
