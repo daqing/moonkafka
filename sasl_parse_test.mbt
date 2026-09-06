@@ -7,7 +7,7 @@ test "fake sasl auth bytes parser" {
   e.write_i16(36)
   e.write_i16(2)
   e.write_i32(7)
-  e.write_nullable_string(Some("moonkafka"))
+  e.write_compact_nullable_string(Some("moonkafka"))
   e.write_tag_buffer()
   e.write_bytes(body)
   let auth = fake_sasl_auth_bytes(e.to_bytes())

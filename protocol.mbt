@@ -10,9 +10,10 @@ pub(all) suberror ProtocolError {
 }
 
 ///|
-/// Encode a full request frame: INT32 size prefix + header v2 + body.
-/// Header v2 keeps client_id as a legacy NULLABLE_STRING (see
-/// RequestHeader.json) followed by an empty tag buffer.
+/// Encode a full request frame: INT32 size prefix + header + body.
+/// Flexible versions use header v2 (client_id as a COMPACT_NULLABLE_STRING
+/// followed by an empty tag buffer, per RequestHeader.json); the rest use
+/// header v1 with a legacy NULLABLE_STRING (SaslHandshake v1 today).
 pub fn encode_request(
   api_key : Int,
   api_version : Int,
@@ -25,9 +26,11 @@ pub fn encode_request(
   header.write_i16(api_key)
   header.write_i16(api_version)
   header.write_i32(correlation_id)
-  header.write_nullable_string(Some(client_id))
   if flexible {
+    header.write_compact_nullable_string(Some(client_id))
     header.write_tag_buffer()
+  } else {
+    header.write_nullable_string(Some(client_id))
   }
   let frame = @buf.Encoder::new()
   frame.write_i32(header.buf.length() + body.length())

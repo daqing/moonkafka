@@ -50,8 +50,7 @@ fn fake_sasl_auth_bytes(rest : Bytes) -> Bytes raise {
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
   ignore(d.read_i32()) // correlation id
-  let id_len = d.read_i16()
-  ignore(d.read_bytes(id_len))
+  ignore(d.read_compact_string()) // client id
   d.skip_tag_buffer()
   let n = d.read_compact_len()
   d.read_bytes(n)
@@ -237,8 +236,7 @@ fn fake_produce_request_partition(rest : Bytes, version : Int) -> Int raise {
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
   ignore(d.read_i32()) // correlation id
-  let id_len = d.read_i16()
-  ignore(d.read_bytes(id_len)) // client id
+  ignore(d.read_compact_string()) // client id
   d.skip_tag_buffer()
   ignore(d.read_compact_nullable_string()) // transactional id
   ignore(d.read_i16()) // acks
@@ -307,8 +305,7 @@ fn fake_fetch_request_session_epoch(rest : Bytes) -> Int raise {
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
   ignore(d.read_i32()) // correlation id
-  let id_len = d.read_i16()
-  ignore(d.read_bytes(id_len)) // client id
+  ignore(d.read_compact_string()) // client id
   d.skip_tag_buffer()
   ignore(d.read_i32()) // max_wait_ms
   ignore(d.read_i32()) // min_bytes
@@ -384,8 +381,7 @@ fn fake_dtp_request_cursor(rest : Bytes) -> TopicPartitionCursor? raise {
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
   ignore(d.read_i32()) // correlation id
-  let id_len = d.read_i16()
-  ignore(d.read_bytes(id_len))
+  ignore(d.read_compact_string()) // client id
   d.skip_tag_buffer()
   let topic_count = d.read_compact_len()
   for _ in 0..<topic_count {
