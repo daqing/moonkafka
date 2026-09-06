@@ -412,6 +412,23 @@ pub fn ProducerConfig::new(
 }
 
 ///|
+/// Which consumer-group protocol subscribe() runs (Java's
+/// group.protocol). Consumer is the KIP-848 path; Classic the
+/// JoinGroup/SyncGroup compat path; the fallback orders try the
+/// preferred protocol first and degrade to the other when the broker
+/// does not advertise it.
+pub(all) enum GroupProtocol {
+  /// KIP-848 only: subscribe fails against brokers without it.
+  ConsumerProtocol
+  /// Classic only: works on every Kafka 4.x broker.
+  ClassicProtocol
+  /// Prefer KIP-848, fall back to classic when unavailable.
+  PreferConsumer
+  /// Prefer classic, fall back to KIP-848 when classic is unavailable.
+  PreferClassic
+} derive(@debug.Debug, Eq)
+
+///|
 /// Where to move the read position when a fetch reports
 /// OFFSET_OUT_OF_RANGE (Java's auto.offset.reset). ResetNone surfaces
 /// the error to the caller instead of silently repositioning.
@@ -455,6 +472,8 @@ pub struct ConsumerConfig {
   /// the consumer leave its group and surface the error (Java's
   /// max.poll.interval.ms).
   max_poll_interval_ms : Int
+  /// Which group protocol subscribe() runs.
+  group_protocol : GroupProtocol
 } derive(@debug.Debug)
 
 ///|
@@ -478,6 +497,7 @@ pub fn ConsumerConfig::new(
   heartbeat_interval_ms? : Int = 3000,
   session_timeout_ms? : Int = 45000,
   max_poll_interval_ms? : Int = 300000,
+  group_protocol? : GroupProtocol = ConsumerProtocol,
 ) -> ConsumerConfig raise {
   if topic.length() == 0 {
     raise ProtocolError::ProtocolError("topic must not be empty")
@@ -548,5 +568,6 @@ pub fn ConsumerConfig::new(
     heartbeat_interval_ms,
     session_timeout_ms,
     max_poll_interval_ms,
+    group_protocol,
   }
 }
