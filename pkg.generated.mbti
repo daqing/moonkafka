@@ -20,6 +20,8 @@ pub const API_FETCH : Int = 1
 
 pub const API_FIND_COORDINATOR : Int = 10
 
+pub const API_INIT_PRODUCER_ID : Int = 22
+
 pub const API_LIST_OFFSETS : Int = 2
 
 pub const API_METADATA : Int = 3
@@ -62,6 +64,8 @@ pub fn decode_fetch_response(Int, @buf.Decoder) -> (FetchResult, Int) raise
 
 pub fn decode_find_coordinator_response(@buf.Decoder) -> (Array[CoordinatorInfo], Int) raise
 
+pub fn decode_init_producer_id_response(@buf.Decoder) -> (InitProducerIdResult, Int) raise
+
 pub fn decode_list_offsets_response(@buf.Decoder) -> (Map[Int, Int64], Int) raise
 
 pub fn decode_metadata_response(Int, @buf.Decoder) -> (Metadata, Int) raise
@@ -87,6 +91,8 @@ pub fn encode_describe_topic_partitions_request(Array[String], Int, cursor? : To
 pub fn encode_fetch_request(Int, Array[FetchTopicReq], session~ : FetchSessionReq, max_wait_ms~ : Int, min_bytes? : Int, max_bytes? : Int, isolation_level? : Int, rack_id? : String) -> Bytes raise
 
 pub fn encode_find_coordinator_request(Array[String], CoordinatorType) -> Bytes
+
+pub fn encode_init_producer_id_request(String?, Int, Int64, Int) -> Bytes
 
 pub fn encode_list_offsets_request(Int, String, Array[PartitionInfo], Int64, timeout_ms? : Int) -> Bytes raise
 
@@ -196,6 +202,7 @@ pub async fn BrokerConnection::describe_topic_partitions(Self, Array[String], re
 pub async fn BrokerConnection::fetch(Self, Array[FetchTopicReq], session~ : FetchSessionReq, max_wait_ms~ : Int, min_bytes? : Int, max_bytes? : Int, timeout_ms? : Int) -> FetchResult
 pub async fn BrokerConnection::fetch_metadata(Self, Array[String]?, timeout_ms? : Int) -> Metadata
 pub async fn BrokerConnection::find_coordinator(Self, Array[String], CoordinatorType, timeout_ms? : Int) -> Array[CoordinatorInfo]
+pub async fn BrokerConnection::init_producer_id(Self, transactional_id? : String?, transaction_timeout_ms? : Int, producer_id? : Int64, producer_epoch? : Int, timeout_ms? : Int) -> InitProducerIdResult
 pub async fn BrokerConnection::list_offsets(Self, String, Array[PartitionInfo], Int64, timeout_ms? : Int) -> Map[Int, Int64]
 pub async fn BrokerConnection::negotiate_api_versions(Self, timeout_ms? : Int) -> Unit
 pub fn BrokerConnection::note_throttle(Self, Int) -> Unit
@@ -396,6 +403,12 @@ pub(all) struct HostPort {
 } derive(Compare, Eq, Hash, @debug.Debug)
 pub fn HostPort::parse(String) -> Self raise ProtocolError
 
+pub struct InitProducerIdResult {
+  producer_id : Int64
+  producer_epoch : Int
+  error_code : Int
+} derive(@debug.Debug)
+
 pub struct Metadata {
   brokers : Map[Int, BrokerInfo]
   topics : Array[TopicMetadata]
@@ -439,6 +452,9 @@ pub struct Producer {
   retry_backoff_max_ms : Int
   delivery_timeout_ms : Int
   group : @async.TaskGroup[Unit]
+  enable_idempotence : Bool
+  mut producer_id : Int64
+  mut producer_epoch : Int
   mut topic_id : Uuid
   mut partitions : Array[PartitionInfo]
   mut closed : Bool
@@ -462,8 +478,9 @@ pub struct ProducerConfig {
   buffer_memory : Int
   max_in_flight : Int
   delivery_timeout_ms : Int
+  enable_idempotence : Bool
 } derive(@debug.Debug)
-pub fn ProducerConfig::new(Array[String], String, acks? : Int, request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?, tls? : TlsClientOptions?, partitioner? : Partitioner, batch_size? : Int, linger_ms? : Int, buffer_memory? : Int, metadata_max_age_ms? : Int, max_in_flight? : Int, delivery_timeout_ms? : Int) -> Self raise
+pub fn ProducerConfig::new(Array[String], String, acks? : Int, request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?, tls? : TlsClientOptions?, partitioner? : Partitioner, batch_size? : Int, linger_ms? : Int, buffer_memory? : Int, metadata_max_age_ms? : Int, max_in_flight? : Int, delivery_timeout_ms? : Int, enable_idempotence? : Bool?) -> Self raise
 
 pub struct ProducerMetrics {
   records_queued : Int
@@ -491,6 +508,9 @@ pub struct RecordBatchBuilder {
   mut base_timestamp : Int64
   mut max_timestamp : Int64
   mut last_offset : Int64
+  mut producer_id : Int64
+  mut producer_epoch : Int
+  mut base_sequence : Int
 } derive(@debug.Debug)
 pub fn RecordBatchBuilder::append(Self, Int64, key? : Bytes?, value? : Bytes?, headers? : Array[(Bytes, Bytes)]) -> Unit
 pub fn RecordBatchBuilder::count(Self) -> Int
@@ -498,6 +518,7 @@ pub fn RecordBatchBuilder::estimated_append_size(Self, Int64, key? : Bytes?, val
 pub fn RecordBatchBuilder::estimated_size(Self) -> Int
 pub fn RecordBatchBuilder::last_assigned_offset(Self) -> Int64
 pub fn RecordBatchBuilder::new(base_offset? : Int64) -> Self
+pub fn RecordBatchBuilder::set_idempotence(Self, Int64, Int, Int) -> Unit
 pub fn RecordBatchBuilder::to_bytes(Self) -> Bytes
 
 pub(all) struct SaslAuthenticateResult {

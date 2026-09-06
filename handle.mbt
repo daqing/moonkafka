@@ -205,5 +205,46 @@ async fn Producer::append_record(
   if rotated {
     self.router.on_batch_closed(n)
   }
+  if self.enable_idempotence {
+    // Every record consumes one sequence number; a fresh batch stamps
+    // its base and keeps it across requeue-and-retry.
+    let base = self.sequences.get(p.index).unwrap_or(0)
+    self.sequences[p.index] = base + 1
+    if index == 0 {
+      batch.builder.set_idempotence(self.producer_id, self.producer_epoch, base)
+    }
+  }
   (batch, index)
+}
+
+///|
+/// Rewind a partition's sequence cursor to a failed batch's base so the
+/// next batch reuses the range instead of leaving a broker-visible gap.
+fn Producer::rewind_sequence(self : Producer, batch : ProducerBatch) -> Unit {
+  if self.enable_idempotence {
+    let base = batch.builder.base_sequence
+    if base >= 0 {
+      let current = self.sequences.get(batch.partition).unwrap_or(0)
+      if base < current {
+        self.sequences[batch.partition] = base
+      }
+    }
+  }
+}
+
+///|
+/// UNKNOWN_PRODUCER_ID recovery (the Java client's reset rules): ask the
+/// broker to bump the epoch for the existing id, then restart every
+/// partition's sequences from zero.
+async fn Producer::bump_epoch(self : Producer) -> Unit {
+  let id = self.cluster
+    .control_conn()
+    .init_producer_id(
+      transaction_timeout_ms=self.delivery_timeout_ms,
+      producer_id=self.producer_id,
+      producer_epoch=self.producer_epoch,
+    )
+  self.producer_id = id.producer_id
+  self.producer_epoch = id.producer_epoch
+  self.sequences.clear()
 }

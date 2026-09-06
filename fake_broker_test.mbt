@@ -7,7 +7,7 @@
 fn fake_api_versions_response(throttle_ms : Int) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i16(0) // error_code
-  e.write_compact_len(7)
+  e.write_compact_len(8)
   let apis : Array[(Int, Int)] = [
     (0, 13),
     (1, 16),
@@ -15,6 +15,7 @@ fn fake_api_versions_response(throttle_ms : Int) -> Bytes {
     (3, 13),
     (10, 4),
     (18, 3),
+    (22, 5),
     (75, 0),
   ]
   for pair in apis {
@@ -221,6 +222,39 @@ fn fake_find_coordinator_response(keys : Array[String], port : Int) -> Bytes {
 }
 
 ///|
+/// Parse an InitProducerId v5 request: (transactional id, timeout,
+/// producer id, producer epoch).
+fn fake_init_producer_id_request(rest : Bytes) -> (String?, Int64, Int) raise {
+  let d = @buf.Decoder::new(rest)
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  ignore(d.read_compact_string()) // client id
+  d.skip_tag_buffer()
+  let transactional_id = d.read_compact_nullable_string()
+  ignore(d.read_i32()) // transaction timeout
+  let producer_id = d.read_i64()
+  let producer_epoch = d.read_i16()
+  (transactional_id, producer_id, producer_epoch)
+}
+
+///|
+/// InitProducerId v5 response: a fresh identity gets pid 500 epoch 0;
+/// a bump request keeps the pid and increments the epoch.
+fn fake_init_producer_id_response(
+  producer_id : Int64,
+  producer_epoch : Int,
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_i16(0) // no error
+  e.write_i64(producer_id)
+  e.write_i16(producer_epoch)
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
 /// Metadata response body; v13 appends a top-level error code after the
 /// topics array.
 fn fake_metadata_response(
@@ -271,7 +305,10 @@ let fake_topic_id : Bytes = Bytes::make(16, b'\x2a')
 /// request: skip the fixed header ints, client id + tag buffer, then the
 /// request body down to the first topic's first partition entry; the
 /// count sits in the batch's v2 header (i32 at bytes 57..61).
-fn fake_produce_request_info(rest : Bytes, version : Int) -> (Int, Int) raise {
+fn fake_produce_request_info(
+  rest : Bytes,
+  version : Int,
+) -> (Int, Int, Int64, Int, Int) raise {
   let d = @buf.Decoder::new(rest)
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
@@ -290,11 +327,26 @@ fn fake_produce_request_info(rest : Bytes, version : Int) -> (Int, Int) raise {
   let partition = d.read_i32()
   let n = d.read_compact_len() // records: one batch's bytes
   let batch = d.read_bytes(n)
-  let count = (batch[57].to_int() << 24) |
-    (batch[58].to_int() << 16) |
-    (batch[59].to_int() << 8) |
-    batch[60].to_int()
-  (partition, count)
+  let count = i32_at(batch, 57)
+  let producer_id = (batch[43].to_int64() << 56) |
+    (batch[44].to_int64() << 48) |
+    (batch[45].to_int64() << 40) |
+    (batch[46].to_int64() << 32) |
+    (batch[47].to_int64() << 24) |
+    (batch[48].to_int64() << 16) |
+    (batch[49].to_int64() << 8) |
+    batch[50].to_int64()
+  let epoch = (batch[51].to_int() << 8) | batch[52].to_int()
+  let base_sequence = i32_at(batch, 53)
+  (partition, count, producer_id, epoch, base_sequence)
+}
+
+///|
+fn i32_at(data : Bytes, at : Int) -> Int {
+  (data[at].to_int() << 24) |
+  (data[at + 1].to_int() << 16) |
+  (data[at + 2].to_int() << 8) |
+  data[at + 3].to_int()
 }
 
 ///|
@@ -506,6 +558,8 @@ async fn fake_serve_conn(
   produce_record_counts? : Array[Int] = [],
   metadata_requests? : Array[Int] = [],
   produce_error_rounds? : Int = 0,
+  produce_identities? : Array[(Int64, Int, Int)] = [],
+  unknown_producer_at? : Int = 0,
 ) -> Unit {
   // per-connection SASL state
   let mut sasl_mechanism : String? = None
@@ -528,15 +582,23 @@ async fn fake_serve_conn(
         fake_sasl_handshake_response()
       }
       0 => {
-        let (idx, count) = fake_produce_request_info(rest, version)
+        let (idx, count, pid, epoch, base_seq) = fake_produce_request_info(
+          rest, version,
+        )
         produce_partitions.push(idx)
         produce_record_counts.push(count)
+        produce_identities.push((pid, epoch, base_seq))
         // The shared partitions array doubles as the round counter, so
         // re-dialed connections keep counting: the first
         // `produce_error_rounds` produce requests (across all of them)
         // answer LEADER_NOT_AVAILABLE — retriable, the sender must
         // requeue and recover.
-        if produce_partitions.length() <= produce_error_rounds {
+        if unknown_producer_at > 0 &&
+          produce_partitions.length() == unknown_producer_at {
+          // UNKNOWN_PRODUCER_ID: the sender must bump the epoch and
+          // restart sequences
+          fake_produce_response(topic, version, 42L, error_code=59)
+        } else if produce_partitions.length() <= produce_error_rounds {
           fake_produce_response(topic, version, 42L, error_code=5)
         } else {
           fake_produce_response(topic, version, 42L)
@@ -556,6 +618,14 @@ async fn fake_serve_conn(
           fake_find_coordinator_request_keys(rest),
           broker_port,
         )
+      22 => {
+        let (_, pid, epoch) = fake_init_producer_id_request(rest)
+        if pid < 0 {
+          fake_init_producer_id_response(500L, 0)
+        } else {
+          fake_init_producer_id_response(pid, epoch + 1)
+        }
+      }
       75 =>
         // Two pages: a fresh request returns partition 0 with a cursor at
         // partition 1; a resumed request returns partition 1 and completes.
@@ -667,6 +737,8 @@ async fn fake_broker(
   produce_record_counts? : Array[Int] = [],
   metadata_requests? : Array[Int] = [],
   produce_error_rounds? : Int = 0,
+  produce_identities? : Array[(Int64, Int, Int)] = [],
+  unknown_producer_at? : Int = 0,
 ) -> Unit {
   for ;; {
     let (tcp, _) = server.accept()
@@ -699,6 +771,8 @@ async fn fake_broker(
         produce_record_counts~,
         metadata_requests~,
         produce_error_rounds~,
+        produce_identities~,
+        unknown_producer_at~,
       )
     }
   }
@@ -1089,6 +1163,51 @@ async test "send handles await, batch, cancel, and call back" {
     let doomed = producer.send_handle(value=b"doomed")
     doomed.cancel()
     assert_true(await_raises(doomed))
+    server.close()
+  }
+}
+
+///|
+async test "idempotent producer stamps pid/epoch/sequence and recovers epoch" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let produce_identities : Array[(Int64, Int, Int)] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(
+        server,
+        root,
+        "events",
+        accepted,
+        produce_identities~,
+        unknown_producer_at=2,
+      )
+    }
+    let producer = @moonkafka.Producer::connect_with_config(
+      group=root,
+      @moonkafka.ProducerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        acks=-1,
+        request_timeout_ms=10000,
+        enable_idempotence=Some(true),
+      ),
+    )
+    defer producer.close()
+    // connect ran InitProducerId: the fake assigns pid 500, epoch 0
+    assert_eq(producer.producer_id, 500L)
+    assert_eq(producer.producer_epoch, 0)
+    // first record: batch header carries (500, 0, seq 0)
+    assert_eq(producer.send(value=b"one"), 42L)
+    // second record's produce answers UNKNOWN_PRODUCER_ID: the sender
+    // bumps the epoch (fake returns epoch 1), resets sequences to zero,
+    // re-stamps, and retries
+    assert_eq(producer.send(value=b"two"), 42L)
+    assert_eq(producer.producer_epoch, 1)
+    assert_eq(produce_identities.length(), 3)
+    assert_eq(produce_identities[0], (500L, 0, 0))
+    assert_eq(produce_identities[1], (500L, 0, 1))
+    assert_eq(produce_identities[2], (500L, 1, 0))
     server.close()
   }
 }

@@ -336,6 +336,10 @@ pub struct RecordBatchBuilder {
   mut base_timestamp : Int64
   mut max_timestamp : Int64
   mut last_offset : Int64
+  /// Idempotence identity stamped by the producer; -1/-1/-1 = none.
+  mut producer_id : Int64
+  mut producer_epoch : Int
+  mut base_sequence : Int
 } derive(@debug.Debug)
 
 ///|
@@ -347,7 +351,25 @@ pub fn RecordBatchBuilder::new(base_offset? : Int64 = 0L) -> RecordBatchBuilder 
     base_timestamp: -1L,
     max_timestamp: -1L,
     last_offset: -1L,
+    producer_id: -1L,
+    producer_epoch: -1,
+    base_sequence: -1,
   }
+}
+
+///|
+/// Stamp the idempotence identity: the batch's records get sequence
+/// numbers base_sequence..base_sequence+count-1 on the wire. Re-stamping
+/// (epoch bump after UNKNOWN_PRODUCER_ID) regenerates them at to_bytes.
+pub fn RecordBatchBuilder::set_idempotence(
+  self : RecordBatchBuilder,
+  producer_id : Int64,
+  producer_epoch : Int,
+  base_sequence : Int,
+) -> Unit {
+  self.producer_id = producer_id
+  self.producer_epoch = producer_epoch
+  self.base_sequence = base_sequence
 }
 
 ///|
@@ -468,9 +490,9 @@ pub fn RecordBatchBuilder::to_bytes(self : RecordBatchBuilder) -> Bytes {
   batch.write_i32(count - 1) // lastOffsetDelta (-1 when empty)
   batch.write_i64(base_timestamp)
   batch.write_i64(max_timestamp)
-  batch.write_i64(-1L) // producerId: none (no idempotence)
-  batch.write_i16(-1) // producerEpoch
-  batch.write_i32(-1) // baseSequence
+  batch.write_i64(self.producer_id) // producerId
+  batch.write_i16(self.producer_epoch) // producerEpoch
+  batch.write_i32(self.base_sequence) // baseSequence
   batch.write_i32(count)
   for body in self.bodies {
     batch.write_varint(body.length()) // record length prefix
