@@ -35,8 +35,10 @@ Working today:
 - Simple producer: per-leader connections, partitioner strategies (Kafka-
   compatible murmur2 key-partitioning; sticky batching or round-robin for
   keyless messages; per-send manual partition override), record batching
-  with linger/batch-size/buffer-memory accounting, metadata refresh on
-  leadership changes, REBOOTSTRAP_REQUIRED recovery
+  with linger/batch-size/buffer-memory accounting, a background sender
+  task (pipelined Produce requests per leader, acks 0/1/-1, retries with
+  backoff bounded by delivery timeout), metadata refresh on leadership
+  changes, REBOOTSTRAP_REQUIRED recovery
 - Simple consumer: incremental fetch sessions with eviction recovery,
   offset resolution by sentinel or timestamp
 - Pipelined broker connections: request timeouts, in-flight cap, reconnect
