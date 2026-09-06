@@ -102,6 +102,36 @@ test "producer config partitioner defaults to murmur2+sticky" {
 }
 
 ///|
+test "producer config batching fields default to the Java values" {
+  let config = @moonkafka.ProducerConfig::new(["b:9092"], "events")
+  assert_eq(config.batch_size, 16384)
+  assert_eq(config.linger_ms, 0)
+  assert_eq(config.buffer_memory, 33554432)
+  assert_true(
+    raises(fn() raise {
+      ignore(@moonkafka.ProducerConfig::new(["b:9092"], "events", batch_size=0))
+    }),
+  )
+  assert_true(
+    raises(fn() raise {
+      ignore(@moonkafka.ProducerConfig::new(["b:9092"], "events", linger_ms=-1))
+    }),
+  )
+  assert_true(
+    raises(fn() raise {
+      ignore(
+        @moonkafka.ProducerConfig::new(
+          ["b:9092"],
+          "events",
+          batch_size=100,
+          buffer_memory=99,
+        ),
+      )
+    }),
+  )
+}
+
+///|
 test "consumer config defaults to earliest" {
   let config = @moonkafka.ConsumerConfig::new(["b:9092"], "events")
   assert_true(config.start_from is Earliest)

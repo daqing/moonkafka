@@ -22,6 +22,7 @@ pub struct Producer {
   leader_conns : Map[Int, BrokerConnection]
   mut partitions : Array[PartitionInfo]
   priv router : PartitionRouter
+  priv accumulator : RecordAccumulator
   mut closed : Bool
 }
 
@@ -85,6 +86,11 @@ pub async fn Producer::connect_with_config(config : ProducerConfig) -> Producer 
     leader_conns: Map([]),
     partitions: [],
     router: PartitionRouter::new(config.partitioner, next_sticky_seed()),
+    accumulator: RecordAccumulator::new(
+      config.batch_size,
+      config.buffer_memory,
+      config.linger_ms,
+    ),
     closed: false,
   }
   producer.refresh_metadata()
@@ -209,19 +215,93 @@ fn Producer::pick_partition(
 /// Send one message and return the offset assigned by the broker.
 /// `timestamp` defaults to the current time (ms since epoch). `partition`
 /// overrides automatic routing when given and must name an existing
-/// partition. Leadership changes and transport failures trigger recovery
-/// and a backoff-paced retry, up to `retries` attempts after the first.
+/// partition; `headers` ride along with the record. The record joins the
+/// partition's open batch (batch_size, linger_ms); whichever sender
+/// flushes the batch shares the broker's base offset with every coalesced
+/// record, each taking base + its index. Leadership changes and transport
+/// failures trigger recovery and a backoff-paced retry, up to `retries`
+/// attempts after the first; buffer_memory exhaustion raises
+/// BufferExhausted.
 pub async fn Producer::send(
   self : Producer,
   key? : Bytes,
   value? : Bytes,
   timestamp? : Int64,
   partition? : Int,
+  headers? : Array[(Bytes, Bytes)] = [],
 ) -> Int64 {
   let timestamp = timestamp.unwrap_or(@async.now())
-  let batch = encode_record_batch([
-    { offset: 0L, timestamp, key, value, headers: [], },
-  ])
+  // The batch's encoded bytes belong to one partition, so the pick
+  // happens once, before accumulating; retries keep it.
+  let p = self.pick_partition(key, partition)
+  let n = self.partitions.length()
+  let (batch, index, rotated) = self.accumulator.append(
+    @async.now(),
+    p.index,
+    timestamp,
+    key,
+    value,
+    headers,
+  )
+  if rotated {
+    self.router.on_batch_closed(n)
+  }
+  // Linger gives concurrent senders a window to coalesce; with the
+  // default linger_ms=0 the batch goes out immediately. A batch closed
+  // early by rotation skips the wait.
+  let ready_at = batch.ready_at(self.accumulator.linger_ms)
+  let now = @async.now()
+  if ready_at > now && !batch.closed {
+    @async.sleep((ready_at - now).to_int())
+  }
+  let (closed_now, claimed) = self.accumulator.close_and_claim(batch)
+  if closed_now {
+    self.router.on_batch_closed(n)
+  }
+  if !claimed {
+    // Another sender is flushing this batch; derive the offset from it.
+    return self.await_batch(batch, index)
+  }
+  // Per-partition order: every earlier queued batch reaches the broker
+  // before ours. The sender task (next work item) replaces this inline
+  // drain with a front-first loop.
+  for pred in self.accumulator.predecessors(batch) {
+    let (pred_closed, pred_claimed) = self.accumulator.close_and_claim(pred)
+    if pred_closed {
+      self.router.on_batch_closed(n)
+    }
+    if pred_claimed {
+      // The predecessor's own records fail with it; ours still go out.
+      // Only protocol errors are swallowed — cancellation must propagate.
+      let _ = self.flush_one(p, pred) catch {
+        ProtocolError(_) => 0L
+        e => raise e
+      }
+    } else {
+      // Its flusher owns the outcome; the predecessor's senders fail
+      // with it, ours continue.
+      let _ = self.await_batch(pred, 0) catch {
+        ProtocolError(_) => 0L
+        e => raise e
+      }
+    }
+  }
+  let base = self.flush_one(p, batch)
+  base + index.to_int64()
+}
+
+///|
+/// Put one claimed batch on the wire and publish its terminal result to
+/// every coalesced sender, returning the broker's base offset to the
+/// flusher (whose own record awaits nothing). Recoverable failures
+/// requeue the batch and retry with backoff after recovery, up to
+/// `retries` attempts after the first.
+async fn Producer::flush_one(
+  self : Producer,
+  p : PartitionInfo,
+  batch : ProducerBatch,
+) -> Int64 {
+  let bytes = batch.builder.to_bytes()
   let backoff = Backoff::new(
     base_ms=self.retry_backoff_ms,
     max_ms=self.retry_backoff_max_ms,
@@ -230,21 +310,53 @@ pub async fn Producer::send(
   // unbounded) must not overflow the loop bound.
   let attempts = if self.retries > 1000 { 1000 } else { self.retries + 1 }
   for attempt in 0..<attempts {
-    let _ = attempt
-    let p = self.pick_partition(key, partition)
-    match self.attempt_send(p, batch) {
-      Some(offset) => return offset
+    let sent = self.attempt_send(p, bytes) catch {
+      e => {
+        self.accumulator.release(batch, BatchError("\{e}"))
+        raise e
+      }
+    }
+    match sent {
+      Some(base) => {
+        self.accumulator.release(batch, BatchOk(base))
+        return base
+      }
       None => {
         self.recover()
+        self.accumulator.requeue(batch)
         if attempt + 1 < attempts {
           @async.sleep(backoff.next_ms())
         }
       }
     }
   }
+  self.accumulator.release(
+    batch,
+    BatchError("send to topic \{self.topic} failed after \{attempts} attempts"),
+  )
   raise ProtocolError::ProtocolError(
     "send to topic \{self.topic} failed after \{attempts} attempts",
   )
+}
+
+///|
+/// Wait for the batch's flusher to publish the result and derive this
+/// record's offset from the batch's base offset.
+async fn Producer::await_batch(
+  self : Producer,
+  batch : ProducerBatch,
+  index : Int,
+) -> Int64 {
+  ignore(self)
+  batch.done.acquire()
+  match batch.result {
+    Some(BatchOk(base)) => base + index.to_int64()
+    Some(BatchError(msg)) => raise ProtocolError::ProtocolError(msg)
+    None =>
+      raise ProtocolError::ProtocolError(
+        "batch finished without a result (moonkafka bug)",
+      )
+  }
 }
 
 ///|

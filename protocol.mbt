@@ -7,6 +7,9 @@
 ///|
 pub(all) suberror ProtocolError {
   ProtocolError(String)
+  /// The producer's buffer_memory is exhausted and the record could not
+  /// be queued (Java's BufferExhaustedException).
+  BufferExhausted(String)
 }
 
 ///|

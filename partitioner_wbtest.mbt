@@ -87,11 +87,13 @@ test "murmur2 strategy places keyed records by hash, unkeyed sticky" {
   for _ in 0..<5 {
     assert_eq(r.pick(6, Some(key), None), expected)
   }
-  // unkeyed records stick per batch: one record per send until the
-  // accumulator lands, so consecutive picks advance (never repeat)
+  // unkeyed records stick until a batch closes: consecutive picks repeat,
+  // and the boundary moves to the next partition
   let a = r.pick(6, None, None)
+  assert_eq(r.pick(6, None, None), a)
+  r.on_batch_closed(6)
   let b = r.pick(6, None, None)
-  assert_true(a != b)
+  assert_true(b != a)
 }
 
 ///|

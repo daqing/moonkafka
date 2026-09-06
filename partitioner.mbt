@@ -118,13 +118,9 @@ fn PartitionRouter::pick(
       match (self.strategy, key) {
         (RoundRobin, _) => self.next_round_robin(n)
         (_, Some(k)) => (@internal.murmur2(k) & 0x7fffffff) % n
-        (Murmur2, None) => {
-          // Until the accumulator batches sends, every record is its own
-          // batch, so each append is a batch boundary.
-          let i = self.sticky.partition(n)
-          self.sticky.on_new_batch(n)
-          i
-        }
+        // Sticky: the same partition until a batch closes; the producer
+        // calls on_batch_closed at batch boundaries.
+        (Murmur2, None) => self.sticky.partition(n)
         (Murmur2RoundRobin, None) => self.next_round_robin(n)
       }
   }
@@ -138,4 +134,12 @@ fn PartitionRouter::next_round_robin(self : PartitionRouter, n : Int) -> Int {
   let i = self.round_robin % n
   self.round_robin += 1
   i
+}
+
+///|
+/// A batch boundary: the accumulator closed a batch (it filled, or its
+/// flusher took it), so the next unkeyed batch under the Murmur2 strategy
+/// moves to the next partition.
+fn PartitionRouter::on_batch_closed(self : PartitionRouter, n : Int) -> Unit {
+  self.sticky.on_new_batch(n)
 }

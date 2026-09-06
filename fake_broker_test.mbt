@@ -228,10 +228,11 @@ fn fake_metadata_response(
 let fake_topic_id : Bytes = Bytes::make(16, b'\x2a')
 
 ///|
-/// Parse the first partition index of a Produce v12/v13 request: skip the
-/// fixed header ints, client id + tag buffer, then the request body down
-/// to the first topic's first partition entry.
-fn fake_produce_request_partition(rest : Bytes, version : Int) -> Int raise {
+/// Parse the first partition index and record count of a Produce v12/v13
+/// request: skip the fixed header ints, client id + tag buffer, then the
+/// request body down to the first topic's first partition entry; the
+/// count sits in the batch's v2 header (i32 at bytes 57..61).
+fn fake_produce_request_info(rest : Bytes, version : Int) -> (Int, Int) raise {
   let d = @buf.Decoder::new(rest)
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
@@ -247,7 +248,14 @@ fn fake_produce_request_partition(rest : Bytes, version : Int) -> Int raise {
     _ => ignore(d.read_compact_string()) // topic name
   }
   ignore(d.read_compact_len()) // partitions
-  d.read_i32()
+  let partition = d.read_i32()
+  let n = d.read_compact_len() // records: one batch's bytes
+  let batch = d.read_bytes(n)
+  let count = (batch[57].to_int() << 24) |
+    (batch[58].to_int() << 16) |
+    (batch[59].to_int() << 8) |
+    batch[60].to_int()
+  (partition, count)
 }
 
 ///|
@@ -455,6 +463,7 @@ async fn fake_serve_conn(
   scram_sha512? : Bool = false,
   fetch_epochs? : Array[Int] = [],
   produce_partitions? : Array[Int] = [],
+  produce_record_counts? : Array[Int] = [],
 ) -> Unit {
   // per-connection SASL state
   let mut sasl_mechanism : String? = None
@@ -477,10 +486,9 @@ async fn fake_serve_conn(
         fake_sasl_handshake_response()
       }
       0 => {
-        let idx = fake_produce_request_partition(rest, version) catch {
-          e => abort("fake broker produce parse failed: \{e}")
-        }
+        let (idx, count) = fake_produce_request_info(rest, version)
         produce_partitions.push(idx)
+        produce_record_counts.push(count)
         fake_produce_response(topic, version, 42L)
       }
       2 => fake_list_offsets_response(topic, 42L)
@@ -597,6 +605,7 @@ async fn fake_broker(
   wrap_tls? : Bool = false,
   fetch_epochs? : Array[Int] = [],
   produce_partitions? : Array[Int] = [],
+  produce_record_counts? : Array[Int] = [],
 ) -> Unit {
   for ;; {
     let (tcp, _) = server.accept()
@@ -626,6 +635,7 @@ async fn fake_broker(
         scram_sha512~,
         fetch_epochs~,
         produce_partitions~,
+        produce_record_counts~,
       )
     }
   }
@@ -772,6 +782,60 @@ async test "producer manual partition override reaches the broker" {
       _ => ()
     }
     assert_eq(produce_partitions.length(), 1)
+    server.close()
+  }
+}
+
+///|
+async test "accumulator coalesces concurrent sends into one batch" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let produce_partitions : Array[Int] = []
+    let produce_record_counts : Array[Int] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(
+        server,
+        root,
+        "events",
+        accepted,
+        produce_partitions~,
+        produce_record_counts~,
+      )
+    }
+    let producer = @moonkafka.Producer::connect_with_config(
+      @moonkafka.ProducerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        acks=1,
+        request_timeout_ms=10000,
+        linger_ms=50,
+      ),
+    )
+    defer producer.close()
+    // Two concurrent sends land in the same open batch during the linger
+    // window and leave as one Produce request; each takes base + index.
+    let offsets : Array[Int64] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      offsets.push(producer.send(value=b"first"))
+    }
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      offsets.push(producer.send(value=b"second"))
+    }
+    for _ in 0..<1000 {
+      if offsets.length() == 2 {
+        break
+      }
+      @async.sleep(5)
+    }
+    assert_eq(offsets.length(), 2)
+    offsets.sort()
+    assert_eq(offsets[0], 42L)
+    assert_eq(offsets[1], 43L)
+    assert_eq(produce_partitions.length(), 1)
+    assert_eq(produce_partitions[0], 0)
+    assert_eq(produce_record_counts.length(), 1)
+    assert_eq(produce_record_counts[0], 2)
     server.close()
   }
 }

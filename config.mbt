@@ -264,11 +264,20 @@ pub struct ProducerConfig {
   /// Partition selection strategy (murmur2 for keyed records in every
   /// strategy; unkeyed records are sticky or round-robin).
   partitioner : Partitioner
+  /// Maximum encoded size of one produce batch per partition.
+  batch_size : Int
+  /// How long a not-yet-full batch waits for more records before it is
+  /// sent; 0 sends as soon as the flusher arrives.
+  linger_ms : Int
+  /// Total bytes the accumulator may queue across all partitions.
+  buffer_memory : Int
 } derive(@debug.Debug)
 
 ///|
 /// `acks` is 1 (leader acknowledgement) or -1 (all in-sync replicas);
 /// 0 becomes valid with the Phase 3 sender that does not read responses.
+/// Defaults mirror the Java client: 16 KiB batches, no lingering, a
+/// 32 MiB buffer pool.
 pub fn ProducerConfig::new(
   bootstrap_servers : Array[String],
   topic : String,
@@ -278,6 +287,9 @@ pub fn ProducerConfig::new(
   sasl? : SaslConfig? = None,
   tls? : TlsClientOptions? = None,
   partitioner? : Partitioner = Murmur2,
+  batch_size? : Int = 16384,
+  linger_ms? : Int = 0,
+  buffer_memory? : Int = 33554432,
 ) -> ProducerConfig raise {
   if acks != 1 && acks != -1 {
     raise ProtocolError::ProtocolError(
@@ -286,6 +298,21 @@ pub fn ProducerConfig::new(
   }
   if topic.length() == 0 {
     raise ProtocolError::ProtocolError("topic must not be empty")
+  }
+  if batch_size <= 0 {
+    raise ProtocolError::ProtocolError(
+      "batch_size must be positive, got \{batch_size}",
+    )
+  }
+  if linger_ms < 0 {
+    raise ProtocolError::ProtocolError(
+      "linger_ms must be >= 0, got \{linger_ms}",
+    )
+  }
+  if buffer_memory < batch_size {
+    raise ProtocolError::ProtocolError(
+      "buffer_memory (\{buffer_memory}) must be at least batch_size (\{batch_size})",
+    )
   }
   {
     common: CommonConfig::new(
@@ -298,6 +325,9 @@ pub fn ProducerConfig::new(
     topic,
     acks,
     partitioner,
+    batch_size,
+    linger_ms,
+    buffer_memory,
   }
 }
 
