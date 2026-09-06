@@ -70,6 +70,8 @@ Working today:
   with range, round-robin, sticky, and cooperative-sticky assignors
   (two-round incremental rebalancing), static membership, graceful
   leave, and rebalance listener hooks
+- group_protocol selection: KIP-848 (default), classic, or fallback
+  ordering probed against the broker's advertised APIs
 - Pipelined broker connections: request timeouts, in-flight cap, reconnect
   through bootstrap servers, broker throttling
 - TLS (including verified certificates via a custom CA) and SASL

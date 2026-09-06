@@ -709,8 +709,27 @@ same PID/sequence (mock broker test).
       helpers; generic parameterized decoders are deferred to the
       API-stability pass, where making the consumer generic can be
       judged against real usage.
-- [ ] **`group_protocol` config**: `consumer` (KIP-848, default) | `classic`
-      | fallback ordering; document interop caveats.
+- [x] **`group_protocol` config**: DONE (commit 89075f7):
+      `GroupProtocol` — `ConsumerProtocol` (KIP-848, the default)
+      fails fast when the broker does not advertise
+      ConsumerGroupHeartbeat; `ClassicProtocol` always rides the
+      classic APIs; `PreferConsumer` / `PreferClassic` probe the
+      negotiated ApiVersions ranges (`ClusterClient::supports_api`) and
+      degrade to the other path. `subscribe()` dispatches on the
+      resolved protocol; explicit `subscribe_classic` remains the
+      escape hatch, and regex subscription stays KIP-848-only (the
+      classic protocol has no regex field).
+      **Interop caveats:** (1) the cooperative-sticky owned-partition
+      report uses our own assignment encoding in the subscription
+      userData slot — Java serializes a private format there, so
+      mixed-vendor cooperative groups will not converge on shared
+      partition movements (single-vendor groups are correct; eager
+      range/roundrobin interop is unaffected); (2) regex expansion
+      implements a glob subset (`*`, `?`/`.`), not full Java regex —
+      patterns outside the subset should use explicit topic lists; (3)
+      the classic path reports `UNSTABLE_OFFSET_COMMIT` through commit
+      retries rather than surfacing `require_stable` semantics
+      explicitly.
 
 **Acceptance:** integration suite vs Docker 4.3: N consumers in one group
 over M partitions converge; rebalance on member join/leave/crash with no
