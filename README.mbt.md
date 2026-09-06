@@ -51,10 +51,14 @@ Working today:
   (AddOffsetsToTxn + TxnOffsetCommit), EndTxn with epoch adoption,
   coordinator retry/refind, fencing detection, and abort-on-error commit
   policy
-- Simple consumer: incremental fetch sessions with eviction recovery,
-  offset resolution by sentinel or timestamp, the seek family
-  (explicit/timestamp/beginning/end), committed-offset tracking with
-  sync/async commit and autocommit (interval + commit-on-close)
+- Simple consumer: concurrent per-leader fetches with incremental
+  sessions and eviction recovery, offset resolution by sentinel or
+  timestamp, the seek family (explicit/timestamp/beginning/end),
+  committed-offset tracking with sync/async commit and autocommit
+  (interval + commit-on-close), max_poll_records /
+  max_partition_fetch_bytes caps, per-partition pause/resume,
+  auto-offset-reset policies, leader-epoch truncation detection, and
+  read_committed filtering of aborted transactions
 - Pipelined broker connections: request timeouts, in-flight cap, reconnect
   through bootstrap servers, broker throttling
 - TLS (including verified certificates via a custom CA) and SASL

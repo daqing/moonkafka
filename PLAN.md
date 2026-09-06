@@ -619,12 +619,27 @@ same PID/sequence (mock broker test).
       commit/read-back round-trip through the fake coordinator store,
       load-retry, async callback, session-aware seek sequencing,
       autocommit interval + close.
-- [ ] **Fetcher**: per-leader pipelined Fetch with sessions (P2); position
-      validation (`OffsetOutOfRange` → auto-reset policy earliest/latest/
-      none); leader-epoch truncation detection via OffsetForLeaderEpoch v4
-      on `UNKNOWN_LEADER_EPOCH`/`FENCED_LEADER_EPOCH`; pause/resume per
-      partition; `max_poll_records`/`max_partition_fetch_bytes` honored;
-      decompression + read_committed filtering wired in.
+- [x] **Fetcher**: DONE (commit 5a0f849): `poll` runs one concurrent
+      long-poll fetch per leader through the incremental sessions, capped
+      by `max_poll_records` (the position rewinds to the first
+      unconsumed record so a capped poll re-fetches the rest) and
+      `max_partition_fetch_bytes` (per-partition cap in every request).
+      `pause`/`resume`/`paused` skip partitions while keeping positions.
+      OFFSET_OUT_OF_RANGE follows the `auto_offset_reset` policy
+      (ResetEarliest/ResetLatest/ResetNone raising); UNKNOWN/FENCED_
+      LEADER_EPOCH answers trigger the KIP-320 check — OffsetForLeaderEpoch
+      v4 (pinned from the 4.3 schema, key 23) asks the leader where the
+      known epoch ends and rewinds the position on truncation, else the
+      metadata refresh heals. `enable_read_committed` fetches with
+      READ_COMMITTED isolation and filters the response's
+      aborted-transaction list via `collect_committed`; fetch responses
+      now carry the detailed decoded batches, and positions advance past
+      whole batch ends (last_offset) so control/aborted ranges never
+      re-fetch. The record batch builder gained `set_transactional`.
+      Decompression and per-partition caps were already wired from Phase
+      2. E2E: pause/resume wire behavior, cap+rewind sequencing,
+      read_committed filtering against an aborted batch, epoch-error
+      rewind.
 - [ ] **KIP-848 member** (`consumer/group_new.mbt`) — the primary path:
       client-generated member id (uuid); ConsumerGroupHeartbeat v1 loop
       (`heartbeat_interval_ms` from server); server-driven assignment applied
