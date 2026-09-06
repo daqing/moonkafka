@@ -63,6 +63,10 @@ Working today:
   membership with client-generated member ids, server-driven assignment
   applied atomically around rebalance listener hooks, static membership,
   regex subscription, graceful leave, and fencing recovery
+- Classic consumer groups (compat path): JoinGroup/SyncGroup/Heartbeat
+  with range, round-robin, sticky, and cooperative-sticky assignors
+  (two-round incremental rebalancing), static membership, graceful
+  leave, and rebalance listener hooks
 - Pipelined broker connections: request timeouts, in-flight cap, reconnect
   through bootstrap servers, broker throttling
 - TLS (including verified certificates via a custom CA) and SASL
@@ -70,7 +74,6 @@ Working today:
 
 Planned:
 
-- Classic consumer groups (JoinGroup/SyncGroup compat path)
 - Admin client and share groups
 
 ## Requirements
