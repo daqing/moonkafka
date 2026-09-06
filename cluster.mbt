@@ -230,6 +230,19 @@ pub fn ClusterClient::topic_name(self : ClusterClient, id : Uuid) -> String? {
 }
 
 ///|
+/// Sum of the throttle hints received across the control connection and
+/// every pooled connection.
+pub fn ClusterClient::total_throttle_ms(self : ClusterClient) -> Int64 {
+  // Unlocked reads: counters are advisory and the cooperative scheduler
+  // makes a torn read impossible on native Int64 writes.
+  let mut total = self.control.throttle_total_ms()
+  for _, conn in self.conns {
+    total += conn.throttle_total_ms()
+  }
+  total
+}
+
+///|
 /// Batched coordinator lookup through the control connection, keyed by
 /// the requested key. Per-key broker errors come back inside the entries
 /// (error_code); transport failures propagate.
