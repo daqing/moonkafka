@@ -444,6 +444,9 @@ pub struct ConsumerConfig {
   /// Fetch with READ_COMMITTED isolation and filter aborted
   /// transactions out of polled records.
   enable_read_committed : Bool
+  /// Static membership identity (KIP-848): a member restarting with the
+  /// same instance id rejoins without triggering a rebalance.
+  group_instance_id : String?
 } derive(@debug.Debug)
 
 ///|
@@ -463,6 +466,7 @@ pub fn ConsumerConfig::new(
   max_poll_records? : Int = 500,
   max_partition_fetch_bytes? : Int = 1048576,
   enable_read_committed? : Bool = false,
+  group_instance_id? : String? = None,
 ) -> ConsumerConfig raise {
   if topic.length() == 0 {
     raise ProtocolError::ProtocolError("topic must not be empty")
@@ -514,5 +518,6 @@ pub fn ConsumerConfig::new(
     max_poll_records,
     max_partition_fetch_bytes,
     enable_read_committed,
+    group_instance_id,
   }
 }
