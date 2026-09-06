@@ -481,10 +481,15 @@ compression codec; `moon coverage analyze` shows codec branches covered.
 
 ### Phase 3 — Full producer
 
-- [ ] **Partitioner**: murmur2 (done in P0) as default for keyed records;
-      uniform round-robin; **sticky partitioning** for unkeyed batches
-      (switch partition per batch-full, like the Java client);
-      `partitioner` config; manual `partition` override per send.
+- [x] **Partitioner**: DONE (commit f31cdc2): `Partitioner` config strategy
+      — `Murmur2` (default: keyed by murmur2, unkeyed sticky), `Murmur2RoundRobin`,
+      `RoundRobin`; `StickyPartitioner` reuses one partition per batch and
+      steps to the next at batch boundaries (KIP-794, sequential step
+      instead of the Java cache's random roll); routing lives in a
+      package-private `PartitionRouter` so the rules test without a
+      connection. `send` takes a manual `partition` override validated
+      against the partition count. Boundary switching is driven per send
+      until the accumulator batches records.
 - [ ] **Batching accumulator** (`producer/accumulator.mbt`): per-partition
       batch deque; `linger_ms`, `batch_size`, `buffer_memory` accounting with
       blocking/`BufferExhausted` error; append API the public `send` uses.
