@@ -13,6 +13,10 @@ pub struct Producer {
   retries : Int
   retry_backoff_ms : Int
   retry_backoff_max_ms : Int
+  delivery_timeout_ms : Int
+  /// The user's task group; hosts the sender drain loop, which the group
+  /// joins on exit (close lets it drain first).
+  group : @async.TaskGroup[Unit]
   priv cluster : ClusterClient
   mut topic_id : Uuid
   mut partitions : Array[PartitionInfo]
@@ -23,10 +27,11 @@ pub struct Producer {
 
 ///|
 /// Connect to a bootstrap broker, negotiate API versions, resolve the
-/// topic's partitions and their leaders. `acks` is 1 (leader
-/// acknowledgement) or -1 (all in-sync replicas); acks=0 is not supported
-/// because this client always reads the response.
+/// topic's partitions and their leaders, and start the sender drain loop
+/// in `group`. `acks` is 0 (fire-and-forget), 1 (leader) or -1 (all
+/// in-sync replicas).
 pub async fn Producer::connect(
+  group~ : @async.TaskGroup[Unit],
   host~ : String,
   port~ : Int,
   topic~ : String,
@@ -39,13 +44,17 @@ pub async fn Producer::connect(
     acks~,
     request_timeout_ms=timeout_ms,
   )
-  Producer::connect_with_config(config)
+  Producer::connect_with_config(group~, config)
 }
 
 ///|
 /// Connect using explicit configuration, which is validated first. The
-/// cluster client lands on the first bootstrap server that accepts.
-pub async fn Producer::connect_with_config(config : ProducerConfig) -> Producer {
+/// cluster client lands on the first bootstrap server that accepts, and
+/// the sender task drains the accumulator until close.
+pub async fn Producer::connect_with_config(
+  group~ : @async.TaskGroup[Unit],
+  config : ProducerConfig,
+) -> Producer {
   // SASL credentials only apply on SASL security protocols.
   let sasl = match config.common.security_protocol {
     SaslPlaintext | SaslSsl => config.common.sasl
@@ -71,6 +80,8 @@ pub async fn Producer::connect_with_config(config : ProducerConfig) -> Producer 
     retries: config.common.retries,
     retry_backoff_ms: config.common.retry_backoff_ms,
     retry_backoff_max_ms: config.common.retry_backoff_max_ms,
+    delivery_timeout_ms: config.delivery_timeout_ms,
+    group,
     cluster,
     topic_id: Uuid::zero(),
     partitions: [],
@@ -83,14 +94,22 @@ pub async fn Producer::connect_with_config(config : ProducerConfig) -> Producer 
     closed: false,
   }
   producer.refresh_metadata()
+  // The sender loop joins the group (no_wait=false): close() stops it
+  // and the group waits out its final drain before tearing down.
+  group.spawn_bg(no_wait=false, allow_failure=false, () => {
+    producer.sender_loop()
+  })
   producer
 }
 
 ///|
+/// Stop the producer: the sender task force-closes every open batch,
+/// drains what is queued (honoring retries and delivery_timeout_ms),
+/// resolves every pending send, and tears the cluster connections down
+/// on exit. Sends after close raise.
 pub fn Producer::close(self : Producer) -> Unit {
   if !self.closed {
     self.closed = true
-    self.cluster.close()
   }
 }
 
@@ -142,12 +161,12 @@ fn Producer::pick_partition(
 /// `timestamp` defaults to the current time (ms since epoch). `partition`
 /// overrides automatic routing when given and must name an existing
 /// partition; `headers` ride along with the record. The record joins the
-/// partition's open batch (batch_size, linger_ms); whichever sender
-/// flushes the batch shares the broker's base offset with every coalesced
-/// record, each taking base + its index. Leadership changes and transport
-/// failures trigger recovery and a backoff-paced retry, up to `retries`
-/// attempts after the first; buffer_memory exhaustion raises
-/// BufferExhausted.
+/// partition's open batch (batch_size, linger_ms) and the sender task
+/// puts it on the wire, so concurrent senders coalesce into shared
+/// Produce requests and each takes the batch's base offset plus its
+/// index. Retries run in the sender, bounded by delivery_timeout_ms.
+/// With acks=0 nothing is acknowledged and send returns -1 once the
+/// request is written. buffer_memory exhaustion raises BufferExhausted.
 pub async fn Producer::send(
   self : Producer,
   key? : Bytes,
@@ -156,6 +175,9 @@ pub async fn Producer::send(
   partition? : Int,
   headers? : Array[(Bytes, Bytes)] = [],
 ) -> Int64 {
+  if self.closed {
+    raise ProtocolError::ProtocolError("producer is closed")
+  }
   // Opportunistic metadata refresh once the cached snapshot aged out.
   self.cluster.refresh_if_stale()
   let timestamp = timestamp.unwrap_or(@async.now())
@@ -174,109 +196,25 @@ pub async fn Producer::send(
   if rotated {
     self.router.on_batch_closed(n)
   }
-  // Linger gives concurrent senders a window to coalesce; with the
-  // default linger_ms=0 the batch goes out immediately. A batch closed
-  // early by rotation skips the wait.
-  let ready_at = batch.ready_at(self.accumulator.linger_ms)
-  let now = @async.now()
-  if ready_at > now && !batch.closed {
-    @async.sleep((ready_at - now).to_int())
-  }
-  let (closed_now, claimed) = self.accumulator.close_and_claim(batch)
-  if closed_now {
-    self.router.on_batch_closed(n)
-  }
-  if !claimed {
-    // Another sender is flushing this batch; derive the offset from it.
-    return self.await_batch(batch, index)
-  }
-  // Per-partition order: every earlier queued batch reaches the broker
-  // before ours. The sender task (next work item) replaces this inline
-  // drain with a front-first loop.
-  for pred in self.accumulator.predecessors(batch) {
-    let (pred_closed, pred_claimed) = self.accumulator.close_and_claim(pred)
-    if pred_closed {
-      self.router.on_batch_closed(n)
-    }
-    if pred_claimed {
-      // The predecessor's own records fail with it; ours still go out.
-      // Only protocol errors are swallowed — cancellation must propagate.
-      let _ = self.flush_one(p, pred) catch {
-        ProtocolError(_) => 0L
-        e => raise e
-      }
-    } else {
-      // Its flusher owns the outcome; the predecessor's senders fail
-      // with it, ours continue.
-      let _ = self.await_batch(pred, 0) catch {
-        ProtocolError(_) => 0L
-        e => raise e
-      }
-    }
-  }
-  let base = self.flush_one(p, batch)
-  base + index.to_int64()
+  // The sender task drains the batch and publishes the result.
+  self.await_batch(batch, index)
 }
 
 ///|
-/// Put one claimed batch on the wire and publish its terminal result to
-/// every coalesced sender, returning the broker's base offset to the
-/// flusher (whose own record awaits nothing). Recoverable failures
-/// requeue the batch and retry with backoff after recovery, up to
-/// `retries` attempts after the first.
-async fn Producer::flush_one(
-  self : Producer,
-  p : PartitionInfo,
-  batch : ProducerBatch,
-) -> Int64 {
-  let bytes = batch.builder.to_bytes()
-  let backoff = Backoff::new(
-    base_ms=self.retry_backoff_ms,
-    max_ms=self.retry_backoff_max_ms,
-  )
-  // Cap the materialized attempt count: huge `retries` values (Java-style
-  // unbounded) must not overflow the loop bound.
-  let attempts = if self.retries > 1000 { 1000 } else { self.retries + 1 }
-  for attempt in 0..<attempts {
-    let sent = self.attempt_send(p, bytes) catch {
-      e => {
-        self.accumulator.release(batch, BatchError("\{e}"))
-        raise e
-      }
-    }
-    match sent {
-      Some(base) => {
-        self.accumulator.release(batch, BatchOk(base))
-        return base
-      }
-      None => {
-        self.recover()
-        self.accumulator.requeue(batch)
-        if attempt + 1 < attempts {
-          @async.sleep(backoff.next_ms())
-        }
-      }
-    }
-  }
-  self.accumulator.release(
-    batch,
-    BatchError("send to topic \{self.topic} failed after \{attempts} attempts"),
-  )
-  raise ProtocolError::ProtocolError(
-    "send to topic \{self.topic} failed after \{attempts} attempts",
-  )
-}
-
-///|
-/// Wait for the batch's flusher to publish the result and derive this
-/// record's offset from the batch's base offset.
+/// Wait for the sender task to publish the batch's result and derive
+/// this record's offset from the batch's base offset. Every coalesced
+/// sender registers its own wakeup under the accumulator lock, so
+/// releases racing the registration cannot strand anyone.
 async fn Producer::await_batch(
   self : Producer,
   batch : ProducerBatch,
   index : Int,
 ) -> Int64 {
-  ignore(self)
-  batch.done.acquire()
+  let my_done = @async.Semaphore(1, initial_value=0)
+  let already_done = self.accumulator.register_waiter(batch, my_done)
+  if !already_done {
+    my_done.acquire()
+  }
   match batch.result {
     Some(BatchOk(base)) => base + index.to_int64()
     Some(BatchError(msg)) => raise ProtocolError::ProtocolError(msg)
@@ -285,63 +223,4 @@ async fn Producer::await_batch(
         "batch finished without a result (moonkafka bug)",
       )
   }
-}
-
-///|
-/// One produce attempt. Returns None when the failure is recoverable —
-/// a dead connection or a leadership change — after recovery has been
-/// triggered; permanent broker errors raise.
-async fn Producer::attempt_send(
-  self : Producer,
-  p : PartitionInfo,
-  batch : Bytes,
-) -> Int64? {
-  // The broker must be known from metadata; a dial or authentication
-  // failure on the way propagates (SASL failures are terminal).
-  guard self.cluster.broker(p.leader) is Some(_) else { return None }
-  let conn = self.cluster.connection(p.leader)
-  let results = conn.produce(
-    self.topic,
-    topic_id=self.topic_id,
-    partitions=[(p.index, batch)],
-    acks=self.acks,
-    timeout_ms=self.timeout_ms,
-  ) catch {
-    e =>
-      match e {
-        TransportError::ConnectionClosed(_) => return None
-        TransportError::RequestTimeout(_) => return None
-        _ => raise e
-      }
-  }
-  guard results.get(0) is Some(result) else {
-    raise ProtocolError::ProtocolError("Produce response has no partitions")
-  }
-  match result.error_code {
-    0 => Some(result.base_offset)
-    // LEADER_NOT_AVAILABLE / NOT_LEADER_OR_FOLLOWER / REBOOTSTRAP_REQUIRED:
-    // all recover by re-dialing the bootstrap set and refreshing metadata.
-    5 | 6 | 129 => None
-    code =>
-      raise ProtocolError::ProtocolError(
-        "Produce failed for partition \{result.partition}: \{error_name(code)}\{produce_error_detail(result)}",
-      )
-  }
-}
-
-///|
-/// The broker's own explanation for a dropped batch: the summary message
-/// and the offending record indices (KIP-467), when it reported any.
-fn produce_error_detail(result : ProducePartitionResult) -> String {
-  let detail = match result.error_message {
-    Some(msg) => ": \{msg}"
-    None => ""
-  }
-  if result.record_errors.is_empty() {
-    return detail
-  }
-  let indices = result.record_errors
-    .map(fn(err) { err.batch_index.to_string() })
-    .join(",")
-  "\{detail} (records [\{indices}])"
 }

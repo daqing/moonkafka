@@ -201,6 +201,7 @@ pub fn BrokerConnection::note_throttle(Self, Int) -> Unit
 pub async fn BrokerConnection::produce(Self, String, topic_id? : Uuid, partitions~ : Array[(Int, Bytes)], acks~ : Int, timeout_ms~ : Int) -> Array[ProducePartitionResult]
 pub async fn BrokerConnection::request(Self, Int, Int, Bytes, timeout_ms? : Int) -> @buf.Decoder
 pub async fn BrokerConnection::request_raw(Self, Int, Int, Bytes, timeout_ms? : Int, flexible? : Bool) -> @buf.Decoder
+pub async fn BrokerConnection::send_only(Self, Int, Int, Bytes) -> Unit
 
 pub struct BrokerInfo {
   node_id : Int
@@ -227,6 +228,7 @@ pub struct ClusterClient {
   client_id : String
   request_timeout_ms : Int
   metadata_max_age_ms : Int
+  max_in_flight : Int
   sasl : SaslConfig?
   use_tls : Bool
   tls_options : TlsClientOptions?
@@ -239,7 +241,7 @@ pub struct ClusterClient {
   // private fields
 }
 pub fn ClusterClient::close(Self) -> Unit
-pub async fn ClusterClient::connect(Array[HostPort], client_id? : String, request_timeout_ms? : Int, metadata_max_age_ms? : Int, sasl? : SaslConfig?, use_tls? : Bool, tls? : TlsClientOptions?) -> Self
+pub async fn ClusterClient::connect(Array[HostPort], client_id? : String, request_timeout_ms? : Int, metadata_max_age_ms? : Int, max_in_flight? : Int, sasl? : SaslConfig?, use_tls? : Bool, tls? : TlsClientOptions?) -> Self
 pub async fn ClusterClient::connection(Self, Int) -> BrokerConnection
 pub fn ClusterClient::control_conn(Self) -> BrokerConnection
 pub async fn ClusterClient::coordinator(Self, Array[String], CoordinatorType) -> Map[String, CoordinatorInfo]
@@ -432,14 +434,16 @@ pub struct Producer {
   retries : Int
   retry_backoff_ms : Int
   retry_backoff_max_ms : Int
+  delivery_timeout_ms : Int
+  group : @async.TaskGroup[Unit]
   mut topic_id : Uuid
   mut partitions : Array[PartitionInfo]
   mut closed : Bool
   // private fields
 }
 pub fn Producer::close(Self) -> Unit
-pub async fn Producer::connect(host~ : String, port~ : Int, topic~ : String, acks? : Int, timeout_ms? : Int) -> Self
-pub async fn Producer::connect_with_config(ProducerConfig) -> Self
+pub async fn Producer::connect(group~ : @async.TaskGroup[Unit], host~ : String, port~ : Int, topic~ : String, acks? : Int, timeout_ms? : Int) -> Self
+pub async fn Producer::connect_with_config(group~ : @async.TaskGroup[Unit], ProducerConfig) -> Self
 pub async fn Producer::send(Self, key? : Bytes, value? : Bytes, timestamp? : Int64, partition? : Int, headers? : Array[(Bytes, Bytes)]) -> Int64
 
 pub struct ProducerConfig {
@@ -450,8 +454,10 @@ pub struct ProducerConfig {
   batch_size : Int
   linger_ms : Int
   buffer_memory : Int
+  max_in_flight : Int
+  delivery_timeout_ms : Int
 } derive(@debug.Debug)
-pub fn ProducerConfig::new(Array[String], String, acks? : Int, request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?, tls? : TlsClientOptions?, partitioner? : Partitioner, batch_size? : Int, linger_ms? : Int, buffer_memory? : Int, metadata_max_age_ms? : Int) -> Self raise
+pub fn ProducerConfig::new(Array[String], String, acks? : Int, request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?, tls? : TlsClientOptions?, partitioner? : Partitioner, batch_size? : Int, linger_ms? : Int, buffer_memory? : Int, metadata_max_age_ms? : Int, max_in_flight? : Int, delivery_timeout_ms? : Int) -> Self raise
 
 pub(all) struct Record {
   offset : Int64

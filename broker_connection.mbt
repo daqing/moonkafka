@@ -248,6 +248,27 @@ async fn BrokerConnection::issue_request(
 }
 
 ///|
+/// Write a request frame without awaiting a response — Produce with
+/// acks=0, where the broker sends none. The correlation id still
+/// advances so later responses keep their numbering; no in-flight slot
+/// is consumed since nothing waits.
+pub async fn BrokerConnection::send_only(
+  self : BrokerConnection,
+  api_key : Int,
+  api_version : Int,
+  body : Bytes,
+) -> Unit {
+  self.write_lock.acquire()
+  defer self.write_lock.release()
+  self.correlation_id += 1
+  let corr = self.correlation_id
+  self.stream.write(
+    encode_request(api_key, api_version, corr, self.client_id, body),
+  )
+  ignore(corr)
+}
+
+///|
 /// Claim responses until our frame arrives, reading new frames while we
 /// hold the read lock and pooling frames that belong to other requesters.
 async fn BrokerConnection::await_response(

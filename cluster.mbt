@@ -13,6 +13,7 @@ pub struct ClusterClient {
   client_id : String
   request_timeout_ms : Int
   metadata_max_age_ms : Int
+  max_in_flight : Int
   sasl : SaslConfig?
   use_tls : Bool
   tls_options : TlsClientOptions?
@@ -38,6 +39,7 @@ pub async fn ClusterClient::connect(
   client_id? : String = "moonkafka",
   request_timeout_ms? : Int = 30000,
   metadata_max_age_ms? : Int = 300000,
+  max_in_flight? : Int = 5,
   sasl? : SaslConfig? = None,
   use_tls? : Bool = false,
   tls? : TlsClientOptions? = None,
@@ -56,6 +58,7 @@ pub async fn ClusterClient::connect(
     client_id,
     request_timeout_ms,
     metadata_max_age_ms,
+    max_in_flight,
     sasl,
     use_tls,
     tls_options: tls,
@@ -186,6 +189,7 @@ pub async fn ClusterClient::connection(
         broker.host,
         broker.port,
         client_id=self.client_id,
+        max_in_flight=self.max_in_flight,
         timeout_ms=self.request_timeout_ms,
         tls=tls_opts,
       )
