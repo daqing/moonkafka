@@ -63,6 +63,9 @@ Working today:
   membership with client-generated member ids, server-driven assignment
   applied atomically around rebalance listener hooks, static membership,
   regex subscription, graceful leave, and fencing recovery
+- Consumer surface: subscribe/assign split, position/committed/
+  assignment/group_metadata introspection, max_poll_interval_ms
+  enforcement, and utf8 record helpers
 - Classic consumer groups (compat path): JoinGroup/SyncGroup/Heartbeat
   with range, round-robin, sticky, and cooperative-sticky assignors
   (two-round incremental rebalancing), static membership, graceful
