@@ -1026,3 +1026,69 @@ async test "sender writes acks=0 produce without reading a response" {
     server.close()
   }
 }
+
+///|
+/// True when awaiting the handle raises (cancellation surfaces as an error).
+async fn await_raises(handle : @moonkafka.SendHandle) -> Bool {
+  let _ = handle.await() catch {
+    @moonkafka.ProtocolError(_) => return true
+    e => raise e
+  }
+  false
+}
+
+///|
+async test "send handles await, batch, cancel, and call back" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let produce_record_counts : Array[Int] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, produce_record_counts~)
+    }
+    let producer = @moonkafka.Producer::connect_with_config(
+      group=root,
+      @moonkafka.ProducerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        acks=1,
+        request_timeout_ms=10000,
+        linger_ms=20,
+      ),
+    )
+    defer producer.close()
+    // send_all: three records appended in one call, resolved by handle
+    let handles = producer.send_all([
+      @moonkafka.SendRecord::of(value=b"a"),
+      @moonkafka.SendRecord::of(value=b"b"),
+      @moonkafka.SendRecord::of(value=b"c"),
+    ])
+    assert_eq(handles.length(), 3)
+    let offsets : Array[Int64] = []
+    for handle in handles {
+      offsets.push(handle.await())
+    }
+    offsets.sort()
+    assert_eq(offsets, [42L, 43L, 44L])
+    // coalesced into one produce request
+    assert_eq(produce_record_counts.length(), 1)
+    assert_eq(produce_record_counts[0], 3)
+    // completion callback fires with the sent offset
+    let callback_results : Array[@moonkafka.SendResult] = []
+    let late = producer.send_handle(value=b"cb")
+    late.on_complete(fn(result) { callback_results.push(result) })
+    for _ in 0..<1000 {
+      if callback_results.length() == 1 {
+        break
+      }
+      @async.sleep(5)
+    }
+    assert_eq(callback_results.length(), 1)
+    assert_true(callback_results[0] is @moonkafka.Sent(_))
+    // cancel stops the wait: await raises, the record still drains at close
+    let doomed = producer.send_handle(value=b"doomed")
+    doomed.cancel()
+    assert_true(await_raises(doomed))
+    server.close()
+  }
+}

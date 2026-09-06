@@ -445,6 +445,8 @@ pub fn Producer::close(Self) -> Unit
 pub async fn Producer::connect(group~ : @async.TaskGroup[Unit], host~ : String, port~ : Int, topic~ : String, acks? : Int, timeout_ms? : Int) -> Self
 pub async fn Producer::connect_with_config(group~ : @async.TaskGroup[Unit], ProducerConfig) -> Self
 pub async fn Producer::send(Self, key? : Bytes, value? : Bytes, timestamp? : Int64, partition? : Int, headers? : Array[(Bytes, Bytes)]) -> Int64
+pub async fn Producer::send_all(Self, Array[SendRecord]) -> Array[SendHandle]
+pub async fn Producer::send_handle(Self, key? : Bytes, value? : Bytes, timestamp? : Int64, partition? : Int, headers? : Array[(Bytes, Bytes)]) -> SendHandle
 
 pub struct ProducerConfig {
   common : CommonConfig
@@ -522,6 +524,27 @@ pub(all) enum SecurityProtocol {
   Ssl
   SaslPlaintext
   SaslSsl
+} derive(@debug.Debug)
+
+pub struct SendHandle {
+  // private fields
+}
+pub async fn SendHandle::await(Self) -> Int64
+pub fn SendHandle::cancel(Self) -> Unit
+pub fn SendHandle::on_complete(Self, async (SendResult) -> Unit) -> Unit
+
+pub(all) struct SendRecord {
+  key : Bytes?
+  value : Bytes?
+  timestamp : Int64?
+  partition : Int?
+  headers : Array[(Bytes, Bytes)]
+}
+pub fn SendRecord::of(value~ : Bytes) -> Self
+
+pub(all) enum SendResult {
+  Sent(Int64)
+  Failed(String)
 } derive(@debug.Debug)
 
 pub(all) enum StartFrom {
