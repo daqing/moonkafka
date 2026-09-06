@@ -162,6 +162,9 @@ pub struct CommonConfig {
   client_id : String
   request_timeout_ms : Int
   connection_max_idle_ms : Int
+  /// How long cached metadata stays fresh before the next opportunistic
+  /// refresh (Java's metadata.max.age.ms).
+  metadata_max_age_ms : Int
   retries : Int
   retry_backoff_ms : Int
   retry_backoff_max_ms : Int
@@ -183,12 +186,14 @@ pub fn CommonConfig::new(
   security_protocol? : SecurityProtocol = Plaintext,
   sasl? : SaslConfig? = None,
   tls? : TlsClientOptions? = None,
+  metadata_max_age_ms? : Int = 300000,
 ) -> CommonConfig raise {
   let config : CommonConfig = {
     bootstrap_servers,
     client_id: "moonkafka",
     request_timeout_ms,
     connection_max_idle_ms: 540000,
+    metadata_max_age_ms,
     retries: 10,
     retry_backoff_ms: 100,
     retry_backoff_max_ms: 1000,
@@ -218,6 +223,11 @@ pub fn CommonConfig::validate(self : CommonConfig) -> Unit raise ProtocolError {
   if self.connection_max_idle_ms <= 0 {
     raise ProtocolError::ProtocolError(
       "connection_max_idle_ms must be positive, got \{self.connection_max_idle_ms}",
+    )
+  }
+  if self.metadata_max_age_ms <= 0 {
+    raise ProtocolError::ProtocolError(
+      "metadata_max_age_ms must be positive, got \{self.metadata_max_age_ms}",
     )
   }
   if self.retries < 0 {
@@ -261,11 +271,41 @@ pub struct ProducerConfig {
   common : CommonConfig
   topic : String
   acks : Int
+  /// Partition selection strategy (murmur2 for keyed records in every
+  /// strategy; unkeyed records are sticky or round-robin).
+  partitioner : Partitioner
+  /// Maximum encoded size of one produce batch per partition.
+  batch_size : Int
+  /// How long a not-yet-full batch waits for more records before it is
+  /// sent; 0 sends as soon as the flusher arrives.
+  linger_ms : Int
+  /// Total bytes the accumulator may queue across all partitions.
+  buffer_memory : Int
+  /// Unacknowledged Produce requests allowed per broker connection; the
+  /// sender pipelines up to this many. Must stay <= 5 once idempotence
+  /// lands, to preserve ordering.
+  max_in_flight : Int
+  /// Bounded window from append to broker acknowledgement (Java's
+  /// delivery.timeout.ms); records still unacknowledged when it passes
+  /// fail with a delivery error.
+  delivery_timeout_ms : Int
+  /// Idempotent producer: broker-side duplicate suppression per
+  /// producer id. Defaults to following acks (on when acks=-1).
+  enable_idempotence : Bool
+  /// Transactional id: set it to make the producer transactional
+  /// (idempotence is then required, so acks must be -1).
+  transactional_id : String?
+  /// How long the coordinator may wait on a transaction before aborting
+  /// it on the producer's behalf (Java's transaction.timeout.ms).
+  transaction_timeout_ms : Int
 } derive(@debug.Debug)
 
 ///|
-/// `acks` is 1 (leader acknowledgement) or -1 (all in-sync replicas);
-/// 0 becomes valid with the Phase 3 sender that does not read responses.
+/// `acks` is 0 (fire-and-forget; the sender writes Produce requests
+/// without reading responses and send returns -1), 1 (leader
+/// acknowledgement) or -1 (all in-sync replicas). Defaults mirror the
+/// Java client: 16 KiB batches, no lingering, a 32 MiB buffer pool, 5
+/// in-flight requests per broker, a 2-minute delivery timeout.
 pub fn ProducerConfig::new(
   bootstrap_servers : Array[String],
   topic : String,
@@ -274,14 +314,79 @@ pub fn ProducerConfig::new(
   security_protocol? : SecurityProtocol = Plaintext,
   sasl? : SaslConfig? = None,
   tls? : TlsClientOptions? = None,
+  partitioner? : Partitioner = Murmur2,
+  batch_size? : Int = 16384,
+  linger_ms? : Int = 0,
+  buffer_memory? : Int = 33554432,
+  metadata_max_age_ms? : Int = 300000,
+  max_in_flight? : Int = 5,
+  delivery_timeout_ms? : Int = 120000,
+  enable_idempotence? : Bool? = None,
+  transactional_id? : String? = None,
+  transaction_timeout_ms? : Int = 60000,
 ) -> ProducerConfig raise {
-  if acks != 1 && acks != -1 {
+  if acks != 0 && acks != 1 && acks != -1 {
     raise ProtocolError::ProtocolError(
-      "acks must be 1 (leader) or -1 (all), got \{acks}",
+      "acks must be 0 (none), 1 (leader) or -1 (all), got \{acks}",
     )
   }
   if topic.length() == 0 {
     raise ProtocolError::ProtocolError("topic must not be empty")
+  }
+  if batch_size <= 0 {
+    raise ProtocolError::ProtocolError(
+      "batch_size must be positive, got \{batch_size}",
+    )
+  }
+  if linger_ms < 0 {
+    raise ProtocolError::ProtocolError(
+      "linger_ms must be >= 0, got \{linger_ms}",
+    )
+  }
+  if buffer_memory < batch_size {
+    raise ProtocolError::ProtocolError(
+      "buffer_memory (\{buffer_memory}) must be at least batch_size (\{batch_size})",
+    )
+  }
+  if max_in_flight < 1 {
+    raise ProtocolError::ProtocolError(
+      "max_in_flight must be >= 1, got \{max_in_flight}",
+    )
+  }
+  if delivery_timeout_ms <= 0 {
+    raise ProtocolError::ProtocolError(
+      "delivery_timeout_ms must be positive, got \{delivery_timeout_ms}",
+    )
+  }
+  if delivery_timeout_ms < linger_ms + request_timeout_ms {
+    raise ProtocolError::ProtocolError(
+      "delivery_timeout_ms (\{delivery_timeout_ms}) must be at least linger_ms + request_timeout_ms (\{linger_ms + request_timeout_ms})",
+    )
+  }
+  // Idempotence defaults to following acks (Java 3.3+ default behavior):
+  // on when acks=all, off otherwise.
+  let idempotence = enable_idempotence.unwrap_or(acks == -1)
+  if idempotence && acks != -1 {
+    raise ProtocolError::ProtocolError(
+      "enable_idempotence requires acks=-1 (all), got \{acks}",
+    )
+  }
+  if idempotence && max_in_flight > 5 {
+    raise ProtocolError::ProtocolError(
+      "enable_idempotence requires max_in_flight <= 5 to preserve ordering, got \{max_in_flight}",
+    )
+  }
+  if transaction_timeout_ms <= 0 {
+    raise ProtocolError::ProtocolError(
+      "transaction_timeout_ms must be positive, got \{transaction_timeout_ms}",
+    )
+  }
+  // A transactional producer is an idempotent producer with a
+  // transactional id; forcing idempotence off is a misconfiguration.
+  if transactional_id is Some(_) && !idempotence {
+    raise ProtocolError::ProtocolError(
+      "transactional_id requires acks=-1 (the idempotent producer)",
+    )
   }
   {
     common: CommonConfig::new(
@@ -290,9 +395,19 @@ pub fn ProducerConfig::new(
       security_protocol~,
       sasl~,
       tls~,
+      metadata_max_age_ms~,
     ),
     topic,
     acks,
+    partitioner,
+    batch_size,
+    linger_ms,
+    buffer_memory,
+    max_in_flight,
+    delivery_timeout_ms,
+    enable_idempotence: idempotence,
+    transactional_id,
+    transaction_timeout_ms,
   }
 }
 
@@ -312,6 +427,7 @@ pub fn ConsumerConfig::new(
   security_protocol? : SecurityProtocol = Plaintext,
   sasl? : SaslConfig? = None,
   tls? : TlsClientOptions? = None,
+  metadata_max_age_ms? : Int = 300000,
 ) -> ConsumerConfig raise {
   if topic.length() == 0 {
     raise ProtocolError::ProtocolError("topic must not be empty")
@@ -323,6 +439,7 @@ pub fn ConsumerConfig::new(
       security_protocol~,
       sasl~,
       tls~,
+      metadata_max_age_ms~,
     ),
     topic,
     start_from,

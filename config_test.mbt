@@ -73,13 +73,103 @@ test "common config rejects invalid values" {
 test "producer config validates acks and topic" {
   let config = @moonkafka.ProducerConfig::new(["b:9092"], "events")
   assert_eq(config.acks, 1)
+  // acks=0 is valid now that the sender writes without reading responses
+  let fire_and_forget = @moonkafka.ProducerConfig::new(
+    ["b:9092"],
+    "events",
+    acks=0,
+  )
+  assert_eq(fire_and_forget.acks, 0)
   assert_true(
     raises(fn() raise {
-      ignore(@moonkafka.ProducerConfig::new(["b:9092"], "events", acks=0))
+      ignore(@moonkafka.ProducerConfig::new(["b:9092"], "events", acks=2))
     }),
   )
   assert_true(
     raises(fn() raise { ignore(@moonkafka.ProducerConfig::new(["b:9092"], "")) }),
+  )
+}
+
+///|
+test "producer config partitioner defaults to murmur2+sticky" {
+  let config = @moonkafka.ProducerConfig::new(["b:9092"], "events")
+  assert_true(config.partitioner is @moonkafka.Murmur2)
+  let custom = @moonkafka.ProducerConfig::new(
+    ["b:9092"],
+    "events",
+    partitioner=@moonkafka.RoundRobin,
+  )
+  assert_true(custom.partitioner is @moonkafka.RoundRobin)
+  let rr_unkeyed = @moonkafka.ProducerConfig::new(
+    ["b:9092"],
+    "events",
+    partitioner=@moonkafka.Murmur2RoundRobin,
+  )
+  assert_true(rr_unkeyed.partitioner is @moonkafka.Murmur2RoundRobin)
+}
+
+///|
+test "producer config idempotence defaults follow acks and validate" {
+  // acks=1 (default): idempotence off unless asked
+  let plain = @moonkafka.ProducerConfig::new(["b:9092"], "events")
+  assert_true(!plain.enable_idempotence)
+  // acks=-1: idempotence on by default
+  let all = @moonkafka.ProducerConfig::new(["b:9092"], "events", acks=-1)
+  assert_true(all.enable_idempotence)
+  // explicit on requires acks=-1
+  assert_true(
+    raises(fn() raise {
+      ignore(
+        @moonkafka.ProducerConfig::new(
+          ["b:9092"],
+          "events",
+          enable_idempotence=Some(true),
+        ),
+      )
+    }),
+  )
+  // explicit on caps max_in_flight at 5
+  assert_true(
+    raises(fn() raise {
+      ignore(
+        @moonkafka.ProducerConfig::new(
+          ["b:9092"],
+          "events",
+          acks=-1,
+          max_in_flight=6,
+        ),
+      )
+    }),
+  )
+}
+
+///|
+test "producer config batching fields default to the Java values" {
+  let config = @moonkafka.ProducerConfig::new(["b:9092"], "events")
+  assert_eq(config.batch_size, 16384)
+  assert_eq(config.linger_ms, 0)
+  assert_eq(config.buffer_memory, 33554432)
+  assert_true(
+    raises(fn() raise {
+      ignore(@moonkafka.ProducerConfig::new(["b:9092"], "events", batch_size=0))
+    }),
+  )
+  assert_true(
+    raises(fn() raise {
+      ignore(@moonkafka.ProducerConfig::new(["b:9092"], "events", linger_ms=-1))
+    }),
+  )
+  assert_true(
+    raises(fn() raise {
+      ignore(
+        @moonkafka.ProducerConfig::new(
+          ["b:9092"],
+          "events",
+          batch_size=100,
+          buffer_memory=99,
+        ),
+      )
+    }),
   )
 }
 

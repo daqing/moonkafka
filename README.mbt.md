@@ -28,10 +28,29 @@ Working today:
   whole-batch decompression for gzip, snappy, lz4, and zstd
 - Data-plane APIs: Produce v12/v13 (topic-id addressing, per-record errors),
   Fetch v12-v16 with incremental fetch sessions (KIP-227), Metadata v12/v13,
-  DescribeTopicPartitions v0 (paginated), ListOffsets v10/v11
-- Simple producer: per-leader connections, Kafka-compatible murmur2
-  key-partitioning (round-robin for keyless messages), metadata refresh on
-  leadership changes, REBOOTSTRAP_REQUIRED recovery
+  DescribeTopicPartitions v0 (paginated), ListOffsets v10/v11,
+  FindCoordinator v4 (batched)
+- Cluster layer: shared connection pool keyed by node id, metadata caching
+  with expiry/error-triggered refresh, topic-id map, coordinator lookups
+- Simple producer: per-leader connections, partitioner strategies (Kafka-
+  compatible murmur2 key-partitioning; sticky batching or round-robin for
+  keyless messages; per-send manual partition override), record batching
+  with linger/batch-size/buffer-memory accounting, a background sender
+  task (pipelined Produce requests per leader, acks 0/1/-1, retries with
+  backoff bounded by delivery timeout), metadata refresh on leadership
+  changes, REBOOTSTRAP_REQUIRED recovery
+- Producer API: `send`, per-record `SendHandle`s (`await`/`cancel`/
+  `on_complete`), batched `send_all`, and on-demand metrics (queue depth,
+  in-flight, sent/failed counters, broker throttle time)
+- Idempotent producer (acks=all default): InitProducerId handshake,
+  per-partition sequence stamping with rewind on failure, epoch bump on
+  `UNKNOWN_PRODUCER_ID`
+- Transactions: `transactional_id` config with coordinator init,
+  `begin_transaction`/`commit_transaction`/`abort_transaction`,
+  AddPartitionsToTxn before produce, transactional offset commits
+  (AddOffsetsToTxn + TxnOffsetCommit), EndTxn with epoch adoption,
+  coordinator retry/refind, fencing detection, and abort-on-error commit
+  policy
 - Simple consumer: incremental fetch sessions with eviction recovery,
   offset resolution by sentinel or timestamp
 - Pipelined broker connections: request timeouts, in-flight cap, reconnect
@@ -41,7 +60,6 @@ Working today:
 
 Planned:
 
-- Batched/async producer (accumulator, idempotence, transactions)
 - Consumer groups with the new KIP-848 consumer rebalance protocol
 - Admin client and share groups
 

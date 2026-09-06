@@ -204,7 +204,7 @@ P6 = share/telemetry.
 | DescribeTopicPartitions | 0 | v0 | P2/P5 | paginated, cursor-based; used by admin + regex subscription |
 | OffsetCommit | 10 | v9 (names) + v10 (topic-id) | P4 | |
 | OffsetFetch | 10 | v8 (multi-group) + v9 (member fields) + v10 | P4 | v9 carries member_id/member_epoch for 848 |
-| FindCoordinator | 6 | v4 (batched `coordinator_keys`) / v5 | P4 | |
+| FindCoordinator | 6 | v4 (batched `coordinator_keys`) | P1 (done), used in P4 | |
 | DescribeQuorum | 2 | v2 | P5 | admin: metadata quorum health |
 | UpdateFeatures | 2 | v2 | P5 | admin |
 | ApiVersions | 4 | v3 (v4 opportunistic) | done | handshake becomes negotiation in P2 |
@@ -362,10 +362,19 @@ lands on the same partitions as the Java/librdkafka clients on the same topic.
         era) deferred unless requested
       - re-authentication: honor `session_lifetime_ms` from
         SaslAuthenticate; schedule transparent re-auth.
-- [ ] **Cluster layer** (`cluster/`): `ClusterClient` owning a pool of
-      BrokerConnections keyed by node id, bootstrap logic, metadata fetch +
-      refresh scheduling (expiry + error-triggered), topic-id map,
-      coordinator lookup helper (FindCoordinator v4 batched).
+- [x] **Cluster layer**: DONE (commit pending, root scope `cluster.mbt`;
+      the plan's `cluster/` package move takes it once the sender task and
+      fetcher depend on it): `ClusterClient` owns the bootstrap set, a
+      BrokerConnection pool keyed by node id (dialed on demand with SASL +
+      ApiVersions negotiation), metadata caching with refresh scheduling
+      (expiry via `metadata_max_age_ms` + `refresh_if_stale`, error trigger
+      via `invalidate_metadata`/explicit refresh), the topic-id map
+      (KIP-516), and a batched `FindCoordinator` v4 helper (KIP-699,
+      `coordinator.mbt`, group/txn/share types). Producer and consumer
+      migrated onto it — their duplicated `meta_conn`/`brokers`/
+      `leader_conns`/recover flows deleted; the consumer additionally
+      gained TLS/SASL leader connections it never had (its pool dials now
+      go through the same SASL/TLS wiring as everyone else).
 
 **Acceptance:** against a local 4.3 broker in Docker: pipelined parallel
 requests; kill/restart broker mid-test → clients recover; TLS + SCRAM
@@ -481,36 +490,100 @@ compression codec; `moon coverage analyze` shows codec branches covered.
 
 ### Phase 3 — Full producer
 
-- [ ] **Partitioner**: murmur2 (done in P0) as default for keyed records;
-      uniform round-robin; **sticky partitioning** for unkeyed batches
-      (switch partition per batch-full, like the Java client);
-      `partitioner` config; manual `partition` override per send.
-- [ ] **Batching accumulator** (`producer/accumulator.mbt`): per-partition
-      batch deque; `linger_ms`, `batch_size`, `buffer_memory` accounting with
-      blocking/`BufferExhausted` error; append API the public `send` uses.
-- [ ] **Sender task**: drains ready partitions (linger expired or batch
-      full), groups by leader, sends pipelined Produce requests with
-      `max_in_flight` (default 5), `acks` 0/1/-1 (acks=0 now becomes
-      possible since the sender doesn't wait), retries on retriable errors
-      with backoff within `delivery_timeout_ms`; metadata-refresh-on-leadership
-      moved here; results resolve per-record via completed future/`Async`.
-- [ ] **Public API**: `send` returns a cancelable future-like handle
-      (`SendHandle` with `await() -> Int64 raise`), plus a batched
-      `send_all`; callbacks optional via async closure.
-- [ ] **Idempotence** (`enable_idempotence`, default on when acks=all):
-      InitProducerId v5; per-partition queues enforce sequence order;
-      `DUPLICATE_SEQUENCE_NUMBER`/`OUT_OF_ORDER_SEQUENCE_NUMBER`/
-      `UNKNOWN_PRODUCER_ID` handling incl. epoch bump on
-      `UNKNOWN_PRODUCER_ID` with the Java client's reset rules; with
-      idempotence on, `max_in_flight ≤ 5` preserves ordering.
-- [ ] **Transactions**: `TransactionalProducer` (transactional_id config):
-      init-with-coordinator, `begin_transaction`, partitions-added tracking,
-      AddPartitionsToTxn, `send_offsets_to_transaction` (AddOffsetsToTxn +
-      TxnOffsetCommit), `commit`/`abort` (EndTxn), coordinator failover
-      (`COORDINATOR_LOAD_IN_PROGRESS` retry, epoch fencing), `abort`-on-error
-      policy; `transaction_timeout_ms`.
-- [ ] **Producer metrics/counters**: queue depth, in-flight, records sent/
-      failed, throttle time (simple counters struct, read on demand).
+- [x] **Partitioner**: DONE (commit f31cdc2): `Partitioner` config strategy
+      — `Murmur2` (default: keyed by murmur2, unkeyed sticky), `Murmur2RoundRobin`,
+      `RoundRobin`; `StickyPartitioner` reuses one partition per batch and
+      steps to the next at batch boundaries (KIP-794, sequential step
+      instead of the Java cache's random roll); routing lives in a
+      package-private `PartitionRouter` so the rules test without a
+      connection. `send` takes a manual `partition` override validated
+      against the partition count. Boundary switching is driven per send
+      until the accumulator batches records.
+- [x] **Batching accumulator**: DONE (this commit, root scope
+      `accumulator.mbt`; folds into the `producer/` split with the sender
+      work): per-partition queues of `ProducerBatch` over the Phase 2
+      `RecordBatchBuilder` (new `estimated_append_size` dry-run for the
+      has-room check); `batch_size` rotation, `linger_ms` readiness, and
+      `buffer_memory` accounting raising the new `BufferExhausted`
+      suberror. One flusher claims each batch (`close_and_claim`), puts it
+      on the wire, and publishes the terminal result through a
+      per-batch semaphore; coalesced senders derive `base_offset + index`.
+      `send` now appends instead of encoding one record per request, takes
+      `headers`, and drains queued predecessors first so per-partition
+      order survives coalescing (the inline stand-in for the sender
+      task's front-first drain); recoverable failures requeue the batch at
+      the queue head and retry within the existing backoff/attempts bound.
+      Sticky boundaries moved from per-pick to batch-close. E2E: two
+      concurrent sends coalesce into one Produce request and take offsets
+      base+0/base+1.
+- [x] **Sender task**: DONE (this commit, root scope `sender.mbt`; joins
+      the `producer/` split with the accumulator): a per-producer drain
+      loop spawned into the caller's task group (`connect`/`connect_with_config`
+      now take `group~` — structured concurrency leaves no ambient group
+      to spawn into; `close()` stops the loop, which force-closes open
+      batches, drains everything, resolves every pending send, and tears
+      the cluster down before the group joins it). Each round takes the
+      accumulator's ready batches (linger expired, full, or closing), one
+      per partition to keep per-partition order, groups them by leader,
+      and puts one Produce request per leader on the wire — pipelined up
+      to `max_in_flight` (default 5) by the connection's own semaphore.
+      `acks=0` writes the frame without registering a response
+      (`BrokerConnection::send_only`) and resolves senders with -1, Java
+      parity. Retriable produce-response codes (`error_retriable`) and
+      transport failures requeue at the queue front, run recovery, and
+      pace the next round with backoff, all inside the new
+      `delivery_timeout_ms` (default 120s, validated >= linger +
+      request_timeout; batches expire with a delivery error when it
+      passes). Per-record results resolve through per-waiter semaphores
+      registered under the accumulator lock (no lost wakeups, any number
+      of coalesced senders). Known limitation, noted for the D6 polish:
+      the sender ticks every 5ms instead of waking on first append, and
+      terminal dial errors (SASL) retry until delivery timeout instead of
+      failing fast.
+- [x] **Public API**: DONE (commit 140051e): `send` is the await-everything
+      path over the new `send_handle`, which appends once and returns a
+      `SendHandle` (`await() -> Int64 raise` fast-pathing cancellation,
+      per-waiter completion semaphores so any number of coalesced senders
+      resolve; `cancel()` stops the wait without retracting the records).
+      `send_all` appends a batch of `SendRecord`s and returns one handle
+      per record; `on_complete` runs an async callback through the
+      producer's task group with `Sent(offset)`/`Failed(reason)`.
+- [x] **Idempotence** (`enable_idempotence`, default on when acks=all):
+      DONE (commit 1948abf): InitProducerId v5 pinned from the 4.3 schema
+      (fresh identity at connect for plain idempotent producers; epoch
+      bump reuses it with pid/epoch set); batches carry pid/epoch and a
+      per-partition sequence base stamped at append (every record consumes
+      one sequence, rewind on terminal failure); `UNKNOWN_PRODUCER_ID`
+      triggers the Java client's reset rules — bump the epoch, restart all
+      sequences from zero, re-stamp in-flight batches, retry. Config
+      validation: idempotence requires acks=-1 and `max_in_flight <= 5` to
+      preserve ordering.
+- [x] **Transactions**: DONE (commit 286ff08): `transactional_id` config
+      (idempotence required, so acks must be -1; `transaction_timeout_ms`
+      registered at connect) turns the Producer transactional — init runs
+      FindCoordinator(Transaction) + InitProducerId at the coordinator with
+      retries while it loads. `begin_transaction`/`commit_transaction`/
+      `abort_transaction` bracket sends; the sender registers each round's
+      new partitions with AddPartitionsToTxn v3 (client shape, KIP-890)
+      before producing, tracked in a per-transaction added-set.
+      `send_offsets_to_transaction` registers the group via AddOffsetsToTxn
+      v4 then lands offsets with TxnOffsetCommit v4 at the group
+      coordinator (v5 is wire-identical and the schema caps non-2PC
+      transactional clients at v4). EndTxn v5 commits/aborts and adopts the
+      coordinator-bumped identity (KIP-890 part 2: epoch up every
+      transaction, sequences continue). Coordinator hiccups
+      (COORDINATOR_LOAD_IN_PROGRESS/NOT_COORDINATOR/concurrent) retry with
+      backoff and re-resolve; fencing (INVALID_PRODUCER_EPOCH/
+      PRODUCER_FENCED) raises. Abort-on-error: a terminal send failure
+      inside the transaction poisons commit (it raises and requires
+      abort). Produce requests carry the transactional id. E2E against the
+      fake broker: commit/abort flows, identity continuation across
+      transactions, fenced produce poisoning the commit, NOT_COORDINATOR
+      retry, and transactional offset commits.
+- [x] **Producer metrics/counters**: DONE (commit e8f207d): `metrics()`
+      returns `ProducerMetrics` — queued records/bytes from the
+      accumulator snapshot, in-flight batches, sent/failed record and
+      batch counters, and the sum of connection throttle hints.
 
 **Acceptance:** integration tests vs Docker 4.3: throughput sanity (≥10k
 rec/s small records, uncompressed and gzip); ordering preserved under retries
