@@ -187,6 +187,11 @@ async fn Producer::append_record(
   if self.closed {
     raise ProtocolError::ProtocolError("producer is closed")
   }
+  if self.transactional_id is Some(_) && !self.in_transaction {
+    raise ProtocolError::ProtocolError(
+      "transactional producer: call begin_transaction before send",
+    )
+  }
   // Opportunistic metadata refresh once the cached snapshot aged out.
   self.cluster.refresh_if_stale()
   let timestamp = timestamp.unwrap_or(@async.now())
@@ -235,15 +240,23 @@ fn Producer::rewind_sequence(self : Producer, batch : ProducerBatch) -> Unit {
 ///|
 /// UNKNOWN_PRODUCER_ID recovery (the Java client's reset rules): ask the
 /// broker to bump the epoch for the existing id, then restart every
-/// partition's sequences from zero.
+/// partition's sequences from zero. Transactional producers must re-init
+/// at their coordinator (which aborts the in-flight transaction), plain
+/// idempotent producers may ask any broker.
 async fn Producer::bump_epoch(self : Producer) -> Unit {
-  let id = self.cluster
-    .control_conn()
-    .init_producer_id(
-      transaction_timeout_ms=self.delivery_timeout_ms,
-      producer_id=self.producer_id,
-      producer_epoch=self.producer_epoch,
-    )
+  let conn = match self.transactional_id {
+    Some(_) => {
+      self.in_transaction = false
+      self.txn_added = Map([])
+      self.txn_coordinator_conn()
+    }
+    None => self.cluster.control_conn()
+  }
+  let id = conn.init_producer_id(
+    transaction_timeout_ms=self.delivery_timeout_ms,
+    producer_id=self.producer_id,
+    producer_epoch=self.producer_epoch,
+  )
   self.producer_id = id.producer_id
   self.producer_epoch = id.producer_epoch
   self.sequences.clear()

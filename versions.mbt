@@ -27,6 +27,18 @@ pub const API_FIND_COORDINATOR : Int = 10
 pub const API_INIT_PRODUCER_ID : Int = 22
 
 ///|
+pub const API_ADD_PARTITIONS_TO_TXN : Int = 24
+
+///|
+pub const API_ADD_OFFSETS_TO_TXN : Int = 25
+
+///|
+pub const API_END_TXN : Int = 26
+
+///|
+pub const API_TXN_OFFSET_COMMIT : Int = 28
+
+///|
 pub const API_DESCRIBE_TOPIC_PARTITIONS : Int = 75
 
 ///|
@@ -79,6 +91,32 @@ pub fn driver_api_range(api_key : Int) -> ApiRange? {
         name: "InitProducerId",
         min: 5,
         max: 5,
+      })
+    // AddPartitionsToTxn v3: the client shape (v4+ is the broker-batch
+    // API of KIP-890, unused by producers).
+    API_ADD_PARTITIONS_TO_TXN =>
+      Some({
+        key: API_ADD_PARTITIONS_TO_TXN,
+        name: "AddPartitionsToTxn",
+        min: 3,
+        max: 3,
+      })
+    API_ADD_OFFSETS_TO_TXN =>
+      Some({
+        key: API_ADD_OFFSETS_TO_TXN,
+        name: "AddOffsetsToTxn",
+        min: 4,
+        max: 4,
+      })
+    API_END_TXN => Some({ key: API_END_TXN, name: "EndTxn", min: 5, max: 5, })
+    // TxnOffsetCommit v4: v5 is wire-identical and the schema caps
+    // non-2PC transactional clients at v4.
+    API_TXN_OFFSET_COMMIT =>
+      Some({
+        key: API_TXN_OFFSET_COMMIT,
+        name: "TxnOffsetCommit",
+        min: 4,
+        max: 4,
       })
     API_DESCRIBE_TOPIC_PARTITIONS =>
       Some({

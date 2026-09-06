@@ -30,6 +30,16 @@ pub struct Producer {
   priv router : PartitionRouter
   priv accumulator : RecordAccumulator
   mut closed : Bool
+  /// Transactional identity and state (Phase 3). `txn_coordinator`
+  /// caches the coordinator node id; `txn_added` tracks the partitions
+  /// registered with the ongoing transaction; `txn_failed_base` pins
+  /// the failed-record counter at begin so commit can detect any send
+  /// failure inside the transaction.
+  priv transactional_id : String?
+  priv mut in_transaction : Bool
+  priv mut txn_added : Map[Int, Bool]
+  priv mut txn_coordinator : Int?
+  priv mut txn_failed_base : Int
 }
 
 ///|
@@ -104,6 +114,11 @@ pub async fn Producer::connect_with_config(
       config.linger_ms,
     ),
     closed: false,
+    transactional_id: config.transactional_id,
+    in_transaction: false,
+    txn_added: Map([]),
+    txn_coordinator: None,
+    txn_failed_base: 0,
   }
   producer.refresh_metadata()
   if config.enable_idempotence {
@@ -114,6 +129,12 @@ pub async fn Producer::connect_with_config(
       .init_producer_id(transaction_timeout_ms=config.delivery_timeout_ms)
     producer.producer_id = id.producer_id
     producer.producer_epoch = id.producer_epoch
+  }
+  if config.transactional_id is Some(id) {
+    // Transactional producers initialize at their coordinator, retrying
+    // while it loads; the id registers the transaction_timeout_ms the
+    // coordinator enforces on the producer's behalf.
+    producer.init_transactional(id, config.transaction_timeout_ms)
   }
   // The sender loop joins the group (no_wait=false): close() stops it
   // and the group waits out its final drain before tearing down.

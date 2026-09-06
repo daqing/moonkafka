@@ -322,6 +322,29 @@ async fn RecordAccumulator::metrics(
 }
 
 ///|
+/// Total records released with an error so far; the transaction manager
+/// compares snapshots to detect any failed send inside a transaction.
+async fn RecordAccumulator::failed_count(self : RecordAccumulator) -> Int {
+  self.lock.acquire()
+  defer self.lock.release()
+  self.records_failed
+}
+
+///|
+/// Batches not yet resolved: queued (open or waiting for the sender) plus
+/// popped and in flight. Zero means every appended record reached a
+/// terminal result — the commit/abort flush condition.
+async fn RecordAccumulator::outstanding(self : RecordAccumulator) -> Int {
+  self.lock.acquire()
+  defer self.lock.release()
+  let mut n = self.in_flight
+  for _, queue in self.batches {
+    n += queue.length()
+  }
+  n
+}
+
+///|
 /// Register a completion waiter under the accumulator lock. Returns true
 /// when the batch already reached a terminal result — no wait needed.
 /// Locking here makes a release racing the registration unable to lose
