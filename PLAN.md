@@ -519,12 +519,30 @@ compression codec; `moon coverage analyze` shows codec branches covered.
 - [ ] **Batching accumulator** (`producer/accumulator.mbt`): per-partition
       batch deque; `linger_ms`, `batch_size`, `buffer_memory` accounting with
       blocking/`BufferExhausted` error; append API the public `send` uses.
-- [ ] **Sender task**: drains ready partitions (linger expired or batch
-      full), groups by leader, sends pipelined Produce requests with
-      `max_in_flight` (default 5), `acks` 0/1/-1 (acks=0 now becomes
-      possible since the sender doesn't wait), retries on retriable errors
-      with backoff within `delivery_timeout_ms`; metadata-refresh-on-leadership
-      moved here; results resolve per-record via completed future/`Async`.
+- [x] **Sender task**: DONE (this commit, root scope `sender.mbt`; joins
+      the `producer/` split with the accumulator): a per-producer drain
+      loop spawned into the caller's task group (`connect`/`connect_with_config`
+      now take `group~` — structured concurrency leaves no ambient group
+      to spawn into; `close()` stops the loop, which force-closes open
+      batches, drains everything, resolves every pending send, and tears
+      the cluster down before the group joins it). Each round takes the
+      accumulator's ready batches (linger expired, full, or closing), one
+      per partition to keep per-partition order, groups them by leader,
+      and puts one Produce request per leader on the wire — pipelined up
+      to `max_in_flight` (default 5) by the connection's own semaphore.
+      `acks=0` writes the frame without registering a response
+      (`BrokerConnection::send_only`) and resolves senders with -1, Java
+      parity. Retriable produce-response codes (`error_retriable`) and
+      transport failures requeue at the queue front, run recovery, and
+      pace the next round with backoff, all inside the new
+      `delivery_timeout_ms` (default 120s, validated >= linger +
+      request_timeout; batches expire with a delivery error when it
+      passes). Per-record results resolve through per-waiter semaphores
+      registered under the accumulator lock (no lost wakeups, any number
+      of coalesced senders). Known limitation, noted for the D6 polish:
+      the sender ticks every 5ms instead of waking on first append, and
+      terminal dial errors (SASL) retry until delivery timeout instead of
+      failing fast.
 - [ ] **Public API**: `send` returns a cancelable future-like handle
       (`SendHandle` with `await() -> Int64 raise`), plus a batched
       `send_all`; callbacks optional via async closure.
