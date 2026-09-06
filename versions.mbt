@@ -27,6 +27,18 @@ pub const API_OFFSET_FOR_LEADER_EPOCH : Int = 23
 pub const API_CONSUMER_GROUP_HEARTBEAT : Int = 68
 
 ///|
+pub const API_JOIN_GROUP : Int = 11
+
+///|
+pub const API_SYNC_GROUP : Int = 14
+
+///|
+pub const API_HEARTBEAT : Int = 12
+
+///|
+pub const API_LEAVE_GROUP : Int = 13
+
+///|
 pub const API_LIST_OFFSETS : Int = 2
 
 ///|
@@ -107,6 +119,17 @@ pub fn driver_api_range(api_key : Int) -> ApiRange? {
         min: 0,
         max: 1,
       })
+    // The classic group coordination quartet: JoinGroup v9 (reason
+    // field), SyncGroup v5 (protocol name/echo), Heartbeat v4 and
+    // LeaveGroup v5 (member identity array).
+    API_JOIN_GROUP =>
+      Some({ key: API_JOIN_GROUP, name: "JoinGroup", min: 9, max: 9, })
+    API_SYNC_GROUP =>
+      Some({ key: API_SYNC_GROUP, name: "SyncGroup", min: 5, max: 5, })
+    API_HEARTBEAT =>
+      Some({ key: API_HEARTBEAT, name: "Heartbeat", min: 4, max: 4, })
+    API_LEAVE_GROUP =>
+      Some({ key: API_LEAVE_GROUP, name: "LeaveGroup", min: 5, max: 5, })
     API_LIST_OFFSETS =>
       Some({ key: API_LIST_OFFSETS, name: "ListOffsets", min: 10, max: 11, })
     API_METADATA =>

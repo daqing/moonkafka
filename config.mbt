@@ -447,6 +447,10 @@ pub struct ConsumerConfig {
   /// Static membership identity (KIP-848): a member restarting with the
   /// same instance id rejoins without triggering a rebalance.
   group_instance_id : String?
+  /// Classic-protocol pacing: heartbeats must land well inside the
+  /// session timeout or the coordinator evicts the member.
+  heartbeat_interval_ms : Int
+  session_timeout_ms : Int
 } derive(@debug.Debug)
 
 ///|
@@ -467,6 +471,8 @@ pub fn ConsumerConfig::new(
   max_partition_fetch_bytes? : Int = 1048576,
   enable_read_committed? : Bool = false,
   group_instance_id? : String? = None,
+  heartbeat_interval_ms? : Int = 3000,
+  session_timeout_ms? : Int = 45000,
 ) -> ConsumerConfig raise {
   if topic.length() == 0 {
     raise ProtocolError::ProtocolError("topic must not be empty")
@@ -486,6 +492,16 @@ pub fn ConsumerConfig::new(
   if max_poll_records <= 0 {
     raise ProtocolError::ProtocolError(
       "max_poll_records must be positive, got \{max_poll_records}",
+    )
+  }
+  if heartbeat_interval_ms <= 0 {
+    raise ProtocolError::ProtocolError(
+      "heartbeat_interval_ms must be positive, got \{heartbeat_interval_ms}",
+    )
+  }
+  if session_timeout_ms < heartbeat_interval_ms {
+    raise ProtocolError::ProtocolError(
+      "session_timeout_ms (\{session_timeout_ms}) must be at least heartbeat_interval_ms (\{heartbeat_interval_ms})",
     )
   }
   if max_partition_fetch_bytes <= 0 {
@@ -519,5 +535,7 @@ pub fn ConsumerConfig::new(
     max_partition_fetch_bytes,
     enable_read_committed,
     group_instance_id,
+    heartbeat_interval_ms,
+    session_timeout_ms,
   }
 }

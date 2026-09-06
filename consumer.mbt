@@ -56,10 +56,15 @@ pub struct Consumer {
   priv mut subscribed_regex : String?
   priv mut assignment : Array[(String, Int)]
   mut heartbeat_interval_ms : Int
+  session_timeout_ms : Int
   priv mut member_active : Bool
   priv mut member_spawned : Bool
   priv mut member_left : Bool
   priv mut member_error : String?
+  /// Classic-protocol membership state.
+  priv mut generation_id : Int
+  priv mut classic_assignors : Array[Assignor]
+  priv mut member_kind : MemberKind
   priv mut rebalance_listener : RebalanceListener?
   priv cluster : ClusterClient
   mut topic_id : Uuid
@@ -133,10 +138,14 @@ pub async fn Consumer::connect_with_config(
     subscribed_regex: None,
     assignment: [],
     heartbeat_interval_ms: 0,
+    session_timeout_ms: config.session_timeout_ms,
     member_active: false,
     member_spawned: false,
     member_left: false,
     member_error: None,
+    generation_id: -1,
+    classic_assignors: [RangeAssignor],
+    member_kind: Kip848Member,
     rebalance_listener: None,
     cluster,
     topic_id: Uuid::zero(),
