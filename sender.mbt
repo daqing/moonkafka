@@ -174,9 +174,23 @@ async fn Producer::send_round(
       return RoundRetry
     }
   }
+  // Transactional produce: the round's new partitions must be registered
+  // with the transaction coordinator before the Produce goes out.
+  if self.in_transaction && self.transactional_id is Some(_) {
+    match self.add_round_partitions(entries) {
+      RoundOk => ()
+      RoundRetry => {
+        for entry in entries {
+          self.accumulator.requeue(entry.1)
+        }
+        return RoundRetry
+      }
+    }
+  }
   let results = conn.produce(
     self.topic,
     topic_id=self.topic_id,
+    transactional_id=self.transactional_id,
     partitions~,
     acks=self.acks,
     timeout_ms=self.timeout_ms,

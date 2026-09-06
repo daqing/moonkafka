@@ -292,6 +292,12 @@ pub struct ProducerConfig {
   /// Idempotent producer: broker-side duplicate suppression per
   /// producer id. Defaults to following acks (on when acks=-1).
   enable_idempotence : Bool
+  /// Transactional id: set it to make the producer transactional
+  /// (idempotence is then required, so acks must be -1).
+  transactional_id : String?
+  /// How long the coordinator may wait on a transaction before aborting
+  /// it on the producer's behalf (Java's transaction.timeout.ms).
+  transaction_timeout_ms : Int
 } derive(@debug.Debug)
 
 ///|
@@ -316,6 +322,8 @@ pub fn ProducerConfig::new(
   max_in_flight? : Int = 5,
   delivery_timeout_ms? : Int = 120000,
   enable_idempotence? : Bool? = None,
+  transactional_id? : String? = None,
+  transaction_timeout_ms? : Int = 60000,
 ) -> ProducerConfig raise {
   if acks != 0 && acks != 1 && acks != -1 {
     raise ProtocolError::ProtocolError(
@@ -368,6 +376,18 @@ pub fn ProducerConfig::new(
       "enable_idempotence requires max_in_flight <= 5 to preserve ordering, got \{max_in_flight}",
     )
   }
+  if transaction_timeout_ms <= 0 {
+    raise ProtocolError::ProtocolError(
+      "transaction_timeout_ms must be positive, got \{transaction_timeout_ms}",
+    )
+  }
+  // A transactional producer is an idempotent producer with a
+  // transactional id; forcing idempotence off is a misconfiguration.
+  if transactional_id is Some(_) && !idempotence {
+    raise ProtocolError::ProtocolError(
+      "transactional_id requires acks=-1 (the idempotent producer)",
+    )
+  }
   {
     common: CommonConfig::new(
       bootstrap_servers,
@@ -386,6 +406,8 @@ pub fn ProducerConfig::new(
     max_in_flight,
     delivery_timeout_ms,
     enable_idempotence: idempotence,
+    transactional_id,
+    transaction_timeout_ms,
   }
 }
 

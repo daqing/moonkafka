@@ -12,9 +12,15 @@ import {
 }
 
 // Values
+pub const API_ADD_OFFSETS_TO_TXN : Int = 25
+
+pub const API_ADD_PARTITIONS_TO_TXN : Int = 24
+
 pub const API_API_VERSIONS : Int = 18
 
 pub const API_DESCRIBE_TOPIC_PARTITIONS : Int = 75
+
+pub const API_END_TXN : Int = 26
 
 pub const API_FETCH : Int = 1
 
@@ -31,6 +37,8 @@ pub const API_PRODUCE : Int = 0
 pub const API_SASL_AUTHENTICATE : Int = 36
 
 pub const API_SASL_HANDSHAKE : Int = 17
+
+pub const API_TXN_OFFSET_COMMIT : Int = 28
 
 pub const FETCH_FULL_EPOCH : Int = 0
 
@@ -56,9 +64,15 @@ pub fn collect_committed(Array[DecodedBatch], Array[AbortedTx]) -> Array[Record]
 
 pub async fn connect_bootstrap(BootstrapServers, String, timeout_ms? : Int, sasl? : SaslConfig?, use_tls? : Bool, tls? : TlsClientOptions?) -> BrokerConnection
 
+pub fn decode_add_offsets_to_txn_response(@buf.Decoder) -> (Int, Int) raise
+
+pub fn decode_add_partitions_to_txn_response(@buf.Decoder) -> (Array[TxnPartitionResult], Int) raise
+
 pub fn decode_api_versions_response(@buf.Decoder) -> (BrokerVersions, Int) raise
 
 pub fn decode_describe_topic_partitions_response(@buf.Decoder) -> (DescribeTopicPartitions, Int) raise
+
+pub fn decode_end_txn_response(@buf.Decoder) -> (EndTxnResult, Int) raise
 
 pub fn decode_fetch_response(Int, @buf.Decoder) -> (FetchResult, Int) raise
 
@@ -82,11 +96,19 @@ pub fn decode_sasl_authenticate_response(@buf.Decoder) -> SaslAuthenticateResult
 
 pub fn decode_sasl_handshake_response(@buf.Decoder) -> SaslHandshakeResult raise
 
+pub fn decode_txn_offset_commit_response(@buf.Decoder) -> (Array[TxnPartitionResult], Int) raise
+
 pub fn driver_api_range(Int) -> ApiRange?
+
+pub fn encode_add_offsets_to_txn_request(String, Int64, Int, String) -> Bytes
+
+pub fn encode_add_partitions_to_txn_request(String, Int64, Int, Array[(String, Array[Int])]) -> Bytes
 
 pub fn encode_api_versions_request() -> Bytes
 
 pub fn encode_describe_topic_partitions_request(Array[String], Int, cursor? : TopicPartitionCursor?) -> Bytes
+
+pub fn encode_end_txn_request(String, Int64, Int, Bool) -> Bytes
 
 pub fn encode_fetch_request(Int, Array[FetchTopicReq], session~ : FetchSessionReq, max_wait_ms~ : Int, min_bytes? : Int, max_bytes? : Int, isolation_level? : Int, rack_id? : String) -> Bytes raise
 
@@ -109,6 +131,8 @@ pub fn encode_request(Int, Int, Int, String, Bytes, flexible? : Bool) -> Bytes
 pub fn encode_sasl_authenticate_request(Bytes) -> Bytes
 
 pub fn encode_sasl_handshake_request(String) -> Bytes
+
+pub fn encode_txn_offset_commit_request(String, String, Int64, Int, Int, String, Array[(String, Array[TxnOffset])]) -> Bytes
 
 pub fn error_name(Int) -> String
 
@@ -194,11 +218,14 @@ pub struct BrokerConnection {
   mut throttle_total_ms : Int64
   mut versions : BrokerVersions?
 }
+pub async fn BrokerConnection::add_offsets_to_txn(Self, String, Int64, Int, String, timeout_ms? : Int) -> Int
+pub async fn BrokerConnection::add_partitions_to_txn(Self, String, Int64, Int, Array[(String, Array[Int])], timeout_ms? : Int) -> Array[TxnPartitionResult]
 pub fn BrokerConnection::api_version(Self, Int, want? : Int?) -> Int raise
 pub async fn BrokerConnection::authenticate(Self, SaslConfig, timeout_ms? : Int) -> Unit
 pub fn BrokerConnection::close(Self) -> Unit
 pub async fn BrokerConnection::connect(String, Int, client_id? : String, max_in_flight? : Int, timeout_ms? : Int, tls? : TlsClientOptions?) -> Self
 pub async fn BrokerConnection::describe_topic_partitions(Self, Array[String], response_partition_limit? : Int, cursor? : TopicPartitionCursor?, timeout_ms? : Int) -> DescribeTopicPartitions
+pub async fn BrokerConnection::end_txn(Self, String, Int64, Int, Bool, timeout_ms? : Int) -> EndTxnResult
 pub async fn BrokerConnection::fetch(Self, Array[FetchTopicReq], session~ : FetchSessionReq, max_wait_ms~ : Int, min_bytes? : Int, max_bytes? : Int, timeout_ms? : Int) -> FetchResult
 pub async fn BrokerConnection::fetch_metadata(Self, Array[String]?, timeout_ms? : Int) -> Metadata
 pub async fn BrokerConnection::find_coordinator(Self, Array[String], CoordinatorType, timeout_ms? : Int) -> Array[CoordinatorInfo]
@@ -206,11 +233,12 @@ pub async fn BrokerConnection::init_producer_id(Self, transactional_id? : String
 pub async fn BrokerConnection::list_offsets(Self, String, Array[PartitionInfo], Int64, timeout_ms? : Int) -> Map[Int, Int64]
 pub async fn BrokerConnection::negotiate_api_versions(Self, timeout_ms? : Int) -> Unit
 pub fn BrokerConnection::note_throttle(Self, Int) -> Unit
-pub async fn BrokerConnection::produce(Self, String, topic_id? : Uuid, partitions~ : Array[(Int, Bytes)], acks~ : Int, timeout_ms~ : Int) -> Array[ProducePartitionResult]
+pub async fn BrokerConnection::produce(Self, String, topic_id? : Uuid, transactional_id? : String?, partitions~ : Array[(Int, Bytes)], acks~ : Int, timeout_ms~ : Int) -> Array[ProducePartitionResult]
 pub async fn BrokerConnection::request(Self, Int, Int, Bytes, timeout_ms? : Int) -> @buf.Decoder
 pub async fn BrokerConnection::request_raw(Self, Int, Int, Bytes, timeout_ms? : Int, flexible? : Bool) -> @buf.Decoder
 pub async fn BrokerConnection::send_only(Self, Int, Int, Bytes) -> Unit
 pub fn BrokerConnection::throttle_total_ms(Self) -> Int64
+pub async fn BrokerConnection::txn_offset_commit(Self, String, String, Int64, Int, Array[(String, Array[TxnOffset])], timeout_ms? : Int) -> Array[TxnPartitionResult]
 
 pub struct BrokerInfo {
   node_id : Int
@@ -338,6 +366,12 @@ pub struct DescribeTopicPartitions {
   next_cursor : TopicPartitionCursor?
 }
 
+pub struct EndTxnResult {
+  error_code : Int
+  producer_id : Int64
+  producer_epoch : Int
+} derive(@debug.Debug)
+
 pub(all) struct FetchPartitionReq {
   index : Int
   leader_epoch : Int
@@ -460,13 +494,17 @@ pub struct Producer {
   mut closed : Bool
   // private fields
 }
+pub async fn Producer::abort_transaction(Self) -> Unit
+pub async fn Producer::begin_transaction(Self) -> Unit
 pub fn Producer::close(Self) -> Unit
+pub async fn Producer::commit_transaction(Self) -> Unit
 pub async fn Producer::connect(group~ : @async.TaskGroup[Unit], host~ : String, port~ : Int, topic~ : String, acks? : Int, timeout_ms? : Int) -> Self
 pub async fn Producer::connect_with_config(group~ : @async.TaskGroup[Unit], ProducerConfig) -> Self
 pub async fn Producer::metrics(Self) -> ProducerMetrics
 pub async fn Producer::send(Self, key? : Bytes, value? : Bytes, timestamp? : Int64, partition? : Int, headers? : Array[(Bytes, Bytes)]) -> Int64
 pub async fn Producer::send_all(Self, Array[SendRecord]) -> Array[SendHandle]
 pub async fn Producer::send_handle(Self, key? : Bytes, value? : Bytes, timestamp? : Int64, partition? : Int, headers? : Array[(Bytes, Bytes)]) -> SendHandle
+pub async fn Producer::send_offsets_to_transaction(Self, Array[(String, Array[TxnOffset])], String) -> Unit
 
 pub struct ProducerConfig {
   common : CommonConfig
@@ -479,8 +517,10 @@ pub struct ProducerConfig {
   max_in_flight : Int
   delivery_timeout_ms : Int
   enable_idempotence : Bool
+  transactional_id : String?
+  transaction_timeout_ms : Int
 } derive(@debug.Debug)
-pub fn ProducerConfig::new(Array[String], String, acks? : Int, request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?, tls? : TlsClientOptions?, partitioner? : Partitioner, batch_size? : Int, linger_ms? : Int, buffer_memory? : Int, metadata_max_age_ms? : Int, max_in_flight? : Int, delivery_timeout_ms? : Int, enable_idempotence? : Bool?) -> Self raise
+pub fn ProducerConfig::new(Array[String], String, acks? : Int, request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?, tls? : TlsClientOptions?, partitioner? : Partitioner, batch_size? : Int, linger_ms? : Int, buffer_memory? : Int, metadata_max_age_ms? : Int, max_in_flight? : Int, delivery_timeout_ms? : Int, enable_idempotence? : Bool?, transactional_id? : String?, transaction_timeout_ms? : Int) -> Self raise
 
 pub struct ProducerMetrics {
   records_queued : Int
@@ -605,6 +645,17 @@ pub struct TopicMetadata {
 pub(all) struct TopicPartitionCursor {
   topic_name : String
   partition_index : Int
+} derive(@debug.Debug)
+
+pub(all) struct TxnOffset {
+  partition : Int
+  offset : Int64
+} derive(@debug.Debug)
+
+pub struct TxnPartitionResult {
+  topic : String
+  partition : Int
+  error_code : Int
 } derive(@debug.Debug)
 
 pub struct Uuid {
