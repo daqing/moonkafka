@@ -109,6 +109,41 @@ test "producer config partitioner defaults to murmur2+sticky" {
 }
 
 ///|
+test "producer config idempotence defaults follow acks and validate" {
+  // acks=1 (default): idempotence off unless asked
+  let plain = @moonkafka.ProducerConfig::new(["b:9092"], "events")
+  assert_true(!plain.enable_idempotence)
+  // acks=-1: idempotence on by default
+  let all = @moonkafka.ProducerConfig::new(["b:9092"], "events", acks=-1)
+  assert_true(all.enable_idempotence)
+  // explicit on requires acks=-1
+  assert_true(
+    raises(fn() raise {
+      ignore(
+        @moonkafka.ProducerConfig::new(
+          ["b:9092"],
+          "events",
+          enable_idempotence=Some(true),
+        ),
+      )
+    }),
+  )
+  // explicit on caps max_in_flight at 5
+  assert_true(
+    raises(fn() raise {
+      ignore(
+        @moonkafka.ProducerConfig::new(
+          ["b:9092"],
+          "events",
+          acks=-1,
+          max_in_flight=6,
+        ),
+      )
+    }),
+  )
+}
+
+///|
 test "producer config batching fields default to the Java values" {
   let config = @moonkafka.ProducerConfig::new(["b:9092"], "events")
   assert_eq(config.batch_size, 16384)

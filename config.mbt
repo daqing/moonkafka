@@ -289,6 +289,9 @@ pub struct ProducerConfig {
   /// delivery.timeout.ms); records still unacknowledged when it passes
   /// fail with a delivery error.
   delivery_timeout_ms : Int
+  /// Idempotent producer: broker-side duplicate suppression per
+  /// producer id. Defaults to following acks (on when acks=-1).
+  enable_idempotence : Bool
 } derive(@debug.Debug)
 
 ///|
@@ -312,6 +315,7 @@ pub fn ProducerConfig::new(
   metadata_max_age_ms? : Int = 300000,
   max_in_flight? : Int = 5,
   delivery_timeout_ms? : Int = 120000,
+  enable_idempotence? : Bool? = None,
 ) -> ProducerConfig raise {
   if acks != 0 && acks != 1 && acks != -1 {
     raise ProtocolError::ProtocolError(
@@ -351,6 +355,19 @@ pub fn ProducerConfig::new(
       "delivery_timeout_ms (\{delivery_timeout_ms}) must be at least linger_ms + request_timeout_ms (\{linger_ms + request_timeout_ms})",
     )
   }
+  // Idempotence defaults to following acks (Java 3.3+ default behavior):
+  // on when acks=all, off otherwise.
+  let idempotence = enable_idempotence.unwrap_or(acks == -1)
+  if idempotence && acks != -1 {
+    raise ProtocolError::ProtocolError(
+      "enable_idempotence requires acks=-1 (all), got \{acks}",
+    )
+  }
+  if idempotence && max_in_flight > 5 {
+    raise ProtocolError::ProtocolError(
+      "enable_idempotence requires max_in_flight <= 5 to preserve ordering, got \{max_in_flight}",
+    )
+  }
   {
     common: CommonConfig::new(
       bootstrap_servers,
@@ -368,6 +385,7 @@ pub fn ProducerConfig::new(
     buffer_memory,
     max_in_flight,
     delivery_timeout_ms,
+    enable_idempotence: idempotence,
   }
 }
 

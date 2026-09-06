@@ -17,6 +17,13 @@ pub struct Producer {
   /// The user's task group; hosts the sender drain loop, which the group
   /// joins on exit (close lets it drain first).
   group : @async.TaskGroup[Unit]
+  enable_idempotence : Bool
+  /// Idempotence identity, assigned at connect (InitProducerId v5).
+  mut producer_id : Int64
+  mut producer_epoch : Int
+  /// Next sequence number per partition; stamped into fresh batches,
+  /// rewound on terminal failures, reset on epoch bumps.
+  priv sequences : Map[Int, Int]
   priv cluster : ClusterClient
   mut topic_id : Uuid
   mut partitions : Array[PartitionInfo]
@@ -69,6 +76,7 @@ pub async fn Producer::connect_with_config(
     client_id=config.common.client_id,
     request_timeout_ms=config.common.request_timeout_ms,
     metadata_max_age_ms=config.common.metadata_max_age_ms,
+    max_in_flight=config.max_in_flight,
     sasl~,
     use_tls~,
     tls=config.common.tls,
@@ -82,6 +90,10 @@ pub async fn Producer::connect_with_config(
     retry_backoff_max_ms: config.common.retry_backoff_max_ms,
     delivery_timeout_ms: config.delivery_timeout_ms,
     group,
+    enable_idempotence: config.enable_idempotence,
+    producer_id: -1L,
+    producer_epoch: -1,
+    sequences: Map([]),
     cluster,
     topic_id: Uuid::zero(),
     partitions: [],
@@ -94,6 +106,15 @@ pub async fn Producer::connect_with_config(
     closed: false,
   }
   producer.refresh_metadata()
+  if config.enable_idempotence {
+    // A plain idempotent producer may ask any broker (Java uses the
+    // least-loaded node); the transactional flow goes to its coordinator.
+    let id = producer.cluster
+      .control_conn()
+      .init_producer_id(transaction_timeout_ms=config.delivery_timeout_ms)
+    producer.producer_id = id.producer_id
+    producer.producer_epoch = id.producer_epoch
+  }
   // The sender loop joins the group (no_wait=false): close() stops it
   // and the group waits out its final drain before tearing down.
   group.spawn_bg(no_wait=false, allow_failure=false, () => {

@@ -19,6 +19,17 @@ priv enum SendRound {
 }
 
 ///|
+/// A popped batch whose delivery window (measured from creation) has
+/// passed: it must fail instead of going out.
+fn batch_expired(
+  batch : ProducerBatch,
+  now_ms : Int64,
+  delivery_timeout_ms : Int,
+) -> Bool {
+  now_ms >= batch.created_ms + delivery_timeout_ms.to_int64()
+}
+
+///|
 /// The sender's tick when no batch is ready. Bounds the added latency of
 /// linger_ms=0 producers; precise wakeup on first append lands with the
 /// D6 background-task polish.
@@ -36,10 +47,25 @@ async fn Producer::sender_loop(self : Producer) -> Unit {
       // empty the queues, resolve everything, then shut down.
       self.accumulator.force_close_all()
     }
-    let ready = self.accumulator.drain_ready(
-      @async.now(),
-      self.delivery_timeout_ms,
-    )
+    let now = @async.now()
+    let drained = self.accumulator.drain_ready(now)
+    // Delivery-expiry enforcement lives here (not in the drain) so the
+    // producer can rewind idempotence sequences before the batch is
+    // released.
+    let ready : Array[ProducerBatch] = []
+    for batch in drained {
+      if batch_expired(batch, now, self.delivery_timeout_ms) {
+        self.rewind_sequence(batch)
+        self.accumulator.release(
+          batch,
+          BatchError(
+            "batch for partition \{batch.partition} exceeded delivery_timeout_ms (\{self.delivery_timeout_ms}) after \{batch.attempts} attempts",
+          ),
+        )
+      } else {
+        ready.push(batch)
+      }
+    }
     if ready.is_empty() {
       if self.closed {
         break
@@ -196,19 +222,35 @@ async fn Producer::send_round(
             self.accumulator.release(batch, BatchOk(result.base_offset))
             self.batch_boundary(batch)
           }
+          59 => {
+            // UNKNOWN_PRODUCER_ID: the broker lost the producer's state
+            // (log truncation, migration). Requeue first so the batch is
+            // included, bump the epoch, restart all sequences from zero
+            // with a full re-stamp, and retry.
+            self.accumulator.requeue(batch)
+            let _ = self.bump_epoch() catch { _ => () }
+            let pid = self.producer_id
+            let epoch = self.producer_epoch
+            self.accumulator.restamp(fn(batch, base) {
+              batch.builder.set_idempotence(pid, epoch, base)
+            })
+            retried = true
+          }
           code if error_retriable(code) => {
             // LEADER_NOT_AVAILABLE and friends: recoverable —
             // requeue, and the loop runs recovery after the round.
             self.accumulator.requeue(batch)
             retried = true
           }
-          code =>
+          code => {
+            self.rewind_sequence(batch)
             self.accumulator.release(
               batch,
               BatchError(
                 "Produce failed for partition \{result.partition}: \{error_name(code)}\{produce_error_detail(result)}",
               ),
             )
+          }
         }
       }
       None => ()

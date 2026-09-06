@@ -203,7 +203,6 @@ async fn RecordAccumulator::force_close_all(self : RecordAccumulator) -> Unit {
 async fn RecordAccumulator::drain_ready(
   self : RecordAccumulator,
   now_ms : Int64,
-  delivery_timeout_ms : Int,
 ) -> Array[ProducerBatch] {
   self.lock.acquire()
   defer self.lock.release()
@@ -213,17 +212,6 @@ async fn RecordAccumulator::drain_ready(
       continue
     }
     let batch = queue[0]
-    if now_ms >= batch.created_ms + delivery_timeout_ms.to_int64() {
-      // The batch never reached the wire in time: expire it.
-      ignore(queue.remove(0))
-      self.resolve_locked(
-        batch,
-        BatchError(
-          "batch for partition \{batch.partition} exceeded delivery_timeout_ms (\{delivery_timeout_ms}) after \{batch.attempts} attempts",
-        ),
-      )
-      continue
-    }
     if batch.closed || now_ms >= batch.ready_at(self.linger_ms) {
       batch.closed = true
       ignore(queue.remove(0))
@@ -232,6 +220,25 @@ async fn RecordAccumulator::drain_ready(
     }
   }
   out
+}
+
+///|
+/// Apply `stamp` to every queued batch with its position-derived
+/// sequence base, per partition in queue order — the epoch-bump
+/// re-stamp after UNKNOWN_PRODUCER_ID.
+async fn RecordAccumulator::restamp(
+  self : RecordAccumulator,
+  stamp : (ProducerBatch, Int) -> Unit,
+) -> Unit {
+  self.lock.acquire()
+  defer self.lock.release()
+  for _, queue in self.batches {
+    let mut base = 0
+    for batch in queue {
+      stamp(batch, base)
+      base += batch.builder.count()
+    }
+  }
 }
 
 ///|

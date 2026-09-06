@@ -24,6 +24,9 @@ pub const API_METADATA : Int = 3
 pub const API_FIND_COORDINATOR : Int = 10
 
 ///|
+pub const API_INIT_PRODUCER_ID : Int = 22
+
+///|
 pub const API_DESCRIBE_TOPIC_PARTITIONS : Int = 75
 
 ///|
@@ -69,6 +72,13 @@ pub fn driver_api_range(api_key : Int) -> ApiRange? {
         name: "FindCoordinator",
         min: 4,
         max: 4,
+      })
+    API_INIT_PRODUCER_ID =>
+      Some({
+        key: API_INIT_PRODUCER_ID,
+        name: "InitProducerId",
+        min: 5,
+        max: 5,
       })
     API_DESCRIBE_TOPIC_PARTITIONS =>
       Some({

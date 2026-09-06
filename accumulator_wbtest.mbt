@@ -101,9 +101,9 @@ async test "drain_ready hands out closed batches one per partition in order" {
   assert_true(b2.id == b1.id)
   assert_true(b3.id == b1.id)
   // nothing is ready while the batch is open and linger has not passed
-  assert_true(a.drain_ready(5_000L, 100_000).is_empty())
+  assert_true(a.drain_ready(5_000L).is_empty())
   // past the linger deadline the open batch becomes ready...
-  let ready = a.drain_ready(10_500L, 100_000)
+  let ready = a.drain_ready(10_500L)
   assert_eq(ready.length(), 1)
   assert_eq(ready[0].id, b1.id)
   // ...and the next record after the old batch left opens a fresh open
@@ -112,26 +112,19 @@ async test "drain_ready hands out closed batches one per partition in order" {
   assert_true(!rotated)
   assert_true(b4.id != b1.id)
   a.force_close_all()
-  let next = a.drain_ready(10_600L, 100_000)
+  let next = a.drain_ready(10_600L)
   assert_eq(next.length(), 1)
   assert_eq(next[0].id, b4.id)
-  assert_true(a.drain_ready(10_600L, 100_000).is_empty())
+  assert_true(a.drain_ready(10_600L).is_empty())
 }
 
 ///|
-async test "drain_ready releases batches past the delivery timeout" {
+async test "delivery expiry predicate fires past the window only" {
   let a = acc(batch_size=1000, buffer_memory=10_000)
-  let (b, _, _) = a.append(0L, 0, 0L, None, Some(b"x"), [])
-  // 5_000 ms old with a 1_000 ms delivery budget: expire, don't hand out
-  let ready = a.drain_ready(5_000L, 1_000)
-  assert_true(ready.is_empty())
-  assert_eq(a.pool_bytes, 0)
-  assert_true(b.result is Some(_))
-  let msg = match b.result {
-    Some(BatchError(msg)) => msg
-    _ => abort("expected a delivery error")
-  }
-  assert_true(msg.contains("delivery_timeout_ms"))
+  let (b, _, _) = a.append(1_000L, 0, 0L, None, Some(b"x"), [])
+  assert_true(!batch_expired(b, 1_500L, 1_000))
+  assert_true(batch_expired(b, 2_000L, 1_000))
+  ignore(a)
 }
 
 ///|
@@ -167,7 +160,7 @@ async test "metrics count queued, in-flight, sent, and failed records" {
   assert_eq(m1.records_queued, 2)
   assert_true(m1.bytes_queued > 0)
   // drain puts the batch in flight; an ack moves the counters to sent
-  let ready = a.drain_ready(1L, 100_000)
+  let ready = a.drain_ready(1L)
   assert_eq(ready.length(), 1)
   assert_eq(a.metrics(0L).batches_in_flight, 1)
   a.release(ready[0], BatchOk(42L))
