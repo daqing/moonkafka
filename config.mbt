@@ -162,6 +162,9 @@ pub struct CommonConfig {
   client_id : String
   request_timeout_ms : Int
   connection_max_idle_ms : Int
+  /// How long cached metadata stays fresh before the next opportunistic
+  /// refresh (Java's metadata.max.age.ms).
+  metadata_max_age_ms : Int
   retries : Int
   retry_backoff_ms : Int
   retry_backoff_max_ms : Int
@@ -183,12 +186,14 @@ pub fn CommonConfig::new(
   security_protocol? : SecurityProtocol = Plaintext,
   sasl? : SaslConfig? = None,
   tls? : TlsClientOptions? = None,
+  metadata_max_age_ms? : Int = 300000,
 ) -> CommonConfig raise {
   let config : CommonConfig = {
     bootstrap_servers,
     client_id: "moonkafka",
     request_timeout_ms,
     connection_max_idle_ms: 540000,
+    metadata_max_age_ms,
     retries: 10,
     retry_backoff_ms: 100,
     retry_backoff_max_ms: 1000,
@@ -218,6 +223,11 @@ pub fn CommonConfig::validate(self : CommonConfig) -> Unit raise ProtocolError {
   if self.connection_max_idle_ms <= 0 {
     raise ProtocolError::ProtocolError(
       "connection_max_idle_ms must be positive, got \{self.connection_max_idle_ms}",
+    )
+  }
+  if self.metadata_max_age_ms <= 0 {
+    raise ProtocolError::ProtocolError(
+      "metadata_max_age_ms must be positive, got \{self.metadata_max_age_ms}",
     )
   }
   if self.retries < 0 {
@@ -290,6 +300,7 @@ pub fn ProducerConfig::new(
   batch_size? : Int = 16384,
   linger_ms? : Int = 0,
   buffer_memory? : Int = 33554432,
+  metadata_max_age_ms? : Int = 300000,
 ) -> ProducerConfig raise {
   if acks != 1 && acks != -1 {
     raise ProtocolError::ProtocolError(
@@ -321,6 +332,7 @@ pub fn ProducerConfig::new(
       security_protocol~,
       sasl~,
       tls~,
+      metadata_max_age_ms~,
     ),
     topic,
     acks,
@@ -347,6 +359,7 @@ pub fn ConsumerConfig::new(
   security_protocol? : SecurityProtocol = Plaintext,
   sasl? : SaslConfig? = None,
   tls? : TlsClientOptions? = None,
+  metadata_max_age_ms? : Int = 300000,
 ) -> ConsumerConfig raise {
   if topic.length() == 0 {
     raise ProtocolError::ProtocolError("topic must not be empty")
@@ -358,6 +371,7 @@ pub fn ConsumerConfig::new(
       security_protocol~,
       sasl~,
       tls~,
+      metadata_max_age_ms~,
     ),
     topic,
     start_from,

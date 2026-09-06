@@ -7,12 +7,13 @@
 fn fake_api_versions_response(throttle_ms : Int) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i16(0) // error_code
-  e.write_compact_len(6)
+  e.write_compact_len(7)
   let apis : Array[(Int, Int)] = [
     (0, 13),
     (1, 16),
     (2, 11),
     (3, 13),
+    (10, 4),
     (18, 3),
     (75, 0),
   ]
@@ -177,6 +178,44 @@ fn fake_sasl_authenticate_response(ok : Bool) -> Bytes {
   )
   e.write_compact_len(0) // auth bytes: empty
   e.write_i64(0L) // session lifetime
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// The requested coordinator keys of a FindCoordinator v4 request.
+fn fake_find_coordinator_request_keys(rest : Bytes) -> Array[String] raise {
+  let d = @buf.Decoder::new(rest)
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  ignore(d.read_compact_string()) // client id
+  d.skip_tag_buffer()
+  ignore(d.read_i8()) // key type
+  let n = d.read_compact_len()
+  let keys : Array[String] = []
+  for _ in 0..<n {
+    keys.push(d.read_compact_string())
+  }
+  keys
+}
+
+///|
+/// FindCoordinator v4 response body: one entry per requested key, all
+/// pointing at node 0.
+fn fake_find_coordinator_response(keys : Array[String], port : Int) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(keys.length())
+  for key in keys {
+    e.write_compact_string(key)
+    e.write_i32(0) // node id
+    e.write_compact_string("127.0.0.1")
+    e.write_i32(port)
+    e.write_i16(0) // no error
+    e.write_compact_nullable_string(None)
+    e.write_tag_buffer()
+  }
   e.write_tag_buffer()
   e.to_bytes()
 }
@@ -464,6 +503,7 @@ async fn fake_serve_conn(
   fetch_epochs? : Array[Int] = [],
   produce_partitions? : Array[Int] = [],
   produce_record_counts? : Array[Int] = [],
+  metadata_requests? : Array[Int] = [],
 ) -> Unit {
   // per-connection SASL state
   let mut sasl_mechanism : String? = None
@@ -496,7 +536,15 @@ async fn fake_serve_conn(
         fetch_epochs.push(fake_fetch_request_session_epoch(rest))
         fake_fetch_response(topic, version, 7)
       }
-      3 => fake_metadata_response(topic, broker_port, version)
+      3 => {
+        metadata_requests.push(1)
+        fake_metadata_response(topic, broker_port, version)
+      }
+      10 =>
+        fake_find_coordinator_response(
+          fake_find_coordinator_request_keys(rest),
+          broker_port,
+        )
       75 =>
         // Two pages: a fresh request returns partition 0 with a cursor at
         // partition 1; a resumed request returns partition 1 and completes.
@@ -606,6 +654,7 @@ async fn fake_broker(
   fetch_epochs? : Array[Int] = [],
   produce_partitions? : Array[Int] = [],
   produce_record_counts? : Array[Int] = [],
+  metadata_requests? : Array[Int] = [],
 ) -> Unit {
   for ;; {
     let (tcp, _) = server.accept()
@@ -636,6 +685,7 @@ async fn fake_broker(
         fetch_epochs~,
         produce_partitions~,
         produce_record_counts~,
+        metadata_requests~,
       )
     }
   }
@@ -836,6 +886,51 @@ async test "accumulator coalesces concurrent sends into one batch" {
     assert_eq(produce_partitions[0], 0)
     assert_eq(produce_record_counts.length(), 1)
     assert_eq(produce_record_counts[0], 2)
+    server.close()
+  }
+}
+
+///|
+async test "cluster client resolves coordinators, pools connections, refreshes on staleness" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let metadata_requests : Array[Int] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, metadata_requests~)
+    }
+    let cluster = @moonkafka.ClusterClient::connect(
+      [@moonkafka.HostPort::parse("127.0.0.1:\{server.addr.port()}")],
+      request_timeout_ms=10000,
+      metadata_max_age_ms=60000,
+    )
+    defer cluster.close()
+    // Batched coordinator lookup: one entry per requested key, all on
+    // the fake cluster's node 0 at the broker port.
+    let coords = cluster.coordinator(["orders", "payments"], @moonkafka.Group)
+    assert_eq(coords.length(), 2)
+    assert_eq(coords.get("orders").unwrap().node_id, 0)
+    assert_eq(coords.get("payments").unwrap().key, "payments")
+    assert_eq(coords.get("payments").unwrap().port, server.addr.port())
+    // Metadata first: the pool refuses to dial unknown node ids.
+    cluster.refresh_metadata(Some(["events"]))
+    assert_true(cluster.topic("events") is Some(_))
+    // Pooled leader connection: node 0 dials once, the second request
+    // reuses it — two accepts total with the control connection.
+    let _ = cluster.connection(0)
+    let _ = cluster.connection(0)
+    assert_eq(accepted.length(), 2)
+    // refresh_if_stale on a fresh cache skips; an invalidated (error
+    // trigger) cache refreshes through the existing control connection.
+    cluster.refresh_if_stale()
+    assert_eq(metadata_requests.length(), 1)
+    cluster.invalidate_metadata()
+    cluster.refresh_if_stale()
+    assert_eq(metadata_requests.length(), 2)
+    cluster.refresh_if_stale()
+    assert_eq(metadata_requests.length(), 2)
+    // no extra dials from any of it
+    assert_eq(accepted.length(), 2)
     server.close()
   }
 }
