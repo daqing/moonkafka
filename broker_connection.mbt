@@ -80,6 +80,8 @@ pub struct BrokerConnection {
   /// Wall-clock deadline set by the broker's last throttle hint; requests
   /// started before it wait out the remainder.
   mut throttled_until_ms : Int64
+  /// Sum of every throttle hint this connection received.
+  mut throttle_total_ms : Int64
   /// Version ranges the broker advertised at handshake; set by
   /// negotiate_api_versions and consulted by api_version per request.
   mut versions : BrokerVersions?
@@ -127,6 +129,7 @@ pub async fn BrokerConnection::connect(
       closed: false,
       in_flight: @async.Semaphore(max_in_flight, initial_value=max_in_flight),
       throttled_until_ms: 0L,
+      throttle_total_ms: 0L,
       versions: None,
     }
     conn
@@ -144,7 +147,14 @@ pub fn BrokerConnection::note_throttle(
     if until > self.throttled_until_ms {
       self.throttled_until_ms = until
     }
+    self.throttle_total_ms += throttle_ms.to_int64()
   }
+}
+
+///|
+/// Cumulative throttle hints received on this connection.
+pub fn BrokerConnection::throttle_total_ms(self : BrokerConnection) -> Int64 {
+  self.throttle_total_ms
 }
 
 ///|
@@ -245,6 +255,27 @@ async fn BrokerConnection::issue_request(
     encode_request(api_key, api_version, corr, self.client_id, body, flexible~),
   )
   corr
+}
+
+///|
+/// Write a request frame without awaiting a response — Produce with
+/// acks=0, where the broker sends none. The correlation id still
+/// advances so later responses keep their numbering; no in-flight slot
+/// is consumed since nothing waits.
+pub async fn BrokerConnection::send_only(
+  self : BrokerConnection,
+  api_key : Int,
+  api_version : Int,
+  body : Bytes,
+) -> Unit {
+  self.write_lock.acquire()
+  defer self.write_lock.release()
+  self.correlation_id += 1
+  let corr = self.correlation_id
+  self.stream.write(
+    encode_request(api_key, api_version, corr, self.client_id, body),
+  )
+  ignore(corr)
 }
 
 ///|

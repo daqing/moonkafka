@@ -7,13 +7,19 @@
 fn fake_api_versions_response(throttle_ms : Int) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i16(0) // error_code
-  e.write_compact_len(6)
+  e.write_compact_len(12)
   let apis : Array[(Int, Int)] = [
     (0, 13),
     (1, 16),
     (2, 11),
     (3, 13),
+    (10, 4),
     (18, 3),
+    (22, 5),
+    (24, 3),
+    (25, 4),
+    (26, 5),
+    (28, 4),
     (75, 0),
   ]
   for pair in apis {
@@ -50,8 +56,7 @@ fn fake_sasl_auth_bytes(rest : Bytes) -> Bytes raise {
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
   ignore(d.read_i32()) // correlation id
-  let id_len = d.read_i16()
-  ignore(d.read_bytes(id_len))
+  ignore(d.read_compact_string()) // client id
   d.skip_tag_buffer()
   let n = d.read_compact_len()
   d.read_bytes(n)
@@ -183,6 +188,77 @@ fn fake_sasl_authenticate_response(ok : Bool) -> Bytes {
 }
 
 ///|
+/// The requested coordinator keys of a FindCoordinator v4 request.
+fn fake_find_coordinator_request_keys(rest : Bytes) -> Array[String] raise {
+  let d = @buf.Decoder::new(rest)
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  ignore(d.read_compact_string()) // client id
+  d.skip_tag_buffer()
+  ignore(d.read_i8()) // key type
+  let n = d.read_compact_len()
+  let keys : Array[String] = []
+  for _ in 0..<n {
+    keys.push(d.read_compact_string())
+  }
+  keys
+}
+
+///|
+/// FindCoordinator v4 response body: one entry per requested key, all
+/// pointing at node 0.
+fn fake_find_coordinator_response(keys : Array[String], port : Int) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(keys.length())
+  for key in keys {
+    e.write_compact_string(key)
+    e.write_i32(0) // node id
+    e.write_compact_string("127.0.0.1")
+    e.write_i32(port)
+    e.write_i16(0) // no error
+    e.write_compact_nullable_string(None)
+    e.write_tag_buffer()
+  }
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse an InitProducerId v5 request: (transactional id, timeout,
+/// producer id, producer epoch).
+fn fake_init_producer_id_request(rest : Bytes) -> (String?, Int64, Int) raise {
+  let d = @buf.Decoder::new(rest)
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  ignore(d.read_compact_string()) // client id
+  d.skip_tag_buffer()
+  let transactional_id = d.read_compact_nullable_string()
+  ignore(d.read_i32()) // transaction timeout
+  let producer_id = d.read_i64()
+  let producer_epoch = d.read_i16()
+  (transactional_id, producer_id, producer_epoch)
+}
+
+///|
+/// InitProducerId v5 response: a fresh identity gets pid 500 epoch 0;
+/// a bump request keeps the pid and increments the epoch.
+fn fake_init_producer_id_response(
+  producer_id : Int64,
+  producer_epoch : Int,
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_i16(0) // no error
+  e.write_i64(producer_id)
+  e.write_i16(producer_epoch)
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
 /// Metadata response body; v13 appends a top-level error code after the
 /// topics array.
 fn fake_metadata_response(
@@ -229,10 +305,60 @@ fn fake_metadata_response(
 let fake_topic_id : Bytes = Bytes::make(16, b'\x2a')
 
 ///|
+/// Parse the first partition index and record count of a Produce v12/v13
+/// request: skip the fixed header ints, client id + tag buffer, then the
+/// request body down to the first topic's first partition entry; the
+/// count sits in the batch's v2 header (i32 at bytes 57..61).
+fn fake_produce_request_info(
+  rest : Bytes,
+  version : Int,
+) -> (Int, Int, Int64, Int, Int) raise {
+  let d = @buf.Decoder::new(rest)
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  ignore(d.read_compact_string()) // client id
+  d.skip_tag_buffer()
+  ignore(d.read_compact_nullable_string()) // transactional id
+  ignore(d.read_i16()) // acks
+  ignore(d.read_i32()) // timeout
+  ignore(d.read_compact_len()) // topics: one
+  match version {
+    13 => d.skip(16) // topic id
+    _ => ignore(d.read_compact_string()) // topic name
+  }
+  ignore(d.read_compact_len()) // partitions
+  let partition = d.read_i32()
+  let n = d.read_compact_len() // records: one batch's bytes
+  let batch = d.read_bytes(n)
+  let count = i32_at(batch, 57)
+  let producer_id = (batch[43].to_int64() << 56) |
+    (batch[44].to_int64() << 48) |
+    (batch[45].to_int64() << 40) |
+    (batch[46].to_int64() << 32) |
+    (batch[47].to_int64() << 24) |
+    (batch[48].to_int64() << 16) |
+    (batch[49].to_int64() << 8) |
+    batch[50].to_int64()
+  let epoch = (batch[51].to_int() << 8) | batch[52].to_int()
+  let base_sequence = i32_at(batch, 53)
+  (partition, count, producer_id, epoch, base_sequence)
+}
+
+///|
+fn i32_at(data : Bytes, at : Int) -> Int {
+  (data[at].to_int() << 24) |
+  (data[at + 1].to_int() << 16) |
+  (data[at + 2].to_int() << 8) |
+  data[at + 3].to_int()
+}
+
+///|
 fn fake_produce_response(
   topic : String,
   version : Int,
   base_offset : Int64,
+  error_code? : Int = 0,
 ) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_compact_len(1) // topics
@@ -243,7 +369,7 @@ fn fake_produce_response(
   }
   e.write_compact_len(1) // partitions
   e.write_i32(0) // index
-  e.write_i16(0) // no error
+  e.write_i16(error_code)
   e.write_i64(base_offset)
   e.write_i64(-1L) // log_append_time
   e.write_i64(-1L) // log_start_offset
@@ -283,8 +409,7 @@ fn fake_fetch_request_session_epoch(rest : Bytes) -> Int raise {
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
   ignore(d.read_i32()) // correlation id
-  let id_len = d.read_i16()
-  ignore(d.read_bytes(id_len)) // client id
+  ignore(d.read_compact_string()) // client id
   d.skip_tag_buffer()
   ignore(d.read_i32()) // max_wait_ms
   ignore(d.read_i32()) // min_bytes
@@ -360,8 +485,7 @@ fn fake_dtp_request_cursor(rest : Bytes) -> TopicPartitionCursor? raise {
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
   ignore(d.read_i32()) // correlation id
-  let id_len = d.read_i16()
-  ignore(d.read_bytes(id_len))
+  ignore(d.read_compact_string()) // client id
   d.skip_tag_buffer()
   let topic_count = d.read_compact_len()
   for _ in 0..<topic_count {
@@ -423,10 +547,188 @@ fn fake_describe_topic_partitions_response(
 }
 
 ///|
+/// Parse an AddPartitionsToTxn v3 request (client shape):
+/// (transactional id, producer id, epoch, topics with partitions).
+fn fake_add_partitions_to_txn_request(
+  rest : Bytes,
+) -> (String, Int64, Int, Array[(String, Array[Int])]) raise {
+  let d = @buf.Decoder::new(rest)
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  ignore(d.read_compact_string()) // client id
+  d.skip_tag_buffer()
+  let transactional_id = d.read_compact_string()
+  let producer_id = d.read_i64()
+  let producer_epoch = d.read_i16()
+  let n = d.read_compact_len()
+  let topics : Array[(String, Array[Int])] = []
+  for _ in 0..<n {
+    let name = d.read_compact_string()
+    let parts = d.read_compact_len()
+    let partitions : Array[Int] = []
+    for _ in 0..<parts {
+      partitions.push(d.read_i32())
+    }
+    d.skip_tag_buffer()
+    topics.push((name, partitions))
+  }
+  (transactional_id, producer_id, producer_epoch, topics)
+}
+
+///|
+/// AddPartitionsToTxn v3 response body: per-partition results under the
+/// v3-and-below topic array.
+fn fake_add_partitions_to_txn_response(
+  topics : Array[(String, Array[Int])],
+  error_code : Int,
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(topics.length())
+  for topic in topics {
+    let (name, partitions) = topic
+    e.write_compact_string(name)
+    e.write_compact_len(partitions.length())
+    for p in partitions {
+      e.write_i32(p)
+      e.write_i16(error_code)
+      e.write_tag_buffer()
+    }
+    e.write_tag_buffer()
+  }
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse an AddOffsetsToTxn v4 request:
+/// (transactional id, producer id, epoch, group id).
+fn fake_add_offsets_to_txn_request(
+  rest : Bytes,
+) -> (String, Int64, Int, String) raise {
+  let d = @buf.Decoder::new(rest)
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  ignore(d.read_compact_string()) // client id
+  d.skip_tag_buffer()
+  let transactional_id = d.read_compact_string()
+  let producer_id = d.read_i64()
+  let producer_epoch = d.read_i16()
+  let group_id = d.read_compact_string()
+  (transactional_id, producer_id, producer_epoch, group_id)
+}
+
+///|
+/// AddOffsetsToTxn v4 response body.
+fn fake_add_offsets_to_txn_response(error_code : Int) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_i16(error_code)
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse a TxnOffsetCommit v4 request: (transactional id, group id,
+/// producer id, epoch, committed (partition, offset) pairs).
+fn fake_txn_offset_commit_request(
+  rest : Bytes,
+) -> (String, String, Int64, Int, Array[(Int, Int64)]) raise {
+  let d = @buf.Decoder::new(rest)
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  ignore(d.read_compact_string()) // client id
+  d.skip_tag_buffer()
+  let transactional_id = d.read_compact_string()
+  let group_id = d.read_compact_string()
+  let producer_id = d.read_i64()
+  let producer_epoch = d.read_i16()
+  ignore(d.read_i32()) // generation id
+  ignore(d.read_compact_string()) // member id
+  ignore(d.read_compact_nullable_string()) // group instance id
+  let n = d.read_compact_len()
+  let offsets : Array[(Int, Int64)] = []
+  for _ in 0..<n {
+    ignore(d.read_compact_string()) // topic name
+    let parts = d.read_compact_len()
+    for _ in 0..<parts {
+      let partition = d.read_i32()
+      let offset = d.read_i64()
+      ignore(d.read_i32()) // committed leader epoch
+      ignore(d.read_compact_nullable_string()) // metadata
+      d.skip_tag_buffer()
+      offsets.push((partition, offset))
+    }
+    d.skip_tag_buffer()
+  }
+  (transactional_id, group_id, producer_id, producer_epoch, offsets)
+}
+
+///|
+/// TxnOffsetCommit v4 response body.
+fn fake_txn_offset_commit_response(
+  offsets : Array[(Int, Int64)],
+  error_code : Int,
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(1) // one topic
+  e.write_compact_string("events")
+  e.write_compact_len(offsets.length())
+  for entry in offsets {
+    let (partition, _) = entry
+    e.write_i32(partition)
+    e.write_i16(error_code)
+    e.write_tag_buffer()
+  }
+  e.write_tag_buffer()
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse an EndTxn v5 request:
+/// (transactional id, producer id, epoch, committed).
+fn fake_end_txn_request(rest : Bytes) -> (String, Int64, Int, Bool) raise {
+  let d = @buf.Decoder::new(rest)
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  ignore(d.read_compact_string()) // client id
+  d.skip_tag_buffer()
+  let transactional_id = d.read_compact_string()
+  let producer_id = d.read_i64()
+  let producer_epoch = d.read_i16()
+  let committed = d.read_bool()
+  (transactional_id, producer_id, producer_epoch, committed)
+}
+
+///|
+/// EndTxn v5 response body: success carries the KIP-890 part 2
+/// post-transaction identity (the fake bumps the epoch like a v2
+/// transaction coordinator).
+fn fake_end_txn_response(
+  error_code : Int,
+  producer_id : Int64,
+  producer_epoch : Int,
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_i16(error_code)
+  e.write_i64(producer_id)
+  e.write_i16(producer_epoch)
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
 /// Answer requests forever on one client connection; exits when the client
 /// goes away. Every API answers with offset 42.
 async fn fake_serve_conn(
-  stream : BrokerStream,
+  stream : @moonkafka.BrokerStream,
   topic : String,
   broker_port : Int,
   api_throttle_ms? : Int = 0,
@@ -434,6 +736,20 @@ async fn fake_serve_conn(
   scram_password? : String = "secret",
   scram_sha512? : Bool = false,
   fetch_epochs? : Array[Int] = [],
+  produce_partitions? : Array[Int] = [],
+  produce_record_counts? : Array[Int] = [],
+  metadata_requests? : Array[Int] = [],
+  produce_error_rounds? : Int = 0,
+  produce_identities? : Array[(Int64, Int, Int)] = [],
+  unknown_producer_at? : Int = 0,
+  add_txn_requests? : Array[(String, Array[(String, Array[Int])])] = [],
+  add_offsets_requests? : Array[(String, String)] = [],
+  txn_offset_requests? : Array[(String, String, Array[(Int, Int64)])] = [],
+  end_txn_requests? : Array[(String, Int64, Int, Bool)] = [],
+  txn_error_code? : Int = 0,
+  end_txn_error_code? : Int = 0,
+  end_txn_error_rounds? : Int = 0,
+  produce_error_code? : Int = 0,
 ) -> Unit {
   // per-connection SASL state
   let mut sasl_mechanism : String? = None
@@ -455,13 +771,85 @@ async fn fake_serve_conn(
         sasl_mechanism = Some(fake_sasl_handshake_mechanism(rest))
         fake_sasl_handshake_response()
       }
-      0 => fake_produce_response(topic, version, 42L)
+      0 => {
+        let (idx, count, pid, epoch, base_seq) = fake_produce_request_info(
+          rest, version,
+        )
+        produce_partitions.push(idx)
+        produce_record_counts.push(count)
+        produce_identities.push((pid, epoch, base_seq))
+        // The shared partitions array doubles as the round counter, so
+        // re-dialed connections keep counting: the first
+        // `produce_error_rounds` produce requests (across all of them)
+        // answer LEADER_NOT_AVAILABLE — retriable, the sender must
+        // requeue and recover.
+        if unknown_producer_at > 0 &&
+          produce_partitions.length() == unknown_producer_at {
+          // UNKNOWN_PRODUCER_ID: the sender must bump the epoch and
+          // restart sequences
+          fake_produce_response(topic, version, 42L, error_code=59)
+        } else if produce_partitions.length() <= produce_error_rounds {
+          fake_produce_response(topic, version, 42L, error_code=5)
+        } else if produce_error_code != 0 {
+          fake_produce_response(
+            topic,
+            version,
+            42L,
+            error_code=produce_error_code,
+          )
+        } else {
+          fake_produce_response(topic, version, 42L)
+        }
+      }
       2 => fake_list_offsets_response(topic, 42L)
       1 => {
         fetch_epochs.push(fake_fetch_request_session_epoch(rest))
         fake_fetch_response(topic, version, 7)
       }
-      3 => fake_metadata_response(topic, broker_port, version)
+      3 => {
+        metadata_requests.push(1)
+        fake_metadata_response(topic, broker_port, version)
+      }
+      10 =>
+        fake_find_coordinator_response(
+          fake_find_coordinator_request_keys(rest),
+          broker_port,
+        )
+      22 => {
+        let (_, pid, epoch) = fake_init_producer_id_request(rest)
+        if pid < 0 {
+          fake_init_producer_id_response(500L, 0)
+        } else {
+          fake_init_producer_id_response(pid, epoch + 1)
+        }
+      }
+      24 => {
+        let (tid, _, _, topics) = fake_add_partitions_to_txn_request(rest)
+        add_txn_requests.push((tid, topics))
+        fake_add_partitions_to_txn_response(topics, txn_error_code)
+      }
+      25 => {
+        let (tid, _, _, group) = fake_add_offsets_to_txn_request(rest)
+        add_offsets_requests.push((tid, group))
+        fake_add_offsets_to_txn_response(0)
+      }
+      26 => {
+        let (tid, pid, epoch, committed) = fake_end_txn_request(rest)
+        end_txn_requests.push((tid, pid, epoch, committed))
+        // The shared array doubles as the round counter: the first
+        // `end_txn_error_rounds` EndTxn calls answer the injected error;
+        // success bumps the epoch like a KIP-890 part 2 coordinator.
+        if end_txn_requests.length() <= end_txn_error_rounds {
+          fake_end_txn_response(end_txn_error_code, pid, epoch)
+        } else {
+          fake_end_txn_response(0, pid, epoch + 1)
+        }
+      }
+      28 => {
+        let (tid, group, _, _, offsets) = fake_txn_offset_commit_request(rest)
+        txn_offset_requests.push((tid, group, offsets))
+        fake_txn_offset_commit_response(offsets, 0)
+      }
       75 =>
         // Two pages: a fresh request returns partition 0 with a cursor at
         // partition 1; a resumed request returns partition 1 and completes.
@@ -569,6 +957,20 @@ async fn fake_broker(
   scram_sha512? : Bool = false,
   wrap_tls? : Bool = false,
   fetch_epochs? : Array[Int] = [],
+  produce_partitions? : Array[Int] = [],
+  produce_record_counts? : Array[Int] = [],
+  metadata_requests? : Array[Int] = [],
+  produce_error_rounds? : Int = 0,
+  produce_identities? : Array[(Int64, Int, Int)] = [],
+  unknown_producer_at? : Int = 0,
+  add_txn_requests? : Array[(String, Array[(String, Array[Int])])] = [],
+  add_offsets_requests? : Array[(String, String)] = [],
+  txn_offset_requests? : Array[(String, String, Array[(Int, Int64)])] = [],
+  end_txn_requests? : Array[(String, Int64, Int, Bool)] = [],
+  txn_error_code? : Int = 0,
+  end_txn_error_code? : Int = 0,
+  end_txn_error_rounds? : Int = 0,
+  produce_error_code? : Int = 0,
 ) -> Unit {
   for ;; {
     let (tcp, _) = server.accept()
@@ -597,6 +999,20 @@ async fn fake_broker(
         scram_password~,
         scram_sha512~,
         fetch_epochs~,
+        produce_partitions~,
+        produce_record_counts~,
+        metadata_requests~,
+        produce_error_rounds~,
+        produce_identities~,
+        unknown_producer_at~,
+        add_txn_requests~,
+        add_offsets_requests~,
+        txn_offset_requests~,
+        end_txn_requests~,
+        txn_error_code~,
+        end_txn_error_code~,
+        end_txn_error_rounds~,
+        produce_error_code~,
       )
     }
   }
@@ -655,6 +1071,7 @@ async test "producer authenticates with SCRAM-SHA-256" {
       fake_broker(server, root, "events", accepted)
     }
     let producer = @moonkafka.Producer::connect_with_config(
+      group=root,
       @moonkafka.ProducerConfig::new(
         ["127.0.0.1:\{server.addr.port()}"],
         "events",
@@ -709,6 +1126,580 @@ async test "consumer polls over an incremental fetch session" {
     let second = consumer.poll(max_wait_ms=200)
     assert_eq(second.length(), 2)
     assert_eq(fetch_epochs, [0, 1])
+    server.close()
+  }
+}
+
+///|
+async test "producer manual partition override reaches the broker" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let produce_partitions : Array[Int] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, produce_partitions~)
+    }
+    let producer = @moonkafka.Producer::connect_with_config(
+      group=root,
+      @moonkafka.ProducerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        acks=1,
+        request_timeout_ms=10000,
+      ),
+    )
+    defer producer.close()
+    // The fake topic has a single partition (index 0): the override pins
+    // the record to it, and an out-of-range one fails before the wire.
+    assert_eq(producer.send(value=b"pinned", partition=0), 42L)
+    assert_eq(produce_partitions.length(), 1)
+    assert_eq(produce_partitions[0], 0)
+    try {
+      let _ = producer.send(value=b"x", partition=3)
+      abort("out-of-range partition override must fail")
+    } catch {
+      _ => ()
+    }
+    assert_eq(produce_partitions.length(), 1)
+    server.close()
+  }
+}
+
+///|
+async test "accumulator coalesces concurrent sends into one batch" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let produce_partitions : Array[Int] = []
+    let produce_record_counts : Array[Int] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(
+        server,
+        root,
+        "events",
+        accepted,
+        produce_partitions~,
+        produce_record_counts~,
+      )
+    }
+    let producer = @moonkafka.Producer::connect_with_config(
+      group=root,
+      @moonkafka.ProducerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        acks=1,
+        request_timeout_ms=10000,
+        linger_ms=50,
+      ),
+    )
+    defer producer.close()
+    // Two concurrent sends land in the same open batch during the linger
+    // window and leave as one Produce request; each takes base + index.
+    let offsets : Array[Int64] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      offsets.push(producer.send(value=b"first"))
+    }
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      offsets.push(producer.send(value=b"second"))
+    }
+    for _ in 0..<1000 {
+      if offsets.length() == 2 {
+        break
+      }
+      @async.sleep(5)
+    }
+    assert_eq(offsets.length(), 2)
+    offsets.sort()
+    assert_eq(offsets[0], 42L)
+    assert_eq(offsets[1], 43L)
+    assert_eq(produce_partitions.length(), 1)
+    assert_eq(produce_partitions[0], 0)
+    assert_eq(produce_record_counts.length(), 1)
+    assert_eq(produce_record_counts[0], 2)
+    server.close()
+  }
+}
+
+///|
+async test "cluster client resolves coordinators, pools connections, refreshes on staleness" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let metadata_requests : Array[Int] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, metadata_requests~)
+    }
+    let cluster = @moonkafka.ClusterClient::connect(
+      [@moonkafka.HostPort::parse("127.0.0.1:\{server.addr.port()}")],
+      request_timeout_ms=10000,
+      metadata_max_age_ms=60000,
+    )
+    defer cluster.close()
+    // Batched coordinator lookup: one entry per requested key, all on
+    // the fake cluster's node 0 at the broker port.
+    let coords = cluster.coordinator(["orders", "payments"], @moonkafka.Group)
+    assert_eq(coords.length(), 2)
+    assert_eq(coords.get("orders").unwrap().node_id, 0)
+    assert_eq(coords.get("payments").unwrap().key, "payments")
+    assert_eq(coords.get("payments").unwrap().port, server.addr.port())
+    // Metadata first: the pool refuses to dial unknown node ids.
+    cluster.refresh_metadata(Some(["events"]))
+    assert_true(cluster.topic("events") is Some(_))
+    // Pooled leader connection: node 0 dials once, the second request
+    // reuses it — two accepts total with the control connection.
+    let _ = cluster.connection(0)
+    let _ = cluster.connection(0)
+    assert_eq(accepted.length(), 2)
+    // refresh_if_stale on a fresh cache skips; an invalidated (error
+    // trigger) cache refreshes through the existing control connection.
+    cluster.refresh_if_stale()
+    assert_eq(metadata_requests.length(), 1)
+    cluster.invalidate_metadata()
+    cluster.refresh_if_stale()
+    assert_eq(metadata_requests.length(), 2)
+    cluster.refresh_if_stale()
+    assert_eq(metadata_requests.length(), 2)
+    // no extra dials from any of it
+    assert_eq(accepted.length(), 2)
+    server.close()
+  }
+}
+
+///|
+async test "sender retries retriable produce errors within the delivery window" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let produce_partitions : Array[Int] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(
+        server,
+        root,
+        "events",
+        accepted,
+        produce_partitions~,
+        produce_error_rounds=2,
+      )
+    }
+    let producer = @moonkafka.Producer::connect_with_config(
+      group=root,
+      @moonkafka.ProducerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        acks=1,
+        request_timeout_ms=10000,
+      ),
+    )
+    defer producer.close()
+    // The first two rounds answer LEADER_NOT_AVAILABLE; the sender
+    // requeues and recovers, and the third round acknowledges.
+    assert_eq(producer.send(value=b"after retries"), 42L)
+    assert_eq(produce_partitions.length(), 3)
+    server.close()
+  }
+}
+
+///|
+async test "sender writes acks=0 produce without reading a response" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let produce_partitions : Array[Int] = []
+    let produce_record_counts : Array[Int] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(
+        server,
+        root,
+        "events",
+        accepted,
+        produce_partitions~,
+        produce_record_counts~,
+      )
+    }
+    let producer = @moonkafka.Producer::connect_with_config(
+      group=root,
+      @moonkafka.ProducerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        acks=0,
+        request_timeout_ms=10000,
+      ),
+    )
+    defer producer.close()
+    // acks=0 has no broker-assigned offset: send resolves with -1 once
+    // the sender wrote the frame.
+    assert_eq(producer.send(value=b"fire and forget"), -1L)
+    for _ in 0..<1000 {
+      if produce_partitions.length() == 1 {
+        break
+      }
+      @async.sleep(5)
+    }
+    assert_eq(produce_partitions[0], 0)
+    assert_eq(produce_record_counts[0], 1)
+    server.close()
+  }
+}
+
+///|
+/// True when awaiting the handle raises (cancellation surfaces as an error).
+async fn await_raises(handle : @moonkafka.SendHandle) -> Bool {
+  let _ = handle.await() catch {
+    @moonkafka.ProtocolError(_) => return true
+    e => raise e
+  }
+  false
+}
+
+///|
+async test "send handles await, batch, cancel, and call back" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let produce_record_counts : Array[Int] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, produce_record_counts~)
+    }
+    let producer = @moonkafka.Producer::connect_with_config(
+      group=root,
+      @moonkafka.ProducerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        acks=1,
+        request_timeout_ms=10000,
+        linger_ms=20,
+      ),
+    )
+    defer producer.close()
+    // send_all: three records appended in one call, resolved by handle
+    let handles = producer.send_all([
+      @moonkafka.SendRecord::of(value=b"a"),
+      @moonkafka.SendRecord::of(value=b"b"),
+      @moonkafka.SendRecord::of(value=b"c"),
+    ])
+    assert_eq(handles.length(), 3)
+    let offsets : Array[Int64] = []
+    for handle in handles {
+      offsets.push(handle.await())
+    }
+    offsets.sort()
+    assert_eq(offsets, [42L, 43L, 44L])
+    // coalesced into one produce request
+    assert_eq(produce_record_counts.length(), 1)
+    assert_eq(produce_record_counts[0], 3)
+    // completion callback fires with the sent offset
+    let callback_results : Array[@moonkafka.SendResult] = []
+    let late = producer.send_handle(value=b"cb")
+    late.on_complete(fn(result) { callback_results.push(result) })
+    for _ in 0..<1000 {
+      if callback_results.length() == 1 {
+        break
+      }
+      @async.sleep(5)
+    }
+    assert_eq(callback_results.length(), 1)
+    assert_true(callback_results[0] is @moonkafka.Sent(_))
+    // cancel stops the wait: await raises, the record still drains at close
+    let doomed = producer.send_handle(value=b"doomed")
+    doomed.cancel()
+    assert_true(await_raises(doomed))
+    server.close()
+  }
+}
+
+///|
+async test "idempotent producer stamps pid/epoch/sequence and recovers epoch" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let produce_identities : Array[(Int64, Int, Int)] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(
+        server,
+        root,
+        "events",
+        accepted,
+        produce_identities~,
+        unknown_producer_at=2,
+      )
+    }
+    let producer = @moonkafka.Producer::connect_with_config(
+      group=root,
+      @moonkafka.ProducerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        acks=-1,
+        request_timeout_ms=10000,
+        enable_idempotence=Some(true),
+      ),
+    )
+    defer producer.close()
+    // connect ran InitProducerId: the fake assigns pid 500, epoch 0
+    assert_eq(producer.producer_id, 500L)
+    assert_eq(producer.producer_epoch, 0)
+    // first record: batch header carries (500, 0, seq 0)
+    assert_eq(producer.send(value=b"one"), 42L)
+    // second record's produce answers UNKNOWN_PRODUCER_ID: the sender
+    // bumps the epoch (fake returns epoch 1), resets sequences to zero,
+    // re-stamps, and retries
+    assert_eq(producer.send(value=b"two"), 42L)
+    assert_eq(producer.producer_epoch, 1)
+    assert_eq(produce_identities.length(), 3)
+    assert_eq(produce_identities[0], (500L, 0, 0))
+    assert_eq(produce_identities[1], (500L, 0, 1))
+    assert_eq(produce_identities[2], (500L, 1, 0))
+    server.close()
+  }
+}
+
+///|
+async test "transactional producer commits and keeps the identity moving" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let produce_identities : Array[(Int64, Int, Int)] = []
+    let add_txn_requests : Array[(String, Array[(String, Array[Int])])] = []
+    let end_txn_requests : Array[(String, Int64, Int, Bool)] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(
+        server,
+        root,
+        "events",
+        accepted,
+        produce_identities~,
+        add_txn_requests~,
+        end_txn_requests~,
+      )
+    }
+    let producer = @moonkafka.Producer::connect_with_config(
+      group=root,
+      @moonkafka.ProducerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        acks=-1,
+        request_timeout_ms=10000,
+        transactional_id=Some("tid-1"),
+        transaction_timeout_ms=30000,
+      ),
+    )
+    defer producer.close()
+    // connect resolved the coordinator and ran InitProducerId there
+    assert_eq(producer.producer_id, 500L)
+    assert_eq(producer.producer_epoch, 0)
+    // sends outside a transaction are a programming error
+    try {
+      let _ = producer.send(value=b"outside")
+      abort("send before begin_transaction must fail")
+    } catch {
+      _ => ()
+    }
+    // first transaction: AddPartitionsToTxn precedes the produce, EndTxn
+    // commits, and the coordinator bumps the epoch (fake mirrors KIP-890
+    // part 2 by returning epoch + 1)
+    producer.begin_transaction()
+    assert_eq(producer.send(value=b"one"), 42L)
+    assert_eq(producer.send(value=b"two"), 42L)
+    producer.commit_transaction()
+    assert_eq(add_txn_requests, [("tid-1", [("events", [0])])])
+    assert_eq(end_txn_requests, [("tid-1", 500L, 0, true)])
+    assert_eq(produce_identities.length(), 2)
+    assert_eq(produce_identities[0], (500L, 0, 0))
+    assert_eq(produce_identities[1], (500L, 0, 1))
+    assert_eq(producer.producer_epoch, 1)
+    // sends outside a transaction stay rejected after commit
+    try {
+      let _ = producer.send(value=b"outside")
+      abort("send after commit must fail")
+    } catch {
+      _ => ()
+    }
+    // second transaction: the identity continues (epoch 1, sequence 2)
+    producer.begin_transaction()
+    assert_eq(producer.send(value=b"three"), 42L)
+    producer.commit_transaction()
+    assert_eq(add_txn_requests.length(), 2)
+    assert_eq(add_txn_requests[1], ("tid-1", [("events", [0])]))
+    assert_eq(end_txn_requests[1], ("tid-1", 500L, 1, true))
+    assert_eq(produce_identities.length(), 3)
+    assert_eq(produce_identities[2], (500L, 1, 2))
+    assert_eq(producer.producer_epoch, 2)
+    server.close()
+  }
+}
+
+///|
+async test "transactional producer aborts discard the records" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let end_txn_requests : Array[(String, Int64, Int, Bool)] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, end_txn_requests~)
+    }
+    let producer = @moonkafka.Producer::connect_with_config(
+      group=root,
+      @moonkafka.ProducerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        acks=-1,
+        request_timeout_ms=10000,
+        transactional_id=Some("tid-2"),
+      ),
+    )
+    defer producer.close()
+    producer.begin_transaction()
+    assert_eq(producer.send(value=b"doomed"), 42L)
+    producer.abort_transaction()
+    assert_eq(end_txn_requests, [("tid-2", 500L, 0, false)])
+    // the aborted transaction released the identity bump too
+    assert_eq(producer.producer_epoch, 1)
+    // and the producer is ready for the next transaction
+    producer.begin_transaction()
+    producer.commit_transaction()
+    assert_eq(end_txn_requests.length(), 2)
+    assert_eq(end_txn_requests[1], ("tid-2", 500L, 1, true))
+    server.close()
+  }
+}
+
+///|
+async test "failed sends poison the commit; abort still lands" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let end_txn_requests : Array[(String, Int64, Int, Bool)] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(
+        server,
+        root,
+        "events",
+        accepted,
+        end_txn_requests~,
+        produce_error_code=47, // INVALID_PRODUCER_EPOCH: terminal
+      )
+    }
+    let producer = @moonkafka.Producer::connect_with_config(
+      group=root,
+      @moonkafka.ProducerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        acks=-1,
+        request_timeout_ms=10000,
+        transactional_id=Some("tid-3"),
+      ),
+    )
+    defer producer.close()
+    producer.begin_transaction()
+    try {
+      let _ = producer.send(value=b"lost")
+      abort("send against a fenced broker must fail")
+    } catch {
+      _ => ()
+    }
+    // the abort-on-error policy: commit refuses to end the transaction
+    // while a record failed inside it
+    try {
+      producer.commit_transaction()
+      abort("commit after a failed send must fail")
+    } catch {
+      _ => ()
+    }
+    assert_true(end_txn_requests.is_empty())
+    // abort ends the transaction cleanly
+    producer.abort_transaction()
+    assert_eq(end_txn_requests, [("tid-3", 500L, 0, false)])
+    server.close()
+  }
+}
+
+///|
+async test "commit retries a moved coordinator and raises on fencing" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let end_txn_requests : Array[(String, Int64, Int, Bool)] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(
+        server,
+        root,
+        "events",
+        accepted,
+        end_txn_requests~,
+        end_txn_error_code=16, // NOT_COORDINATOR
+        end_txn_error_rounds=1,
+      )
+    }
+    let producer = @moonkafka.Producer::connect_with_config(
+      group=root,
+      @moonkafka.ProducerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        acks=-1,
+        request_timeout_ms=10000,
+        transactional_id=Some("tid-4"),
+      ),
+    )
+    defer producer.close()
+    producer.begin_transaction()
+    assert_eq(producer.send(value=b"retry"), 42L)
+    // the first EndTxn answers NOT_COORDINATOR; the retry re-resolves and
+    // commits
+    producer.commit_transaction()
+    assert_eq(end_txn_requests.length(), 2)
+    assert_eq(end_txn_requests[1], ("tid-4", 500L, 0, true))
+    server.close()
+  }
+}
+
+///|
+async test "transactional offset commits register the group and land at it" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let end_txn_requests : Array[(String, Int64, Int, Bool)] = []
+    let add_offsets_requests : Array[(String, String)] = []
+    let txn_offset_requests : Array[(String, String, Array[(Int, Int64)])] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(
+        server,
+        root,
+        "events",
+        accepted,
+        add_offsets_requests~,
+        txn_offset_requests~,
+        end_txn_requests~,
+      )
+    }
+    let producer = @moonkafka.Producer::connect_with_config(
+      group=root,
+      @moonkafka.ProducerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        acks=-1,
+        request_timeout_ms=10000,
+        transactional_id=Some("tid-5"),
+      ),
+    )
+    defer producer.close()
+    // offset commits need an active transaction
+    try {
+      producer.send_offsets_to_transaction(
+        [("events", [{ partition: 0, offset: 42L, }])],
+        "gid-1",
+      )
+      abort("send_offsets_to_transaction before begin must fail")
+    } catch {
+      _ => ()
+    }
+    producer.begin_transaction()
+    producer.send_offsets_to_transaction(
+      [("events", [{ partition: 0, offset: 42L, }])],
+      "gid-1",
+    )
+    assert_eq(add_offsets_requests, [("tid-5", "gid-1")])
+    assert_eq(txn_offset_requests, [("tid-5", "gid-1", [(0, 42L)])])
+    producer.commit_transaction()
+    assert_eq(end_txn_requests, [("tid-5", 500L, 0, true)])
     server.close()
   }
 }

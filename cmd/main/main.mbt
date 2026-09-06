@@ -72,24 +72,28 @@ async fn produce(args : Array[String]) -> Unit {
       }
     None => 9092
   }
-  let producer = @lib.Producer::connect(host~, port~, topic~) catch {
-    @lib.BrokerError(code, msg) => {
-      println("broker refused: \{@lib.error_name(code)}: \{msg}")
-      abort("")
+  // The producer's sender drain loop lives in a task group scoped to the
+  // produce call.
+  @async.with_task_group(fn(_group) {
+    let producer = @lib.Producer::connect(group=_group, host~, port~, topic~) catch {
+      @lib.BrokerError(code, msg) => {
+        println("broker refused: \{@lib.error_name(code)}: \{msg}")
+        abort("")
+      }
+      e => {
+        println("failed to connect: \{e}")
+        abort("")
+      }
     }
-    e => {
-      println("failed to connect: \{e}")
-      abort("")
+    defer producer.close()
+    let offset = producer.send(key?, value=@utf8.encode(value)) catch {
+      e => {
+        println("produce failed: \{e}")
+        abort("")
+      }
     }
-  }
-  defer producer.close()
-  let offset = producer.send(key?, value=@utf8.encode(value)) catch {
-    e => {
-      println("produce failed: \{e}")
-      abort("")
-    }
-  }
-  println("produced to \"\{topic}\" at offset \{offset}")
+    println("produced to \"\{topic}\" at offset \{offset}")
+  })
 }
 
 ///|

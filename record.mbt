@@ -336,6 +336,10 @@ pub struct RecordBatchBuilder {
   mut base_timestamp : Int64
   mut max_timestamp : Int64
   mut last_offset : Int64
+  /// Idempotence identity stamped by the producer; -1/-1/-1 = none.
+  mut producer_id : Int64
+  mut producer_epoch : Int
+  mut base_sequence : Int
 } derive(@debug.Debug)
 
 ///|
@@ -347,7 +351,25 @@ pub fn RecordBatchBuilder::new(base_offset? : Int64 = 0L) -> RecordBatchBuilder 
     base_timestamp: -1L,
     max_timestamp: -1L,
     last_offset: -1L,
+    producer_id: -1L,
+    producer_epoch: -1,
+    base_sequence: -1,
   }
+}
+
+///|
+/// Stamp the idempotence identity: the batch's records get sequence
+/// numbers base_sequence..base_sequence+count-1 on the wire. Re-stamping
+/// (epoch bump after UNKNOWN_PRODUCER_ID) regenerates them at to_bytes.
+pub fn RecordBatchBuilder::set_idempotence(
+  self : RecordBatchBuilder,
+  producer_id : Int64,
+  producer_epoch : Int,
+  base_sequence : Int,
+) -> Unit {
+  self.producer_id = producer_id
+  self.producer_epoch = producer_epoch
+  self.base_sequence = base_sequence
 }
 
 ///|
@@ -360,17 +382,42 @@ pub fn RecordBatchBuilder::append(
   value? : Bytes? = None,
   headers? : Array[(Bytes, Bytes)] = [],
 ) -> Unit {
+  let encoded = self.encode_record_body(timestamp, key, value, headers)
   if self.base_timestamp < 0L {
     // The first record fixes the batch's base timestamp; later deltas
     // are relative to it and must be non-negative (monotonic stamps,
     // as the broker requires).
     self.base_timestamp = timestamp
   }
-  let offset_delta = self.last_offset + 1L
+  self.body_bytes += encoded.length() + varint_len(encoded.length())
+  self.bodies.push(encoded)
+  if timestamp > self.max_timestamp {
+    self.max_timestamp = timestamp
+  }
+  self.last_offset = self.last_offset + 1L
+}
+
+///|
+/// The encoded record body `append` would store, without mutating the
+/// builder. The base timestamp for the first record is treated as the
+/// record's own timestamp, so the encoded deltas match what append will
+/// write.
+fn RecordBatchBuilder::encode_record_body(
+  self : RecordBatchBuilder,
+  timestamp : Int64,
+  key : Bytes?,
+  value : Bytes?,
+  headers : Array[(Bytes, Bytes)],
+) -> Bytes {
+  let base = if self.base_timestamp < 0L {
+    timestamp
+  } else {
+    self.base_timestamp
+  }
   let body = @buf.Encoder::new()
   body.write_i8(0) // attributes
-  body.write_varlong(timestamp - self.base_timestamp)
-  body.write_varint(offset_delta.to_int())
+  body.write_varlong(timestamp - base)
+  body.write_varint((self.last_offset + 1L).to_int())
   write_nullable_varint_bytes(body, key)
   write_nullable_varint_bytes(body, value)
   body.write_varint(headers.length())
@@ -380,13 +427,22 @@ pub fn RecordBatchBuilder::append(
     body.write_bytes(header_key)
     write_nullable_varint_bytes(body, Some(header_value))
   }
-  let encoded = body.to_bytes()
-  self.body_bytes += encoded.length() + varint_len(encoded.length())
-  self.bodies.push(encoded)
-  if timestamp > self.max_timestamp {
-    self.max_timestamp = timestamp
-  }
-  self.last_offset = offset_delta
+  body.to_bytes()
+}
+
+///|
+/// Encoded size that `append` would add — the record body plus its
+/// length varint — without mutating the builder. The accumulator's
+/// has-room check for batch_size and buffer_memory accounting.
+pub fn RecordBatchBuilder::estimated_append_size(
+  self : RecordBatchBuilder,
+  timestamp : Int64,
+  key? : Bytes? = None,
+  value? : Bytes? = None,
+  headers? : Array[(Bytes, Bytes)] = [],
+) -> Int {
+  let encoded = self.encode_record_body(timestamp, key, value, headers)
+  encoded.length() + varint_len(encoded.length())
 }
 
 ///|
@@ -434,9 +490,9 @@ pub fn RecordBatchBuilder::to_bytes(self : RecordBatchBuilder) -> Bytes {
   batch.write_i32(count - 1) // lastOffsetDelta (-1 when empty)
   batch.write_i64(base_timestamp)
   batch.write_i64(max_timestamp)
-  batch.write_i64(-1L) // producerId: none (no idempotence)
-  batch.write_i16(-1) // producerEpoch
-  batch.write_i32(-1) // baseSequence
+  batch.write_i64(self.producer_id) // producerId
+  batch.write_i16(self.producer_epoch) // producerEpoch
+  batch.write_i32(self.base_sequence) // baseSequence
   batch.write_i32(count)
   for body in self.bodies {
     batch.write_varint(body.length()) // record length prefix
