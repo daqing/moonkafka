@@ -360,17 +360,42 @@ pub fn RecordBatchBuilder::append(
   value? : Bytes? = None,
   headers? : Array[(Bytes, Bytes)] = [],
 ) -> Unit {
+  let encoded = self.encode_record_body(timestamp, key, value, headers)
   if self.base_timestamp < 0L {
     // The first record fixes the batch's base timestamp; later deltas
     // are relative to it and must be non-negative (monotonic stamps,
     // as the broker requires).
     self.base_timestamp = timestamp
   }
-  let offset_delta = self.last_offset + 1L
+  self.body_bytes += encoded.length() + varint_len(encoded.length())
+  self.bodies.push(encoded)
+  if timestamp > self.max_timestamp {
+    self.max_timestamp = timestamp
+  }
+  self.last_offset = self.last_offset + 1L
+}
+
+///|
+/// The encoded record body `append` would store, without mutating the
+/// builder. The base timestamp for the first record is treated as the
+/// record's own timestamp, so the encoded deltas match what append will
+/// write.
+fn RecordBatchBuilder::encode_record_body(
+  self : RecordBatchBuilder,
+  timestamp : Int64,
+  key : Bytes?,
+  value : Bytes?,
+  headers : Array[(Bytes, Bytes)],
+) -> Bytes {
+  let base = if self.base_timestamp < 0L {
+    timestamp
+  } else {
+    self.base_timestamp
+  }
   let body = @buf.Encoder::new()
   body.write_i8(0) // attributes
-  body.write_varlong(timestamp - self.base_timestamp)
-  body.write_varint(offset_delta.to_int())
+  body.write_varlong(timestamp - base)
+  body.write_varint((self.last_offset + 1L).to_int())
   write_nullable_varint_bytes(body, key)
   write_nullable_varint_bytes(body, value)
   body.write_varint(headers.length())
@@ -380,13 +405,22 @@ pub fn RecordBatchBuilder::append(
     body.write_bytes(header_key)
     write_nullable_varint_bytes(body, Some(header_value))
   }
-  let encoded = body.to_bytes()
-  self.body_bytes += encoded.length() + varint_len(encoded.length())
-  self.bodies.push(encoded)
-  if timestamp > self.max_timestamp {
-    self.max_timestamp = timestamp
-  }
-  self.last_offset = offset_delta
+  body.to_bytes()
+}
+
+///|
+/// Encoded size that `append` would add — the record body plus its
+/// length varint — without mutating the builder. The accumulator's
+/// has-room check for batch_size and buffer_memory accounting.
+pub fn RecordBatchBuilder::estimated_append_size(
+  self : RecordBatchBuilder,
+  timestamp : Int64,
+  key? : Bytes? = None,
+  value? : Bytes? = None,
+  headers? : Array[(Bytes, Bytes)] = [],
+) -> Int {
+  let encoded = self.encode_record_body(timestamp, key, value, headers)
+  encoded.length() + varint_len(encoded.length())
 }
 
 ///|

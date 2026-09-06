@@ -127,6 +127,7 @@ pub fn BrokerError::name(Self) -> String
 
 pub(all) suberror ProtocolError {
   ProtocolError(String)
+  BufferExhausted(String)
 }
 
 pub(all) suberror SaslError {
@@ -399,15 +400,18 @@ pub struct Producer {
 pub fn Producer::close(Self) -> Unit
 pub async fn Producer::connect(host~ : String, port~ : Int, topic~ : String, acks? : Int, timeout_ms? : Int) -> Self
 pub async fn Producer::connect_with_config(ProducerConfig) -> Self
-pub async fn Producer::send(Self, key? : Bytes, value? : Bytes, timestamp? : Int64, partition? : Int) -> Int64
+pub async fn Producer::send(Self, key? : Bytes, value? : Bytes, timestamp? : Int64, partition? : Int, headers? : Array[(Bytes, Bytes)]) -> Int64
 
 pub struct ProducerConfig {
   common : CommonConfig
   topic : String
   acks : Int
   partitioner : Partitioner
+  batch_size : Int
+  linger_ms : Int
+  buffer_memory : Int
 } derive(@debug.Debug)
-pub fn ProducerConfig::new(Array[String], String, acks? : Int, request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?, tls? : TlsClientOptions?, partitioner? : Partitioner) -> Self raise
+pub fn ProducerConfig::new(Array[String], String, acks? : Int, request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?, tls? : TlsClientOptions?, partitioner? : Partitioner, batch_size? : Int, linger_ms? : Int, buffer_memory? : Int) -> Self raise
 
 pub(all) struct Record {
   offset : Int64
@@ -427,6 +431,7 @@ pub struct RecordBatchBuilder {
 } derive(@debug.Debug)
 pub fn RecordBatchBuilder::append(Self, Int64, key? : Bytes?, value? : Bytes?, headers? : Array[(Bytes, Bytes)]) -> Unit
 pub fn RecordBatchBuilder::count(Self) -> Int
+pub fn RecordBatchBuilder::estimated_append_size(Self, Int64, key? : Bytes?, value? : Bytes?, headers? : Array[(Bytes, Bytes)]) -> Int
 pub fn RecordBatchBuilder::estimated_size(Self) -> Int
 pub fn RecordBatchBuilder::last_assigned_offset(Self) -> Int64
 pub fn RecordBatchBuilder::new(base_offset? : Int64) -> Self
