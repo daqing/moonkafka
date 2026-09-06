@@ -10,14 +10,22 @@ test "record batch encode/decode roundtrip" {
       timestamp: 1700000000000L,
       key: Some(@utf8.encode("key-1")),
       value: Some(@utf8.encode("value-1")),
+      headers: [],
     },
     {
       offset: 0L,
       timestamp: 1700000001234L,
       key: None,
       value: Some(b"\x00\xff"),
+      headers: [],
     },
-    { offset: 0L, timestamp: 1700000001234L, key: None, value: None, },
+    {
+      offset: 0L,
+      timestamp: 1700000001234L,
+      key: None,
+      value: None,
+      headers: [],
+    },
   ]
   let decoded = @moonkafka.decode_record_batches(
     @moonkafka.encode_record_batch(records),

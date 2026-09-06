@@ -22,7 +22,10 @@ pub struct Consumer {
   sasl : SaslConfig?
   mut meta_conn : BrokerConnection
   mut brokers : Map[Int, BrokerInfo]
+  mut topic_id : Uuid
   leader_conns : Map[Int, BrokerConnection]
+  /// Fetch session per leader connection, driving incremental fetches.
+  fetch_sessions : Map[Int, FetchSession]
   partitions : Array[PartitionState]
   mut closed : Bool
 }
@@ -56,7 +59,6 @@ pub async fn Consumer::connect_with_config(config : ConsumerConfig) -> Consumer 
     timeout_ms=config.common.request_timeout_ms,
     sasl~,
   )
-  meta_conn.check_api_versions(timeout_ms=config.common.request_timeout_ms)
   let consumer = {
     topic: config.topic,
     start_from: config.start_from,
@@ -65,7 +67,9 @@ pub async fn Consumer::connect_with_config(config : ConsumerConfig) -> Consumer 
     sasl,
     meta_conn,
     brokers: Map([]),
+    topic_id: Uuid::zero(),
     leader_conns: Map([]),
+    fetch_sessions: Map([]),
     partitions: [],
     closed: false,
   }
@@ -122,6 +126,7 @@ async fn Consumer::refresh_metadata(self : Consumer) -> Unit {
   }
   // A refresh after a reconnect must keep read positions; fresh connects
   // start from zero and are overwritten by reset_offsets anyway.
+  self.topic_id = topic_meta.topic_id
   let old : Map[Int, Int64] = Map([])
   for p in self.partitions {
     old[p.info.index] = p.next_offset
@@ -131,11 +136,13 @@ async fn Consumer::refresh_metadata(self : Consumer) -> Unit {
     let next_offset = old.get(p.index).unwrap_or(0L)
     self.partitions.push({ info: p, next_offset, })
   }
-  // Open a connection per distinct partition leader.
+  // Open a connection per distinct partition leader; fetch sessions die
+  // with the old connections.
   for _, conn in self.leader_conns {
     conn.close()
   }
   self.leader_conns.clear()
+  self.fetch_sessions.clear()
   for p in self.partitions {
     let leader = p.info.leader
     if !self.leader_conns.contains(leader) {
@@ -152,6 +159,7 @@ async fn Consumer::refresh_metadata(self : Consumer) -> Unit {
               conn.authenticate(sasl, timeout_ms=self.request_timeout_ms)
             None => ()
           }
+          conn.negotiate_api_versions(timeout_ms=self.request_timeout_ms)
           self.leader_conns[leader] = conn
         }
         None =>
@@ -193,32 +201,34 @@ async fn Consumer::reset_offsets(self : Consumer) -> Unit {
 /// the broker long-polls up to `max_wait_ms` per fetch).
 /// On offset or leadership errors the consumer recovers by refreshing
 /// metadata or re-resolving offsets on the next poll.
+///
+/// Fetches run through per-leader incremental fetch sessions: the first
+/// request carries every partition, later ones only partitions whose
+/// position changed since the broker last heard (session eviction and
+/// INVALID_FETCH_SESSION_EPOCH restart with a full request).
 pub async fn Consumer::poll(
   self : Consumer,
   max_wait_ms? : Int = 500,
   max_bytes? : Int = 1048576,
 ) -> Array[Record] {
   // Group partitions by leader so each leader connection gets one fetch.
-  let by_leader : Map[Int, Array[(PartitionInfo, Int64)]] = Map([])
+  let by_leader : Map[Int, Map[Int, (Int64, Int)]] = Map([])
   for p in self.partitions {
-    let list = by_leader.get_or_init(p.info.leader, fn() { [] })
-    list.push((p.info, p.next_offset))
+    let wanted = by_leader.get_or_init(p.info.leader, fn() { Map([]) })
+    wanted[p.info.index] = (p.next_offset, p.info.leader_epoch)
   }
   let out : Array[Record] = []
   let mut refresh = false
-  for leader, request_partitions in by_leader {
+  for leader, wanted in by_leader {
     guard self.leader_conns.get(leader) is Some(conn) else {
       refresh = true
       continue
     }
-    let results : Array[FetchPartitionResult]? = Some(
-      conn.fetch(
-        self.topic,
-        request_partitions,
-        max_wait_ms~,
-        max_bytes~,
-        timeout_ms=self.request_timeout_ms,
-      ),
+    let session = self.fetch_sessions.get_or_init(leader, fn() {
+      FetchSession::new()
+    })
+    let results : FetchResult? = Some(
+      self.fetch_from_leader(conn, session, wanted, max_wait_ms, max_bytes),
     ) catch {
       e =>
         match e {
@@ -231,18 +241,23 @@ pub async fn Consumer::poll(
         }
     }
     guard results is Some(results) else { continue }
-    for result in results {
-      match result.error_code {
-        0 =>
-          if !result.records.is_empty() {
-            for record in result.records {
-              out.push(record)
+    session.handle_response(results.session_id, results.top_error_code)
+    for topic in results.topics {
+      for result in topic.partitions {
+        match result.error_code {
+          0 =>
+            if !result.records.is_empty() {
+              for record in result.records {
+                out.push(record)
+              }
+              // Offset-safe even when a trailing batch was truncated:
+              // only complete batches were decoded.
+              let last = result.records[result.records.length() - 1]
+              self.set_next_offset(result.partition, last.offset + 1L)
             }
-            let last = result.records[result.records.length() - 1]
-            self.set_next_offset(result.partition, last.offset + 1L)
-          }
-        1 => self.reset_partition_offset(result.partition) // OFFSET_OUT_OF_RANGE
-        _ => refresh = true // NOT_LEADER_OR_FOLLOWER etc.
+          1 => self.reset_partition_offset(result.partition) // OFFSET_OUT_OF_RANGE
+          _ => refresh = true // NOT_LEADER_OR_FOLLOWER etc.
+        }
       }
     }
   }
@@ -250,6 +265,56 @@ pub async fn Consumer::poll(
     self.recover()
   }
   out
+}
+
+///|
+/// One fetch exchange with a leader, retrying once when the broker
+/// evicts the fetch session (FETCH_SESSION_ID_NOT_FOUND /
+/// INVALID_FETCH_SESSION_EPOCH): the retry goes out as a full request.
+async fn Consumer::fetch_from_leader(
+  self : Consumer,
+  conn : BrokerConnection,
+  session : FetchSession,
+  wanted : Map[Int, (Int64, Int)],
+  max_wait_ms : Int,
+  max_bytes : Int,
+) -> FetchResult {
+  let request = session.prepare(self.topic, self.topic_id, wanted, max_bytes)
+  let result = self.send_fetch(conn, request, max_wait_ms, max_bytes)
+  if result.top_error_code == FETCH_SESSION_ID_NOT_FOUND ||
+    result.top_error_code == INVALID_FETCH_SESSION_EPOCH {
+    // The broker lost the session (failover, eviction, epoch race):
+    // re-establish with everything, once.
+    session.invalidate()
+    let retry = session.prepare(self.topic, self.topic_id, wanted, max_bytes)
+    return self.send_fetch(conn, retry, max_wait_ms, max_bytes)
+  }
+  result
+}
+
+///|
+/// Send one fetch for the single subscribed topic, mapping the session's
+/// forgotten partition indexes onto the topic entry.
+async fn Consumer::send_fetch(
+  self : Consumer,
+  conn : BrokerConnection,
+  request : FetchSessionReq,
+  max_wait_ms : Int,
+  max_bytes : Int,
+) -> FetchResult {
+  conn.fetch(
+    [
+      {
+        name: self.topic,
+        topic_id: self.topic_id,
+        partitions: request.partitions,
+      },
+    ],
+    session=request,
+    max_wait_ms~,
+    max_bytes~,
+    timeout_ms=self.request_timeout_ms,
+  )
 }
 
 ///|
