@@ -18,6 +18,8 @@ pub const API_DESCRIBE_TOPIC_PARTITIONS : Int = 75
 
 pub const API_FETCH : Int = 1
 
+pub const API_FIND_COORDINATOR : Int = 10
+
 pub const API_LIST_OFFSETS : Int = 2
 
 pub const API_METADATA : Int = 3
@@ -58,6 +60,8 @@ pub fn decode_describe_topic_partitions_response(@buf.Decoder) -> (DescribeTopic
 
 pub fn decode_fetch_response(Int, @buf.Decoder) -> (FetchResult, Int) raise
 
+pub fn decode_find_coordinator_response(@buf.Decoder) -> (Array[CoordinatorInfo], Int) raise
+
 pub fn decode_list_offsets_response(@buf.Decoder) -> (Map[Int, Int64], Int) raise
 
 pub fn decode_metadata_response(Int, @buf.Decoder) -> (Metadata, Int) raise
@@ -81,6 +85,8 @@ pub fn encode_api_versions_request() -> Bytes
 pub fn encode_describe_topic_partitions_request(Array[String], Int, cursor? : TopicPartitionCursor?) -> Bytes
 
 pub fn encode_fetch_request(Int, Array[FetchTopicReq], session~ : FetchSessionReq, max_wait_ms~ : Int, min_bytes? : Int, max_bytes? : Int, isolation_level? : Int, rack_id? : String) -> Bytes raise
+
+pub fn encode_find_coordinator_request(Array[String], CoordinatorType) -> Bytes
 
 pub fn encode_list_offsets_request(Int, String, Array[PartitionInfo], Int64, timeout_ms? : Int) -> Bytes raise
 
@@ -187,7 +193,8 @@ pub fn BrokerConnection::close(Self) -> Unit
 pub async fn BrokerConnection::connect(String, Int, client_id? : String, max_in_flight? : Int, timeout_ms? : Int, tls? : TlsClientOptions?) -> Self
 pub async fn BrokerConnection::describe_topic_partitions(Self, Array[String], response_partition_limit? : Int, cursor? : TopicPartitionCursor?, timeout_ms? : Int) -> DescribeTopicPartitions
 pub async fn BrokerConnection::fetch(Self, Array[FetchTopicReq], session~ : FetchSessionReq, max_wait_ms~ : Int, min_bytes? : Int, max_bytes? : Int, timeout_ms? : Int) -> FetchResult
-pub async fn BrokerConnection::fetch_metadata(Self, String, timeout_ms? : Int) -> Metadata
+pub async fn BrokerConnection::fetch_metadata(Self, Array[String]?, timeout_ms? : Int) -> Metadata
+pub async fn BrokerConnection::find_coordinator(Self, Array[String], CoordinatorType, timeout_ms? : Int) -> Array[CoordinatorInfo]
 pub async fn BrokerConnection::list_offsets(Self, String, Array[PartitionInfo], Int64, timeout_ms? : Int) -> Map[Int, Int64]
 pub async fn BrokerConnection::negotiate_api_versions(Self, timeout_ms? : Int) -> Unit
 pub fn BrokerConnection::note_throttle(Self, Int) -> Unit
@@ -215,11 +222,40 @@ pub struct BrokerVersions {
 pub fn BrokerVersions::pick(Self, Int, want? : Int?) -> Int raise
 pub fn BrokerVersions::range(Self, Int) -> (Int, Int)?
 
+pub struct ClusterClient {
+  bootstrap : BootstrapServers
+  client_id : String
+  request_timeout_ms : Int
+  metadata_max_age_ms : Int
+  sasl : SaslConfig?
+  use_tls : Bool
+  tls_options : TlsClientOptions?
+  lock : @async.Mutex
+  mut brokers : Map[Int, BrokerInfo]
+  mut topics : Map[String, TopicMetadata]
+  mut topic_ids : Map[Uuid, String]
+  mut refreshed_ms : Int64
+  conns : Map[Int, BrokerConnection]
+  // private fields
+}
+pub fn ClusterClient::close(Self) -> Unit
+pub async fn ClusterClient::connect(Array[HostPort], client_id? : String, request_timeout_ms? : Int, metadata_max_age_ms? : Int, sasl? : SaslConfig?, use_tls? : Bool, tls? : TlsClientOptions?) -> Self
+pub async fn ClusterClient::connection(Self, Int) -> BrokerConnection
+pub fn ClusterClient::control_conn(Self) -> BrokerConnection
+pub async fn ClusterClient::coordinator(Self, Array[String], CoordinatorType) -> Map[String, CoordinatorInfo]
+pub fn ClusterClient::invalidate_metadata(Self) -> Unit
+pub async fn ClusterClient::reconnect(Self) -> Unit
+pub async fn ClusterClient::refresh_if_stale(Self) -> Unit
+pub async fn ClusterClient::refresh_metadata(Self, Array[String]?) -> Unit
+pub fn ClusterClient::topic(Self, String) -> TopicMetadata?
+pub fn ClusterClient::topic_name(Self, Uuid) -> String?
+
 pub struct CommonConfig {
   bootstrap_servers : Array[String]
   client_id : String
   request_timeout_ms : Int
   connection_max_idle_ms : Int
+  metadata_max_age_ms : Int
   retries : Int
   retry_backoff_ms : Int
   retry_backoff_max_ms : Int
@@ -228,22 +264,18 @@ pub struct CommonConfig {
   tls : TlsClientOptions?
 } derive(@debug.Debug)
 pub fn CommonConfig::bootstrap_addresses(Self) -> Array[HostPort] raise ProtocolError
-pub fn CommonConfig::new(Array[String], request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?, tls? : TlsClientOptions?) -> Self raise
+pub fn CommonConfig::new(Array[String], request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?, tls? : TlsClientOptions?, metadata_max_age_ms? : Int) -> Self raise
 pub fn CommonConfig::validate(Self) -> Unit raise ProtocolError
 
 pub struct Consumer {
   topic : String
   start_from : StartFrom
   request_timeout_ms : Int
-  bootstrap : BootstrapServers
-  sasl : SaslConfig?
-  mut meta_conn : BrokerConnection
-  mut brokers : Map[Int, BrokerInfo]
   mut topic_id : Uuid
-  leader_conns : Map[Int, BrokerConnection]
   fetch_sessions : Map[Int, FetchSession]
   partitions : Array[PartitionState]
   mut closed : Bool
+  // private fields
 }
 pub fn Consumer::close(Self) -> Unit
 pub async fn Consumer::connect(host~ : String, port~ : Int, topic~ : String, start_from? : StartFrom) -> Self
@@ -255,7 +287,22 @@ pub struct ConsumerConfig {
   topic : String
   start_from : StartFrom
 } derive(@debug.Debug)
-pub fn ConsumerConfig::new(Array[String], String, start_from? : StartFrom, request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?, tls? : TlsClientOptions?) -> Self raise
+pub fn ConsumerConfig::new(Array[String], String, start_from? : StartFrom, request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?, tls? : TlsClientOptions?, metadata_max_age_ms? : Int) -> Self raise
+
+pub struct CoordinatorInfo {
+  key : String
+  node_id : Int
+  host : String
+  port : Int
+  error_code : Int
+  error_message : String?
+} derive(@debug.Debug)
+
+pub(all) enum CoordinatorType {
+  Group
+  Transaction
+  Share
+} derive(Eq, @debug.Debug)
 
 pub struct Deadline {
   at_ms : Int64
@@ -385,14 +432,7 @@ pub struct Producer {
   retries : Int
   retry_backoff_ms : Int
   retry_backoff_max_ms : Int
-  bootstrap : BootstrapServers
-  sasl : SaslConfig?
-  use_tls : Bool
-  tls_options : TlsClientOptions?
-  mut meta_conn : BrokerConnection
-  mut brokers : Map[Int, BrokerInfo]
   mut topic_id : Uuid
-  leader_conns : Map[Int, BrokerConnection]
   mut partitions : Array[PartitionInfo]
   mut closed : Bool
   // private fields
@@ -411,7 +451,7 @@ pub struct ProducerConfig {
   linger_ms : Int
   buffer_memory : Int
 } derive(@debug.Debug)
-pub fn ProducerConfig::new(Array[String], String, acks? : Int, request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?, tls? : TlsClientOptions?, partitioner? : Partitioner, batch_size? : Int, linger_ms? : Int, buffer_memory? : Int) -> Self raise
+pub fn ProducerConfig::new(Array[String], String, acks? : Int, request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?, tls? : TlsClientOptions?, partitioner? : Partitioner, batch_size? : Int, linger_ms? : Int, buffer_memory? : Int, metadata_max_age_ms? : Int) -> Self raise
 
 pub(all) struct Record {
   offset : Int64

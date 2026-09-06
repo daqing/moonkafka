@@ -25,14 +25,14 @@ pub async fn BrokerConnection::negotiate_api_versions(
 ///|
 pub async fn BrokerConnection::fetch_metadata(
   self : BrokerConnection,
-  topic : String,
+  topics : Array[String]?,
   timeout_ms? : Int = 30000,
 ) -> Metadata {
   let version = self.api_version(API_METADATA)
   let d = self.request(
     API_METADATA,
     version,
-    encode_metadata_request(Some([topic])),
+    encode_metadata_request(topics),
     timeout_ms~,
   )
   let (metadata, throttle) = decode_metadata_response(version, d)

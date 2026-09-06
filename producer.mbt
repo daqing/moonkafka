@@ -1,8 +1,9 @@
-// A simple producer: sends messages to one topic, one Produce request per
-// send. Messages with a key are routed by key hash; messages without a key
-// are spread over the partitions round-robin. Transport failures and
-// leadership changes trigger recovery — reconnect through the bootstrap
-// set, refresh metadata, and retry with backoff up to `retries` times.
+// A simple producer: sends messages to one topic through the accumulator's
+// per-partition batches, routed by the configured partitioner. Transport
+// failures and leadership changes trigger recovery — reconnect through
+// the bootstrap set, refresh metadata, and retry with backoff up to
+// `retries` times. Cluster management (connection pool, metadata,
+// reconnection) lives in ClusterClient.
 
 ///|
 pub struct Producer {
@@ -12,14 +13,8 @@ pub struct Producer {
   retries : Int
   retry_backoff_ms : Int
   retry_backoff_max_ms : Int
-  bootstrap : BootstrapServers
-  sasl : SaslConfig?
-  use_tls : Bool
-  tls_options : TlsClientOptions?
-  mut meta_conn : BrokerConnection
-  mut brokers : Map[Int, BrokerInfo]
+  priv cluster : ClusterClient
   mut topic_id : Uuid
-  leader_conns : Map[Int, BrokerConnection]
   mut partitions : Array[PartitionInfo]
   priv router : PartitionRouter
   priv accumulator : RecordAccumulator
@@ -28,9 +23,9 @@ pub struct Producer {
 
 ///|
 /// Connect to a bootstrap broker, negotiate API versions, resolve the
-/// topic's partitions and their leaders, and open a connection per leader.
-/// `acks` is 1 (leader acknowledgement) or -1 (all in-sync replicas);
-/// acks=0 is not supported because this client always reads the response.
+/// topic's partitions and their leaders. `acks` is 1 (leader
+/// acknowledgement) or -1 (all in-sync replicas); acks=0 is not supported
+/// because this client always reads the response.
 pub async fn Producer::connect(
   host~ : String,
   port~ : Int,
@@ -49,9 +44,8 @@ pub async fn Producer::connect(
 
 ///|
 /// Connect using explicit configuration, which is validated first. The
-/// meta connection lands on the first bootstrap server that accepts.
+/// cluster client lands on the first bootstrap server that accepts.
 pub async fn Producer::connect_with_config(config : ProducerConfig) -> Producer {
-  let bootstrap = BootstrapServers::new(config.common.bootstrap_addresses())
   // SASL credentials only apply on SASL security protocols.
   let sasl = match config.common.security_protocol {
     SaslPlaintext | SaslSsl => config.common.sasl
@@ -61,10 +55,11 @@ pub async fn Producer::connect_with_config(config : ProducerConfig) -> Producer 
     Ssl | SaslSsl => true
     _ => false
   }
-  let meta_conn = connect_bootstrap(
-    bootstrap,
-    config.common.client_id,
-    timeout_ms=config.common.request_timeout_ms,
+  let cluster = ClusterClient::connect(
+    config.common.bootstrap_addresses(),
+    client_id=config.common.client_id,
+    request_timeout_ms=config.common.request_timeout_ms,
+    metadata_max_age_ms=config.common.metadata_max_age_ms,
     sasl~,
     use_tls~,
     tls=config.common.tls,
@@ -76,14 +71,8 @@ pub async fn Producer::connect_with_config(config : ProducerConfig) -> Producer 
     retries: config.common.retries,
     retry_backoff_ms: config.common.retry_backoff_ms,
     retry_backoff_max_ms: config.common.retry_backoff_max_ms,
-    bootstrap,
-    sasl,
-    use_tls,
-    tls_options: config.common.tls,
-    meta_conn,
-    brokers: Map([]),
+    cluster,
     topic_id: Uuid::zero(),
-    leader_conns: Map([]),
     partitions: [],
     router: PartitionRouter::new(config.partitioner, next_sticky_seed()),
     accumulator: RecordAccumulator::new(
@@ -101,46 +90,22 @@ pub async fn Producer::connect_with_config(config : ProducerConfig) -> Producer 
 pub fn Producer::close(self : Producer) -> Unit {
   if !self.closed {
     self.closed = true
-    self.drop_connections()
+    self.cluster.close()
   }
 }
 
 ///|
-fn Producer::drop_connections(self : Producer) -> Unit {
-  self.meta_conn.close()
-  for _, conn in self.leader_conns {
-    conn.close()
-  }
-  self.leader_conns.clear()
-}
-
-///|
-/// Rebuild every connection after a transport failure: dial a bootstrap
-/// server (rotating), then refresh metadata and leader connections.
+/// Recover after a transport failure: re-dial the bootstrap set and
+/// refresh metadata through the cluster client.
 async fn Producer::recover(self : Producer) -> Unit {
-  self.drop_connections()
-  self.meta_conn = connect_bootstrap(
-    self.bootstrap,
-    self.meta_conn.client_id,
-    timeout_ms=self.timeout_ms,
-    use_tls=self.use_tls,
-    tls=self.tls_options,
-  )
-  match self.sasl {
-    Some(sasl) => self.meta_conn.authenticate(sasl, timeout_ms=self.timeout_ms)
-    None => ()
-  }
+  self.cluster.reconnect()
   self.refresh_metadata()
 }
 
 ///|
 async fn Producer::refresh_metadata(self : Producer) -> Unit {
-  let metadata = self.meta_conn.fetch_metadata(
-    self.topic,
-    timeout_ms=self.timeout_ms,
-  )
-  self.brokers = metadata.brokers
-  let topic_meta = match metadata.topics.get(0) {
+  self.cluster.refresh_metadata(Some([self.topic]))
+  let topic_meta = match self.cluster.topic(self.topic) {
     Some(t) => t
     None => raise ProtocolError::ProtocolError("topic \{self.topic} not found")
   }
@@ -151,45 +116,6 @@ async fn Producer::refresh_metadata(self : Producer) -> Unit {
   }
   self.partitions = topic_meta.partitions
   self.topic_id = topic_meta.topic_id
-  // Open a connection per distinct partition leader.
-  for _, conn in self.leader_conns {
-    conn.close()
-  }
-  self.leader_conns.clear()
-  for p in self.partitions {
-    if !self.leader_conns.contains(p.leader) {
-      match self.brokers.get(p.leader) {
-        Some(broker) => {
-          let tls_opts = match self.tls_options {
-            Some(opts) => Some(opts)
-            None =>
-              if self.use_tls {
-                Some(TlsClientOptions::new(broker.host))
-              } else {
-                None
-              }
-          }
-          let conn = BrokerConnection::connect(
-            broker.host,
-            broker.port,
-            client_id=self.meta_conn.client_id,
-            timeout_ms=self.timeout_ms,
-            tls=tls_opts,
-          )
-          match self.sasl {
-            Some(sasl) => conn.authenticate(sasl, timeout_ms=self.timeout_ms)
-            None => ()
-          }
-          conn.negotiate_api_versions(timeout_ms=self.timeout_ms)
-          self.leader_conns[p.leader] = conn
-        }
-        None =>
-          raise ProtocolError::ProtocolError(
-            "no broker info for leader node \{p.leader}",
-          )
-      }
-    }
-  }
 }
 
 ///|
@@ -230,6 +156,8 @@ pub async fn Producer::send(
   partition? : Int,
   headers? : Array[(Bytes, Bytes)] = [],
 ) -> Int64 {
+  // Opportunistic metadata refresh once the cached snapshot aged out.
+  self.cluster.refresh_if_stale()
   let timestamp = timestamp.unwrap_or(@async.now())
   // The batch's encoded bytes belong to one partition, so the pick
   // happens once, before accumulating; retries keep it.
@@ -368,7 +296,10 @@ async fn Producer::attempt_send(
   p : PartitionInfo,
   batch : Bytes,
 ) -> Int64? {
-  guard self.leader_conns.get(p.leader) is Some(conn) else { return None }
+  // The broker must be known from metadata; a dial or authentication
+  // failure on the way propagates (SASL failures are terminal).
+  guard self.cluster.broker(p.leader) is Some(_) else { return None }
+  let conn = self.cluster.connection(p.leader)
   let results = conn.produce(
     self.topic,
     topic_id=self.topic_id,
