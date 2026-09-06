@@ -229,6 +229,30 @@ fn fake_metadata_response(
 let fake_topic_id : Bytes = Bytes::make(16, b'\x2a')
 
 ///|
+/// Parse the first partition index of a Produce v12/v13 request: skip the
+/// fixed header ints, client id + tag buffer, then the request body down
+/// to the first topic's first partition entry.
+fn fake_produce_request_partition(rest : Bytes, version : Int) -> Int raise {
+  let d = @buf.Decoder::new(rest)
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  let id_len = d.read_i16()
+  ignore(d.read_bytes(id_len)) // client id
+  d.skip_tag_buffer()
+  ignore(d.read_compact_nullable_string()) // transactional id
+  ignore(d.read_i16()) // acks
+  ignore(d.read_i32()) // timeout
+  ignore(d.read_compact_len()) // topics: one
+  match version {
+    13 => d.skip(16) // topic id
+    _ => ignore(d.read_compact_string()) // topic name
+  }
+  ignore(d.read_compact_len()) // partitions
+  d.read_i32()
+}
+
+///|
 fn fake_produce_response(
   topic : String,
   version : Int,
@@ -426,7 +450,7 @@ fn fake_describe_topic_partitions_response(
 /// Answer requests forever on one client connection; exits when the client
 /// goes away. Every API answers with offset 42.
 async fn fake_serve_conn(
-  stream : BrokerStream,
+  stream : @moonkafka.BrokerStream,
   topic : String,
   broker_port : Int,
   api_throttle_ms? : Int = 0,
@@ -434,6 +458,7 @@ async fn fake_serve_conn(
   scram_password? : String = "secret",
   scram_sha512? : Bool = false,
   fetch_epochs? : Array[Int] = [],
+  produce_partitions? : Array[Int] = [],
 ) -> Unit {
   // per-connection SASL state
   let mut sasl_mechanism : String? = None
@@ -455,7 +480,13 @@ async fn fake_serve_conn(
         sasl_mechanism = Some(fake_sasl_handshake_mechanism(rest))
         fake_sasl_handshake_response()
       }
-      0 => fake_produce_response(topic, version, 42L)
+      0 => {
+        let idx = fake_produce_request_partition(rest, version) catch {
+          e => abort("fake broker produce parse failed: \{e}")
+        }
+        produce_partitions.push(idx)
+        fake_produce_response(topic, version, 42L)
+      }
       2 => fake_list_offsets_response(topic, 42L)
       1 => {
         fetch_epochs.push(fake_fetch_request_session_epoch(rest))
@@ -569,6 +600,7 @@ async fn fake_broker(
   scram_sha512? : Bool = false,
   wrap_tls? : Bool = false,
   fetch_epochs? : Array[Int] = [],
+  produce_partitions? : Array[Int] = [],
 ) -> Unit {
   for ;; {
     let (tcp, _) = server.accept()
@@ -597,6 +629,7 @@ async fn fake_broker(
         scram_password~,
         scram_sha512~,
         fetch_epochs~,
+        produce_partitions~,
       )
     }
   }
@@ -709,6 +742,40 @@ async test "consumer polls over an incremental fetch session" {
     let second = consumer.poll(max_wait_ms=200)
     assert_eq(second.length(), 2)
     assert_eq(fetch_epochs, [0, 1])
+    server.close()
+  }
+}
+
+///|
+async test "producer manual partition override reaches the broker" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let produce_partitions : Array[Int] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, produce_partitions~)
+    }
+    let producer = @moonkafka.Producer::connect_with_config(
+      @moonkafka.ProducerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        acks=1,
+        request_timeout_ms=10000,
+      ),
+    )
+    defer producer.close()
+    // The fake topic has a single partition (index 0): the override pins
+    // the record to it, and an out-of-range one fails before the wire.
+    assert_eq(producer.send(value=b"pinned", partition=0), 42L)
+    assert_eq(produce_partitions.length(), 1)
+    assert_eq(produce_partitions[0], 0)
+    try {
+      let _ = producer.send(value=b"x", partition=3)
+      abort("out-of-range partition override must fail")
+    } catch {
+      _ => ()
+    }
+    assert_eq(produce_partitions.length(), 1)
     server.close()
   }
 }
