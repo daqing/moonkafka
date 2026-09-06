@@ -82,44 +82,56 @@ async test "append raises BufferExhausted when buffer_memory is out" {
 }
 
 ///|
-async test "close_and_claim grants the flusher role exactly once" {
-  let a = acc(batch_size=1000, buffer_memory=10_000)
-  let (b, _, _) = a.append(0L, 0, 0L, None, Some(b"x"), [])
-  let (closed1, claimed1) = a.close_and_claim(b)
-  assert_true(closed1)
-  assert_true(claimed1)
-  let (closed2, claimed2) = a.close_and_claim(b)
-  assert_true(!closed2)
-  assert_true(!claimed2)
-}
-
-///|
 async test "release publishes the result and frees the buffer pool" {
   let a = acc(batch_size=1000, buffer_memory=10_000)
   let (b, _, _) = a.append(0L, 0, 0L, None, Some(b"x"), [])
   assert_true(a.pool_bytes > 0)
-  let _ = a.close_and_claim(b)
   a.release(b, BatchOk(42L))
   assert_eq(a.pool_bytes, 0)
   assert_true(b.result is Some(BatchOk(42L)))
 }
 
 ///|
-async test "predecessors lists earlier unreleased batches in queue order" {
-  let a = acc(batch_size=82, buffer_memory=1_000_000)
-  let (b1, _, _) = a.append(0L, 0, 0L, None, Some(b"AAAA"), [])
-  let (b2, _, _) = a.append(1L, 0, 1L, None, Some(b"AAAA"), [])
-  let (b3, _, _) = a.append(2L, 0, 2L, None, Some(b"AAAA"), [])
-  let preds = a.predecessors(b3)
-  assert_eq(preds.length(), 2)
-  assert_eq(preds[0].id, b1.id)
-  assert_eq(preds[1].id, b2.id)
-  // released batches drop out of the predecessor list
-  a.release(b1, BatchOk(0L))
-  let preds2 = a.predecessors(b3)
-  assert_eq(preds2.length(), 1)
-  assert_eq(preds2[0].id, b2.id)
-  ignore(b2)
+async test "drain_ready hands out closed batches one per partition in order" {
+  // all three records coalesce into one open batch that lingers
+  let a = acc(batch_size=1000, buffer_memory=10_000, linger_ms=10_000)
+  let (b1, _, _) = a.append(0L, 0, 0L, None, Some(b"x"), [])
+  let (b2, _, _) = a.append(1L, 0, 1L, None, Some(b"y"), [])
+  let (b3, _, _) = a.append(2L, 0, 2L, None, Some(b"z"), [])
+  assert_true(b2.id == b1.id)
+  assert_true(b3.id == b1.id)
+  // nothing is ready while the batch is open and linger has not passed
+  assert_true(a.drain_ready(5_000L, 100_000).is_empty())
+  // past the linger deadline the open batch becomes ready...
+  let ready = a.drain_ready(10_500L, 100_000)
+  assert_eq(ready.length(), 1)
+  assert_eq(ready[0].id, b1.id)
+  // ...and the next record after the old batch left opens a fresh open
+  // batch (nothing to rotate), which force-close then makes ready
+  let (b4, _, rotated) = a.append(10_600L, 0, 10_600L, None, Some(b"w"), [])
+  assert_true(!rotated)
+  assert_true(b4.id != b1.id)
+  a.force_close_all()
+  let next = a.drain_ready(10_600L, 100_000)
+  assert_eq(next.length(), 1)
+  assert_eq(next[0].id, b4.id)
+  assert_true(a.drain_ready(10_600L, 100_000).is_empty())
+}
+
+///|
+async test "drain_ready releases batches past the delivery timeout" {
+  let a = acc(batch_size=1000, buffer_memory=10_000)
+  let (b, _, _) = a.append(0L, 0, 0L, None, Some(b"x"), [])
+  // 5_000 ms old with a 1_000 ms delivery budget: expire, don't hand out
+  let ready = a.drain_ready(5_000L, 1_000)
+  assert_true(ready.is_empty())
+  assert_eq(a.pool_bytes, 0)
+  assert_true(b.result is Some(_))
+  let msg = match b.result {
+    Some(BatchError(msg)) => msg
+    _ => abort("expected a delivery error")
+  }
+  assert_true(msg.contains("delivery_timeout_ms"))
 }
 
 ///|

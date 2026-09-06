@@ -281,13 +281,22 @@ pub struct ProducerConfig {
   linger_ms : Int
   /// Total bytes the accumulator may queue across all partitions.
   buffer_memory : Int
+  /// Unacknowledged Produce requests allowed per broker connection; the
+  /// sender pipelines up to this many. Must stay <= 5 once idempotence
+  /// lands, to preserve ordering.
+  max_in_flight : Int
+  /// Bounded window from append to broker acknowledgement (Java's
+  /// delivery.timeout.ms); records still unacknowledged when it passes
+  /// fail with a delivery error.
+  delivery_timeout_ms : Int
 } derive(@debug.Debug)
 
 ///|
-/// `acks` is 1 (leader acknowledgement) or -1 (all in-sync replicas);
-/// 0 becomes valid with the Phase 3 sender that does not read responses.
-/// Defaults mirror the Java client: 16 KiB batches, no lingering, a
-/// 32 MiB buffer pool.
+/// `acks` is 0 (fire-and-forget; the sender writes Produce requests
+/// without reading responses and send returns -1), 1 (leader
+/// acknowledgement) or -1 (all in-sync replicas). Defaults mirror the
+/// Java client: 16 KiB batches, no lingering, a 32 MiB buffer pool, 5
+/// in-flight requests per broker, a 2-minute delivery timeout.
 pub fn ProducerConfig::new(
   bootstrap_servers : Array[String],
   topic : String,
@@ -301,10 +310,12 @@ pub fn ProducerConfig::new(
   linger_ms? : Int = 0,
   buffer_memory? : Int = 33554432,
   metadata_max_age_ms? : Int = 300000,
+  max_in_flight? : Int = 5,
+  delivery_timeout_ms? : Int = 120000,
 ) -> ProducerConfig raise {
-  if acks != 1 && acks != -1 {
+  if acks != 0 && acks != 1 && acks != -1 {
     raise ProtocolError::ProtocolError(
-      "acks must be 1 (leader) or -1 (all), got \{acks}",
+      "acks must be 0 (none), 1 (leader) or -1 (all), got \{acks}",
     )
   }
   if topic.length() == 0 {
@@ -325,6 +336,21 @@ pub fn ProducerConfig::new(
       "buffer_memory (\{buffer_memory}) must be at least batch_size (\{batch_size})",
     )
   }
+  if max_in_flight < 1 {
+    raise ProtocolError::ProtocolError(
+      "max_in_flight must be >= 1, got \{max_in_flight}",
+    )
+  }
+  if delivery_timeout_ms <= 0 {
+    raise ProtocolError::ProtocolError(
+      "delivery_timeout_ms must be positive, got \{delivery_timeout_ms}",
+    )
+  }
+  if delivery_timeout_ms < linger_ms + request_timeout_ms {
+    raise ProtocolError::ProtocolError(
+      "delivery_timeout_ms (\{delivery_timeout_ms}) must be at least linger_ms + request_timeout_ms (\{linger_ms + request_timeout_ms})",
+    )
+  }
   {
     common: CommonConfig::new(
       bootstrap_servers,
@@ -340,6 +366,8 @@ pub fn ProducerConfig::new(
     batch_size,
     linger_ms,
     buffer_memory,
+    max_in_flight,
+    delivery_timeout_ms,
   }
 }
 

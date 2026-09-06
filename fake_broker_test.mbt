@@ -302,6 +302,7 @@ fn fake_produce_response(
   topic : String,
   version : Int,
   base_offset : Int64,
+  error_code? : Int = 0,
 ) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_compact_len(1) // topics
@@ -312,7 +313,7 @@ fn fake_produce_response(
   }
   e.write_compact_len(1) // partitions
   e.write_i32(0) // index
-  e.write_i16(0) // no error
+  e.write_i16(error_code)
   e.write_i64(base_offset)
   e.write_i64(-1L) // log_append_time
   e.write_i64(-1L) // log_start_offset
@@ -504,6 +505,7 @@ async fn fake_serve_conn(
   produce_partitions? : Array[Int] = [],
   produce_record_counts? : Array[Int] = [],
   metadata_requests? : Array[Int] = [],
+  produce_error_rounds? : Int = 0,
 ) -> Unit {
   // per-connection SASL state
   let mut sasl_mechanism : String? = None
@@ -529,7 +531,16 @@ async fn fake_serve_conn(
         let (idx, count) = fake_produce_request_info(rest, version)
         produce_partitions.push(idx)
         produce_record_counts.push(count)
-        fake_produce_response(topic, version, 42L)
+        // The shared partitions array doubles as the round counter, so
+        // re-dialed connections keep counting: the first
+        // `produce_error_rounds` produce requests (across all of them)
+        // answer LEADER_NOT_AVAILABLE — retriable, the sender must
+        // requeue and recover.
+        if produce_partitions.length() <= produce_error_rounds {
+          fake_produce_response(topic, version, 42L, error_code=5)
+        } else {
+          fake_produce_response(topic, version, 42L)
+        }
       }
       2 => fake_list_offsets_response(topic, 42L)
       1 => {
@@ -655,6 +666,7 @@ async fn fake_broker(
   produce_partitions? : Array[Int] = [],
   produce_record_counts? : Array[Int] = [],
   metadata_requests? : Array[Int] = [],
+  produce_error_rounds? : Int = 0,
 ) -> Unit {
   for ;; {
     let (tcp, _) = server.accept()
@@ -686,6 +698,7 @@ async fn fake_broker(
         produce_partitions~,
         produce_record_counts~,
         metadata_requests~,
+        produce_error_rounds~,
       )
     }
   }
@@ -744,6 +757,7 @@ async test "producer authenticates with SCRAM-SHA-256" {
       fake_broker(server, root, "events", accepted)
     }
     let producer = @moonkafka.Producer::connect_with_config(
+      group=root,
       @moonkafka.ProducerConfig::new(
         ["127.0.0.1:\{server.addr.port()}"],
         "events",
@@ -812,6 +826,7 @@ async test "producer manual partition override reaches the broker" {
       fake_broker(server, root, "events", accepted, produce_partitions~)
     }
     let producer = @moonkafka.Producer::connect_with_config(
+      group=root,
       @moonkafka.ProducerConfig::new(
         ["127.0.0.1:\{server.addr.port()}"],
         "events",
@@ -854,6 +869,7 @@ async test "accumulator coalesces concurrent sends into one batch" {
       )
     }
     let producer = @moonkafka.Producer::connect_with_config(
+      group=root,
       @moonkafka.ProducerConfig::new(
         ["127.0.0.1:\{server.addr.port()}"],
         "events",
@@ -931,6 +947,82 @@ async test "cluster client resolves coordinators, pools connections, refreshes o
     assert_eq(metadata_requests.length(), 2)
     // no extra dials from any of it
     assert_eq(accepted.length(), 2)
+    server.close()
+  }
+}
+
+///|
+async test "sender retries retriable produce errors within the delivery window" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let produce_partitions : Array[Int] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(
+        server,
+        root,
+        "events",
+        accepted,
+        produce_partitions~,
+        produce_error_rounds=2,
+      )
+    }
+    let producer = @moonkafka.Producer::connect_with_config(
+      group=root,
+      @moonkafka.ProducerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        acks=1,
+        request_timeout_ms=10000,
+      ),
+    )
+    defer producer.close()
+    // The first two rounds answer LEADER_NOT_AVAILABLE; the sender
+    // requeues and recovers, and the third round acknowledges.
+    assert_eq(producer.send(value=b"after retries"), 42L)
+    assert_eq(produce_partitions.length(), 3)
+    server.close()
+  }
+}
+
+///|
+async test "sender writes acks=0 produce without reading a response" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let produce_partitions : Array[Int] = []
+    let produce_record_counts : Array[Int] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(
+        server,
+        root,
+        "events",
+        accepted,
+        produce_partitions~,
+        produce_record_counts~,
+      )
+    }
+    let producer = @moonkafka.Producer::connect_with_config(
+      group=root,
+      @moonkafka.ProducerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        acks=0,
+        request_timeout_ms=10000,
+      ),
+    )
+    defer producer.close()
+    // acks=0 has no broker-assigned offset: send resolves with -1 once
+    // the sender wrote the frame.
+    assert_eq(producer.send(value=b"fire and forget"), -1L)
+    for _ in 0..<1000 {
+      if produce_partitions.length() == 1 {
+        break
+      }
+      @async.sleep(5)
+    }
+    assert_eq(produce_partitions[0], 0)
+    assert_eq(produce_record_counts[0], 1)
     server.close()
   }
 }

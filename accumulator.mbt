@@ -17,6 +17,8 @@ priv enum BatchResult {
 }
 
 ///|
+
+///|
 priv struct ProducerBatch {
   /// Unique within its accumulator; identity for queue-order comparisons.
   id : Int
@@ -25,14 +27,17 @@ priv struct ProducerBatch {
   created_ms : Int64
   /// Closed batches accept no more records and are ready to send.
   mut closed : Bool
-  /// Claimed by the flusher that alone puts the batch on the wire; stays
-  /// claimed across requeue-and-retry until a terminal result.
-  mut claimed : Bool
+  /// Send attempts so far, reported in delivery-timeout errors.
+  mut attempts : Int
+  /// Set when the sticky boundary for this batch already fired (append
+  /// closed it by rotation); the sender fires it otherwise.
+  mut boundary_fired : Bool
   /// Estimated wire size; also the batch's share of buffer_memory.
   mut size_estimate : Int
   mut result : BatchResult?
-  /// Released exactly once when the result lands; coalesced senders wait.
-  done : @async.Semaphore
+  /// One semaphore per waiting sender, registered under the accumulator
+  /// lock; release() wakes every waiter exactly once.
+  waiters : Array[@async.Semaphore]
 }
 
 ///|
@@ -131,7 +136,10 @@ async fn RecordAccumulator::append(
   // Rotate: the open batch cannot fit the record, so it is full.
   let rotated = open is Some(_)
   match open {
-    Some(b) => b.closed = true
+    Some(b) => {
+      b.closed = true
+      b.boundary_fired = true
+    }
     None => ()
   }
   let fresh = RECORD_BATCH_HEADER_SIZE + rec_size
@@ -148,10 +156,11 @@ async fn RecordAccumulator::append(
     builder: RecordBatchBuilder::new(),
     created_ms: now_ms,
     closed: false,
-    claimed: false,
+    attempts: 0,
+    boundary_fired: false,
     size_estimate: 0,
     result: None,
-    done: @async.Semaphore(1, initial_value=0),
+    waiters: [],
   }
   batch.builder.append(timestamp, key~, value~, headers~)
   batch.size_estimate = fresh
@@ -161,56 +170,60 @@ async fn RecordAccumulator::append(
 }
 
 ///|
-/// Close the batch (if still open) and take the flusher role if free.
-/// Returns whether this call closed it — the sticky partitioner's
-/// boundary — and whether this caller is the flusher.
-async fn RecordAccumulator::close_and_claim(
-  self : RecordAccumulator,
-  batch : ProducerBatch,
-) -> (Bool, Bool) {
+/// Force-close every open batch: the producer is closing and its sender
+/// must drain and resolve everything still queued.
+async fn RecordAccumulator::force_close_all(self : RecordAccumulator) -> Unit {
   self.lock.acquire()
   defer self.lock.release()
-  let closed_now = !batch.closed
-  batch.closed = true
-  let mut claimed = false
-  if !batch.claimed {
-    batch.claimed = true
-    claimed = true
+  for _, queue in self.batches {
+    for batch in queue {
+      batch.closed = true
+    }
   }
-  (closed_now, claimed)
 }
 
 ///|
-/// Queued batches ordered ahead of `batch` in its partition that have
-/// not reached a terminal result yet. A flusher must put these on the
-/// wire (or wait out their owner) first, so per-partition order survives
-/// coalescing — the inline stand-in for the sender task's front-first
-/// drain.
-async fn RecordAccumulator::predecessors(
+/// Pop the front batch of every partition whose head is ready: closed
+/// (full or force-closed) or past its linger deadline. Batches past
+/// delivery_timeout are released with an error instead of being handed
+/// out. At most one batch per partition per round keeps per-partition
+/// order trivially; requeued batches return to the front.
+async fn RecordAccumulator::drain_ready(
   self : RecordAccumulator,
-  batch : ProducerBatch,
+  now_ms : Int64,
+  delivery_timeout_ms : Int,
 ) -> Array[ProducerBatch] {
   self.lock.acquire()
   defer self.lock.release()
   let out : Array[ProducerBatch] = []
-  match self.batches.get(batch.partition) {
-    Some(q) =>
-      for b in q {
-        if b.id == batch.id {
-          break
-        }
-        if b.result is None {
-          out.push(b)
-        }
-      }
-    None => ()
+  for _, queue in self.batches {
+    if queue.is_empty() {
+      continue
+    }
+    let batch = queue[0]
+    if now_ms >= batch.created_ms + delivery_timeout_ms.to_int64() {
+      // The batch never reached the wire in time: expire it.
+      ignore(queue.remove(0))
+      self.resolve_locked(
+        batch,
+        BatchError(
+          "batch for partition \{batch.partition} exceeded delivery_timeout_ms (\{delivery_timeout_ms}) after \{batch.attempts} attempts",
+        ),
+      )
+      continue
+    }
+    if batch.closed || now_ms >= batch.ready_at(self.linger_ms) {
+      batch.closed = true
+      ignore(queue.remove(0))
+      out.push(batch)
+    }
   }
   out
 }
 
 ///|
-/// Put a claimed batch back at the front of its partition queue after a
-/// recoverable failure, preserving per-partition order; its claimer
+/// Put a batch back at the front of its partition queue after a
+/// recoverable failure, preserving per-partition order; the sender
 /// retries it.
 async fn RecordAccumulator::requeue(
   self : RecordAccumulator,
@@ -230,8 +243,41 @@ async fn RecordAccumulator::release(
   result : BatchResult,
 ) -> Unit {
   self.lock.acquire()
+  defer self.lock.release()
+  self.resolve_locked(batch, result)
+}
+
+///|
+fn RecordAccumulator::resolve_locked(
+  self : RecordAccumulator,
+  batch : ProducerBatch,
+  result : BatchResult,
+) -> Unit {
   batch.result = Some(result)
   self.pool_bytes -= batch.size_estimate
-  self.lock.release()
-  batch.done.release()
+  // Waiters never re-register once the result is set.
+  for waiter in batch.waiters {
+    waiter.release()
+  }
+}
+
+///|
+/// Register a completion waiter under the accumulator lock. Returns true
+/// when the batch already reached a terminal result — no wait needed.
+/// Locking here makes a release racing the registration unable to lose
+/// the wakeup.
+async fn RecordAccumulator::register_waiter(
+  self : RecordAccumulator,
+  batch : ProducerBatch,
+  waiter : @async.Semaphore,
+) -> Bool {
+  self.lock.acquire()
+  defer self.lock.release()
+  match batch.result {
+    Some(_) => true
+    None => {
+      batch.waiters.push(waiter)
+      false
+    }
+  }
 }

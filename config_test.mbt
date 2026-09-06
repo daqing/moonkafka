@@ -73,9 +73,16 @@ test "common config rejects invalid values" {
 test "producer config validates acks and topic" {
   let config = @moonkafka.ProducerConfig::new(["b:9092"], "events")
   assert_eq(config.acks, 1)
+  // acks=0 is valid now that the sender writes without reading responses
+  let fire_and_forget = @moonkafka.ProducerConfig::new(
+    ["b:9092"],
+    "events",
+    acks=0,
+  )
+  assert_eq(fire_and_forget.acks, 0)
   assert_true(
     raises(fn() raise {
-      ignore(@moonkafka.ProducerConfig::new(["b:9092"], "events", acks=0))
+      ignore(@moonkafka.ProducerConfig::new(["b:9092"], "events", acks=2))
     }),
   )
   assert_true(
