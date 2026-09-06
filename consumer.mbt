@@ -11,6 +11,17 @@ pub(all) enum StartFrom {
 struct PartitionState {
   info : PartitionInfo
   mut next_offset : Int64
+  /// Paused partitions are skipped by poll until resumed.
+  mut paused : Bool
+}
+
+///|
+/// One leader's poll outcome, gathered concurrently and applied
+/// sequentially afterwards (cooperative scheduling keeps the swap safe).
+priv enum PollOutcome {
+  Fetched(FetchResult)
+  /// Transport failure: recover and retry on the next poll.
+  PollRetry
 }
 
 ///|
@@ -30,6 +41,10 @@ pub struct Consumer {
   priv mut group_coordinator : Int?
   enable_auto_commit : Bool
   auto_commit_interval_ms : Int
+  auto_offset_reset : AutoOffsetReset
+  max_poll_records : Int
+  max_partition_fetch_bytes : Int
+  enable_read_committed : Bool
   /// Last known committed offset per partition (-1 = none), refreshed
   /// by commit() and committed().
   priv committed_offsets : Map[Int, Int64]
@@ -93,6 +108,10 @@ pub async fn Consumer::connect_with_config(
     group_coordinator: None,
     enable_auto_commit: config.enable_auto_commit,
     auto_commit_interval_ms: config.auto_commit_interval_ms,
+    auto_offset_reset: config.auto_offset_reset,
+    max_poll_records: config.max_poll_records,
+    max_partition_fetch_bytes: config.max_partition_fetch_bytes,
+    enable_read_committed: config.enable_read_committed,
     committed_offsets: Map([]),
     cluster,
     topic_id: Uuid::zero(),
@@ -154,14 +173,17 @@ async fn Consumer::refresh_metadata(self : Consumer) -> Unit {
   // A refresh after a reconnect must keep read positions; fresh connects
   // start from zero and are overwritten by reset_offsets anyway.
   self.topic_id = topic_meta.topic_id
-  let old : Map[Int, Int64] = Map([])
+  let old : Map[Int, (Int64, Bool)] = Map([])
   for p in self.partitions {
-    old[p.info.index] = p.next_offset
+    old[p.info.index] = (p.next_offset, p.paused)
   }
   self.partitions.clear()
   for p in topic_meta.partitions {
-    let next_offset = old.get(p.index).unwrap_or(0L)
-    self.partitions.push({ info: p, next_offset, })
+    match old.get(p.index) {
+      Some((next_offset, paused)) =>
+        self.partitions.push({ info: p, next_offset, paused, })
+      None => self.partitions.push({ info: p, next_offset: 0L, paused: false, })
+    }
   }
   // Leader connections come from the cluster client's pool on demand;
   // fetch sessions die with every refresh.
@@ -196,67 +218,127 @@ async fn Consumer::reset_offsets(self : Consumer) -> Unit {
 }
 
 ///|
-/// Poll every partition once. Returns the decoded records (possibly empty;
-/// the broker long-polls up to `max_wait_ms` per fetch).
-/// On offset or leadership errors the consumer recovers by refreshing
-/// metadata or re-resolving offsets on the next poll.
+/// Poll the assigned partitions once. Returns up to `max_poll_records`
+/// decoded records (possibly empty; the broker long-polls up to
+/// `max_wait_ms` per fetch). Paused partitions are skipped.
 ///
-/// Fetches run through per-leader incremental fetch sessions: the first
-/// request carries every partition, later ones only partitions whose
-/// position changed since the broker last heard (session eviction and
-/// INVALID_FETCH_SESSION_EPOCH restart with a full request).
+/// Fetches run concurrently per leader through incremental fetch
+/// sessions: the first request carries every partition, later ones only
+/// partitions whose position changed since the broker last heard (session
+/// eviction and INVALID_FETCH_SESSION_EPOCH restart with a full request).
+/// Recovery: transport failures refresh metadata; OFFSET_OUT_OF_RANGE
+/// follows the auto-reset policy; UNKNOWN/FENCED_LEADER_EPOCH validate
+/// the position against the leader's epoch end offset (KIP-320) and
+/// rewind on truncation. READ_COMMITTED consumers filter aborted
+/// transactions; read positions always advance past whole batches, so
+/// markers and aborted ranges are never re-fetched.
 pub async fn Consumer::poll(
   self : Consumer,
   max_wait_ms? : Int = 500,
   max_bytes? : Int = 1048576,
 ) -> Array[Record] {
-  // Group partitions by leader so each leader connection gets one fetch.
+  // Group unpauseed partitions by leader so each leader connection gets
+  // one concurrent fetch.
   let by_leader : Map[Int, Map[Int, (Int64, Int)]] = Map([])
   for p in self.partitions {
+    if p.paused {
+      continue
+    }
     let wanted = by_leader.get_or_init(p.info.leader, fn() { Map([]) })
     wanted[p.info.index] = (p.next_offset, p.info.leader_epoch)
   }
-  let out : Array[Record] = []
-  let mut refresh = false
-  for leader, wanted in by_leader {
-    let conn = self.cluster.connection(leader) catch {
-      _ => {
-        refresh = true
-        continue
-      }
-    }
-    let session = self.fetch_sessions.get_or_init(leader, fn() {
-      FetchSession::new()
-    })
-    let results : FetchResult? = Some(
-      self.fetch_from_leader(conn, session, wanted, max_wait_ms, max_bytes),
-    ) catch {
-      e =>
-        match e {
-          TransportError::ConnectionClosed(_)
-          | TransportError::RequestTimeout(_) => {
-            refresh = true
-            None
-          }
-          _ => raise e
+  // One fetch exchange per leader, all in flight at once.
+  let outcomes : Array[PollOutcome] = []
+  @async.with_task_group(fn(group) {
+    for _, wanted in by_leader {
+      group.spawn_bg(no_wait=false, allow_failure=true, () => {
+        let outcome = self.poll_leader(wanted, max_wait_ms, max_bytes) catch {
+          _ => PollRetry
         }
+        outcomes.push(outcome)
+      })
     }
-    guard results is Some(results) else { continue }
-    session.handle_response(results.session_id, results.top_error_code)
-    for topic in results.topics {
-      for result in topic.partitions {
-        match result.error_code {
-          0 =>
-            if !result.records.is_empty() {
-              for record in result.records {
-                out.push(record)
-              }
-              // Offset-safe even when a trailing batch was truncated:
-              // only complete batches were decoded.
-              let last = result.records[result.records.length() - 1]
-              self.set_next_offset(result.partition, last.offset + 1L)
+  })
+  // Apply the results sequentially: records, positions, error policies.
+  let out : Array[Record] = []
+  let mut remaining = self.max_poll_records
+  let mut refresh = false
+  for outcome in outcomes {
+    guard outcome is Fetched(result) else {
+      refresh = true
+      continue
+    }
+    for leader_result in result.topics {
+      for part in leader_result.partitions {
+        match part.error_code {
+          0 => {
+            // Delivered records honor read_committed; the position
+            // advances past the last complete batch (markers and
+            // aborted ranges included), so nothing is re-fetched.
+            let delivered = if self.enable_read_committed {
+              collect_committed(part.batches, part.aborted_transactions)
+            } else {
+              part.records
             }
-          1 => self.reset_partition_offset(result.partition) // OFFSET_OUT_OF_RANGE
+            if remaining <= 0 {
+              // max_poll_records reached: leave the position alone so
+              // the next poll re-fetches what this one didn't return.
+              continue
+            }
+            let mut last_seen : Int64? = None
+            if !part.batches.is_empty() && part.records_complete {
+              let last_batch = part.batches[part.batches.length() - 1]
+              last_seen = Some(last_batch.last_offset + 1L)
+            } else if !part.records.is_empty() {
+              // Truncated tail: stop at the last complete record.
+              let last = part.records[part.records.length() - 1]
+              last_seen = Some(last.offset + 1L)
+            }
+            let taken : Array[Record] = []
+            let mut cut = false
+            for record in delivered {
+              if taken.length() >= remaining {
+                cut = true
+                break
+              }
+              taken.push(record)
+            }
+            for record in taken {
+              out.push(record)
+            }
+            remaining -= taken.length()
+            if cut {
+              // The cap cut mid-delivery: the position stops at the last
+              // returned record so the rest is re-fetched next poll.
+              let last_taken = taken[taken.length() - 1]
+              self.set_next_offset(part.partition, last_taken.offset + 1L)
+              remaining = 0
+            } else {
+              match last_seen {
+                Some(offset) => self.set_next_offset(part.partition, offset)
+                None => ()
+              }
+            }
+          }
+          1 =>
+            // OFFSET_OUT_OF_RANGE: follow the auto-reset policy.
+            match self.auto_offset_reset {
+              ResetEarliest =>
+                self.reset_partition_offset(part.partition, OFFSET_EARLIEST)
+              ResetLatest =>
+                self.reset_partition_offset(part.partition, OFFSET_LATEST)
+              ResetNone =>
+                raise ProtocolError::ProtocolError(
+                  "offset for partition \{part.partition} is out of range and auto offset reset is disabled",
+                )
+            }
+          74 | 75 => {
+            // FENCED/UNKNOWN_LEADER_EPOCH: leadership changed under us.
+            // Validate the position against the leader's epoch end and
+            // rewind on truncation; otherwise refresh metadata.
+            self.validate_leader_epoch(part.partition)
+            refresh = true
+          }
           _ => refresh = true // NOT_LEADER_OR_FOLLOWER etc.
         }
       }
@@ -269,9 +351,94 @@ pub async fn Consumer::poll(
 }
 
 ///|
+/// One leader's fetch exchange with session-eviction retry.
+async fn Consumer::poll_leader(
+  self : Consumer,
+  wanted : Map[Int, (Int64, Int)],
+  max_wait_ms : Int,
+  max_bytes : Int,
+) -> PollOutcome {
+  let leader = self.leader_of_any(wanted)
+  let conn = self.cluster.connection(leader)
+  let session = self.fetch_sessions.get_or_init(leader, fn() {
+    FetchSession::new()
+  })
+  let result = self.fetch_from_leader(
+    conn,
+    session,
+    wanted,
+    max_wait_ms,
+    max_bytes,
+    self.max_partition_fetch_bytes,
+  )
+  session.handle_response(result.session_id, result.top_error_code)
+  Fetched(result)
+}
+
+///|
+/// The leader of any partition in `wanted` (single-topic consumer: all
+/// entries share the topic's leader mapping).
+fn Consumer::leader_of_any(
+  self : Consumer,
+  wanted : Map[Int, (Int64, Int)],
+) -> Int raise {
+  for p in self.partitions {
+    if wanted.contains(p.info.index) {
+      return p.info.leader
+    }
+  }
+  raise ProtocolError::ProtocolError("no assigned partition to fetch")
+}
+
+///|
+/// KIP-320 truncation check after a fenced/unknown leader epoch: ask the
+/// leader where the known epoch ends; a position past it rewinds. Any
+/// failure leaves recovery to the metadata refresh.
+async fn Consumer::validate_leader_epoch(
+  self : Consumer,
+  partition : Int,
+) -> Unit {
+  let mut info : PartitionInfo? = None
+  for p in self.partitions {
+    if p.info.index == partition {
+      info = Some(p.info)
+    }
+  }
+  guard info is Some(info) else { return }
+  let results = self.cluster
+    .connection(info.leader)
+    .offset_for_leader_epoch(
+      self.topic,
+      [(partition, info.leader_epoch, info.leader_epoch)],
+      timeout_ms=self.request_timeout_ms,
+    ) catch {
+      _ => return
+    }
+  for result in results {
+    if result.error_code == 0 &&
+      result.end_offset >= 0L &&
+      result.end_offset < self.position_of(partition) {
+      self.set_next_offset(partition, result.end_offset)
+    }
+  }
+}
+
+///|
+fn Consumer::position_of(self : Consumer, partition : Int) -> Int64 {
+  for p in self.partitions {
+    if p.info.index == partition {
+      return p.next_offset
+    }
+  }
+  0L
+}
+
+///|
 /// One fetch exchange with a leader, retrying once when the broker
 /// evicts the fetch session (FETCH_SESSION_ID_NOT_FOUND /
 /// INVALID_FETCH_SESSION_EPOCH): the retry goes out as a full request.
+/// `partition_max_bytes` caps each partition's response; `max_bytes` is
+/// the request-level cap.
 async fn Consumer::fetch_from_leader(
   self : Consumer,
   conn : BrokerConnection,
@@ -279,15 +446,26 @@ async fn Consumer::fetch_from_leader(
   wanted : Map[Int, (Int64, Int)],
   max_wait_ms : Int,
   max_bytes : Int,
+  partition_max_bytes : Int,
 ) -> FetchResult {
-  let request = session.prepare(self.topic, self.topic_id, wanted, max_bytes)
+  let request = session.prepare(
+    self.topic,
+    self.topic_id,
+    wanted,
+    partition_max_bytes,
+  )
   let result = self.send_fetch(conn, request, max_wait_ms, max_bytes)
   if result.top_error_code == FETCH_SESSION_ID_NOT_FOUND ||
     result.top_error_code == INVALID_FETCH_SESSION_EPOCH {
     // The broker lost the session (failover, eviction, epoch race):
     // re-establish with everything, once.
     session.invalidate()
-    let retry = session.prepare(self.topic, self.topic_id, wanted, max_bytes)
+    let retry = session.prepare(
+      self.topic,
+      self.topic_id,
+      wanted,
+      partition_max_bytes,
+    )
     return self.send_fetch(conn, retry, max_wait_ms, max_bytes)
   }
   result
@@ -295,7 +473,9 @@ async fn Consumer::fetch_from_leader(
 
 ///|
 /// Send one fetch for the single subscribed topic, mapping the session's
-/// forgotten partition indexes onto the topic entry.
+/// forgotten partition indexes onto the topic entry. READ_COMMITTED
+/// consumers set the isolation level so the broker withholds records
+/// past the last stable offset and reports aborted transactions.
 async fn Consumer::send_fetch(
   self : Consumer,
   conn : BrokerConnection,
@@ -314,6 +494,7 @@ async fn Consumer::send_fetch(
     session=request,
     max_wait_ms~,
     max_bytes~,
+    isolation_level=if self.enable_read_committed { 1 } else { 0 },
     timeout_ms=self.request_timeout_ms,
   )
 }
@@ -332,14 +513,13 @@ fn Consumer::set_next_offset(
 }
 
 ///|
+/// Re-resolve one partition's position from a ListOffsets sentinel
+/// (the auto-reset policy's earliest/latest).
 async fn Consumer::reset_partition_offset(
   self : Consumer,
   partition : Int,
+  sentinel : Int64,
 ) -> Unit {
-  let timestamp = match self.start_from {
-    Earliest => OFFSET_EARLIEST
-    Latest => OFFSET_LATEST
-  }
   for p in self.partitions {
     if p.info.index == partition {
       let offsets = self.cluster
@@ -347,13 +527,65 @@ async fn Consumer::reset_partition_offset(
         .list_offsets(
           self.topic,
           [p.info],
-          timestamp,
+          sentinel,
           timeout_ms=self.request_timeout_ms,
         )
       match offsets.get(partition) {
         Some(offset) => p.next_offset = offset
         None => ()
       }
+    }
+  }
+}
+
+///|
+/// Pause fetching from the given partitions (default: all). Paused
+/// partitions keep their positions; poll skips them until resume.
+pub fn Consumer::pause(self : Consumer, partitions? : Array[Int]) -> Unit {
+  for p in self.partitions {
+    if self.pause_wanted(partitions, p.info.index) {
+      p.paused = true
+    }
+  }
+}
+
+///|
+/// Resume fetching from the given partitions (default: all).
+pub fn Consumer::resume(self : Consumer, partitions? : Array[Int]) -> Unit {
+  for p in self.partitions {
+    if self.pause_wanted(partitions, p.info.index) {
+      p.paused = false
+    }
+  }
+}
+
+///|
+/// The partitions currently paused.
+pub fn Consumer::paused(self : Consumer) -> Array[Int] {
+  let out : Array[Int] = []
+  for p in self.partitions {
+    if p.paused {
+      out.push(p.info.index)
+    }
+  }
+  out
+}
+
+///|
+fn Consumer::pause_wanted(
+  self : Consumer,
+  partitions : Array[Int]?,
+  index : Int,
+) -> Bool {
+  match partitions {
+    None => true
+    Some(list) => {
+      for i in list {
+        if i == index {
+          return true
+        }
+      }
+      false
     }
   }
 }

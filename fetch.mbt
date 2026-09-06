@@ -272,6 +272,12 @@ pub struct FetchPartitionResult {
   last_stable_offset : Int64
   log_start_offset : Int64
   records : Array[Record]
+  /// The decoded batches with their metadata, so read_committed
+  /// consumers can filter via collect_committed.
+  batches : Array[DecodedBatch]
+  /// The response's aborted-transactions list for this partition
+  /// (isolation READ_COMMITTED fetches only).
+  aborted_transactions : Array[AbortedTx]
   /// False when max_bytes truncated a trailing batch: `records` holds
   /// only complete batches, and the read position must not skip ahead
   /// past what was dropped.
@@ -324,19 +330,34 @@ pub fn decode_fetch_response(
       let high_watermark = d.read_i64()
       let last_stable_offset = d.read_i64()
       let log_start_offset = d.read_i64()
+      let aborted : Array[AbortedTx] = []
       let aborted_count = d.read_compact_len() // nullable array; -1 = null
       if aborted_count > 0 {
         for _ in 0..<aborted_count {
-          d.skip(8 + 8) // producer_id, first_offset
+          let producer_id = d.read_i64()
+          let first_offset = d.read_i64()
           d.skip_tag_buffer()
+          aborted.push({ producer_id, first_offset, })
         }
       }
       d.skip(4) // preferred_read_replica
       let records_len = d.read_compact_len() // nullable records; -1 = null
-      let (records, truncated) = if records_len > 0 {
-        decode_record_batches_ex(d.read_bytes(records_len))
+      let (records, batches, truncated) = if records_len > 0 {
+        let (detailed, cut) = decode_record_batches_detailed(
+          d.read_bytes(records_len),
+        )
+        let flat : Array[Record] = []
+        for batch in detailed {
+          if batch.is_control {
+            continue
+          }
+          for record in batch.records {
+            flat.push(record)
+          }
+        }
+        (flat, detailed, cut)
       } else {
-        ([], false)
+        ([], [], false)
       }
       d.skip_tag_buffer()
       partitions.push({
@@ -346,6 +367,8 @@ pub fn decode_fetch_response(
         last_stable_offset,
         log_start_offset,
         records,
+        batches,
+        aborted_transactions: aborted,
         records_complete: !truncated,
       })
     }

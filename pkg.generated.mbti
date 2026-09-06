@@ -36,6 +36,8 @@ pub const API_OFFSET_COMMIT : Int = 8
 
 pub const API_OFFSET_FETCH : Int = 9
 
+pub const API_OFFSET_FOR_LEADER_EPOCH : Int = 23
+
 pub const API_PRODUCE : Int = 0
 
 pub const API_SASL_AUTHENTICATE : Int = 36
@@ -92,6 +94,8 @@ pub fn decode_offset_commit_response(Int, @buf.Decoder) -> (Array[OffsetCommitPa
 
 pub fn decode_offset_fetch_response(Int, @buf.Decoder) -> (Array[OffsetFetchGroupResult], Int) raise
 
+pub fn decode_offset_for_leader_epoch_response(@buf.Decoder) -> (Array[EpochEndOffset], Int) raise
+
 pub fn decode_produce_response(Int, @buf.Decoder) -> (Array[ProducePartitionResult], Int) raise
 
 pub fn decode_record_batches(Bytes) -> Array[Record] raise @buf.DecodeError
@@ -131,6 +135,8 @@ pub fn encode_metadata_request(Array[String]?) -> Bytes
 pub fn encode_offset_commit_request(Int, String, Int, String, String?, Array[CommitTopic]) -> Bytes raise
 
 pub fn encode_offset_fetch_request(Int, String, String, Int, Array[FetchOffsetTopic], require_stable? : Bool) -> Bytes raise
+
+pub fn encode_offset_for_leader_epoch_request(String, Array[(Int, Int, Int)], timeout_ms? : Int) -> Bytes
 
 pub fn encode_produce_request(Int, String, Uuid, Array[(Int, Bytes)], transactional_id? : String?, acks~ : Int, timeout_ms~ : Int) -> Bytes raise
 
@@ -200,6 +206,12 @@ pub(all) struct ApiRange {
   max : Int
 } derive(@debug.Debug)
 
+pub(all) enum AutoOffsetReset {
+  ResetEarliest
+  ResetLatest
+  ResetNone
+} derive(@debug.Debug)
+
 pub struct Backoff {
   base_ms : Int
   max_ms : Int
@@ -238,7 +250,7 @@ pub fn BrokerConnection::close(Self) -> Unit
 pub async fn BrokerConnection::connect(String, Int, client_id? : String, max_in_flight? : Int, timeout_ms? : Int, tls? : TlsClientOptions?) -> Self
 pub async fn BrokerConnection::describe_topic_partitions(Self, Array[String], response_partition_limit? : Int, cursor? : TopicPartitionCursor?, timeout_ms? : Int) -> DescribeTopicPartitions
 pub async fn BrokerConnection::end_txn(Self, String, Int64, Int, Bool, timeout_ms? : Int) -> EndTxnResult
-pub async fn BrokerConnection::fetch(Self, Array[FetchTopicReq], session~ : FetchSessionReq, max_wait_ms~ : Int, min_bytes? : Int, max_bytes? : Int, timeout_ms? : Int) -> FetchResult
+pub async fn BrokerConnection::fetch(Self, Array[FetchTopicReq], session~ : FetchSessionReq, max_wait_ms~ : Int, min_bytes? : Int, max_bytes? : Int, isolation_level? : Int, timeout_ms? : Int) -> FetchResult
 pub async fn BrokerConnection::fetch_metadata(Self, Array[String]?, timeout_ms? : Int) -> Metadata
 pub async fn BrokerConnection::find_coordinator(Self, Array[String], CoordinatorType, timeout_ms? : Int) -> Array[CoordinatorInfo]
 pub async fn BrokerConnection::init_producer_id(Self, transactional_id? : String?, transaction_timeout_ms? : Int, producer_id? : Int64, producer_epoch? : Int, timeout_ms? : Int) -> InitProducerIdResult
@@ -247,6 +259,7 @@ pub async fn BrokerConnection::negotiate_api_versions(Self, timeout_ms? : Int) -
 pub fn BrokerConnection::note_throttle(Self, Int) -> Unit
 pub async fn BrokerConnection::offset_commit(Self, String, Int, String, group_instance_id? : String?, topics~ : Array[CommitTopic], timeout_ms? : Int) -> Array[OffsetCommitPartitionResult]
 pub async fn BrokerConnection::offset_fetch(Self, String, member_id? : String, member_epoch? : Int, topics~ : Array[FetchOffsetTopic], require_stable? : Bool, timeout_ms? : Int) -> Array[OffsetFetchGroupResult]
+pub async fn BrokerConnection::offset_for_leader_epoch(Self, String, Array[(Int, Int, Int)], timeout_ms? : Int) -> Array[EpochEndOffset]
 pub async fn BrokerConnection::produce(Self, String, topic_id? : Uuid, transactional_id? : String?, partitions~ : Array[(Int, Bytes)], acks~ : Int, timeout_ms~ : Int) -> Array[ProducePartitionResult]
 pub async fn BrokerConnection::request(Self, Int, Int, Bytes, timeout_ms? : Int) -> @buf.Decoder
 pub async fn BrokerConnection::request_raw(Self, Int, Int, Bytes, timeout_ms? : Int, flexible? : Bool) -> @buf.Decoder
@@ -345,6 +358,10 @@ pub struct Consumer {
   group : @async.TaskGroup[Unit]
   enable_auto_commit : Bool
   auto_commit_interval_ms : Int
+  auto_offset_reset : AutoOffsetReset
+  max_poll_records : Int
+  max_partition_fetch_bytes : Int
+  enable_read_committed : Bool
   mut topic_id : Uuid
   fetch_sessions : Map[Int, FetchSession]
   partitions : Array[PartitionState]
@@ -358,7 +375,10 @@ pub async fn Consumer::committed(Self, partitions? : Array[Int]?) -> Map[Int, In
 pub fn Consumer::committed_cached(Self, Int) -> Int64?
 pub async fn Consumer::connect(group~ : @async.TaskGroup[Unit], host~ : String, port~ : Int, topic~ : String, start_from? : StartFrom) -> Self
 pub async fn Consumer::connect_with_config(group~ : @async.TaskGroup[Unit], ConsumerConfig) -> Self
+pub fn Consumer::pause(Self, partitions? : Array[Int]) -> Unit
+pub fn Consumer::paused(Self) -> Array[Int]
 pub async fn Consumer::poll(Self, max_wait_ms? : Int, max_bytes? : Int) -> Array[Record]
+pub fn Consumer::resume(Self, partitions? : Array[Int]) -> Unit
 pub fn Consumer::seek(Self, Int, Int64) -> Unit raise
 pub async fn Consumer::seek_by_timestamp(Self, Int, Int64) -> Unit
 pub async fn Consumer::seek_to_beginning(Self, partitions? : Array[Int]?) -> Unit
@@ -371,8 +391,12 @@ pub struct ConsumerConfig {
   group_id : String?
   enable_auto_commit : Bool
   auto_commit_interval_ms : Int
+  auto_offset_reset : AutoOffsetReset
+  max_poll_records : Int
+  max_partition_fetch_bytes : Int
+  enable_read_committed : Bool
 } derive(@debug.Debug)
-pub fn ConsumerConfig::new(Array[String], String, start_from? : StartFrom, request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?, tls? : TlsClientOptions?, metadata_max_age_ms? : Int, group_id? : String?, enable_auto_commit? : Bool, auto_commit_interval_ms? : Int) -> Self raise
+pub fn ConsumerConfig::new(Array[String], String, start_from? : StartFrom, request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?, tls? : TlsClientOptions?, metadata_max_age_ms? : Int, group_id? : String?, enable_auto_commit? : Bool, auto_commit_interval_ms? : Int, auto_offset_reset? : AutoOffsetReset?, max_poll_records? : Int, max_partition_fetch_bytes? : Int, enable_read_committed? : Bool) -> Self raise
 
 pub struct CoordinatorInfo {
   key : String
@@ -398,6 +422,7 @@ pub fn Deadline::remaining_ms(Self) -> Int64
 
 pub(all) struct DecodedBatch {
   records : Array[Record]
+  last_offset : Int64
   producer_id : Int64
   producer_epoch : Int
   base_sequence : Int
@@ -415,6 +440,13 @@ pub struct EndTxnResult {
   error_code : Int
   producer_id : Int64
   producer_epoch : Int
+} derive(@debug.Debug)
+
+pub struct EpochEndOffset {
+  partition : Int
+  error_code : Int
+  leader_epoch : Int
+  end_offset : Int64
 } derive(@debug.Debug)
 
 pub(all) struct FetchOffsetTopic {
@@ -437,6 +469,8 @@ pub struct FetchPartitionResult {
   last_stable_offset : Int64
   log_start_offset : Int64
   records : Array[Record]
+  batches : Array[DecodedBatch]
+  aborted_transactions : Array[AbortedTx]
   records_complete : Bool
 }
 
@@ -613,6 +647,7 @@ pub struct RecordBatchBuilder {
   mut producer_id : Int64
   mut producer_epoch : Int
   mut base_sequence : Int
+  mut transactional : Bool
 } derive(@debug.Debug)
 pub fn RecordBatchBuilder::append(Self, Int64, key? : Bytes?, value? : Bytes?, headers? : Array[(Bytes, Bytes)]) -> Unit
 pub fn RecordBatchBuilder::count(Self) -> Int
@@ -621,6 +656,7 @@ pub fn RecordBatchBuilder::estimated_size(Self) -> Int
 pub fn RecordBatchBuilder::last_assigned_offset(Self) -> Int64
 pub fn RecordBatchBuilder::new(base_offset? : Int64) -> Self
 pub fn RecordBatchBuilder::set_idempotence(Self, Int64, Int, Int) -> Unit
+pub fn RecordBatchBuilder::set_transactional(Self) -> Unit
 pub fn RecordBatchBuilder::to_bytes(Self) -> Bytes
 
 pub(all) struct SaslAuthenticateResult {
