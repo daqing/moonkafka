@@ -356,6 +356,12 @@ pub struct PartitionInfo {
 
 type PartitionState
 
+pub(all) enum Partitioner {
+  Murmur2
+  Murmur2RoundRobin
+  RoundRobin
+} derive(Eq, @debug.Debug)
+
 pub struct ProducePartitionResult {
   partition : Int
   error_code : Int
@@ -387,20 +393,21 @@ pub struct Producer {
   mut topic_id : Uuid
   leader_conns : Map[Int, BrokerConnection]
   mut partitions : Array[PartitionInfo]
-  mut round_robin : Int
   mut closed : Bool
+  // private fields
 }
 pub fn Producer::close(Self) -> Unit
 pub async fn Producer::connect(host~ : String, port~ : Int, topic~ : String, acks? : Int, timeout_ms? : Int) -> Self
 pub async fn Producer::connect_with_config(ProducerConfig) -> Self
-pub async fn Producer::send(Self, key? : Bytes, value? : Bytes, timestamp? : Int64) -> Int64
+pub async fn Producer::send(Self, key? : Bytes, value? : Bytes, timestamp? : Int64, partition? : Int) -> Int64
 
 pub struct ProducerConfig {
   common : CommonConfig
   topic : String
   acks : Int
+  partitioner : Partitioner
 } derive(@debug.Debug)
-pub fn ProducerConfig::new(Array[String], String, acks? : Int, request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?, tls? : TlsClientOptions?) -> Self raise
+pub fn ProducerConfig::new(Array[String], String, acks? : Int, request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?, tls? : TlsClientOptions?, partitioner? : Partitioner) -> Self raise
 
 pub(all) struct Record {
   offset : Int64

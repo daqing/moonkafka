@@ -261,6 +261,9 @@ pub struct ProducerConfig {
   common : CommonConfig
   topic : String
   acks : Int
+  /// Partition selection strategy (murmur2 for keyed records in every
+  /// strategy; unkeyed records are sticky or round-robin).
+  partitioner : Partitioner
 } derive(@debug.Debug)
 
 ///|
@@ -274,6 +277,7 @@ pub fn ProducerConfig::new(
   security_protocol? : SecurityProtocol = Plaintext,
   sasl? : SaslConfig? = None,
   tls? : TlsClientOptions? = None,
+  partitioner? : Partitioner = Murmur2,
 ) -> ProducerConfig raise {
   if acks != 1 && acks != -1 {
     raise ProtocolError::ProtocolError(
@@ -293,6 +297,7 @@ pub fn ProducerConfig::new(
     ),
     topic,
     acks,
+    partitioner,
   }
 }
 

@@ -21,7 +21,7 @@ pub struct Producer {
   mut topic_id : Uuid
   leader_conns : Map[Int, BrokerConnection]
   mut partitions : Array[PartitionInfo]
-  mut round_robin : Int
+  priv router : PartitionRouter
   mut closed : Bool
 }
 
@@ -84,7 +84,7 @@ pub async fn Producer::connect_with_config(config : ProducerConfig) -> Producer 
     topic_id: Uuid::zero(),
     leader_conns: Map([]),
     partitions: [],
-    round_robin: 0,
+    router: PartitionRouter::new(config.partitioner, next_sticky_seed()),
     closed: false,
   }
   producer.refresh_metadata()
@@ -187,33 +187,36 @@ async fn Producer::refresh_metadata(self : Producer) -> Unit {
 }
 
 ///|
-/// Route a message to a partition: @internal.murmur2 hash of the key when present
-/// (Kafka-compatible — same placement as the Java client and librdkafka's
-/// default partitioner), round-robin otherwise. @internal.murmur2 is masked to 31 bits
-/// before the modulo, like Utils.toPositive in the Java client.
-fn Producer::pick_partition(self : Producer, key : Bytes?) -> PartitionInfo {
-  let n = self.partitions.length()
-  let index = match key {
-    Some(k) => (@internal.murmur2(k) & 0x7fffffff) % n
-    None => {
-      let i = self.round_robin % n
-      self.round_robin += 1
-      i
-    }
-  }
+/// Route a record to a partition: an explicit override wins; otherwise
+/// keyed records follow murmur2 (Kafka-compatible — same placement as the
+/// Java client and librdkafka's default partitioner, murmur2 masked to 31
+/// bits before the modulo like Utils.toPositive) and unkeyed records go
+/// sticky or round-robin per the configured strategy.
+fn Producer::pick_partition(
+  self : Producer,
+  key : Bytes?,
+  override_partition : Int?,
+) -> PartitionInfo raise ProtocolError {
+  let index = self.router.pick(
+    self.partitions.length(),
+    key,
+    override_partition,
+  )
   self.partitions[index]
 }
 
 ///|
 /// Send one message and return the offset assigned by the broker.
-/// `timestamp` defaults to the current time (ms since epoch).
-/// Leadership changes and transport failures trigger recovery and a
-/// backoff-paced retry, up to `retries` attempts after the first.
+/// `timestamp` defaults to the current time (ms since epoch). `partition`
+/// overrides automatic routing when given and must name an existing
+/// partition. Leadership changes and transport failures trigger recovery
+/// and a backoff-paced retry, up to `retries` attempts after the first.
 pub async fn Producer::send(
   self : Producer,
   key? : Bytes,
   value? : Bytes,
   timestamp? : Int64,
+  partition? : Int,
 ) -> Int64 {
   let timestamp = timestamp.unwrap_or(@async.now())
   let batch = encode_record_batch([
@@ -228,7 +231,7 @@ pub async fn Producer::send(
   let attempts = if self.retries > 1000 { 1000 } else { self.retries + 1 }
   for attempt in 0..<attempts {
     let _ = attempt
-    let p = self.pick_partition(key)
+    let p = self.pick_partition(key, partition)
     match self.attempt_send(p, batch) {
       Some(offset) => return offset
       None => {

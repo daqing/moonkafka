@@ -84,6 +84,24 @@ test "producer config validates acks and topic" {
 }
 
 ///|
+test "producer config partitioner defaults to murmur2+sticky" {
+  let config = @moonkafka.ProducerConfig::new(["b:9092"], "events")
+  assert_true(config.partitioner is @moonkafka.Murmur2)
+  let custom = @moonkafka.ProducerConfig::new(
+    ["b:9092"],
+    "events",
+    partitioner=@moonkafka.RoundRobin,
+  )
+  assert_true(custom.partitioner is @moonkafka.RoundRobin)
+  let rr_unkeyed = @moonkafka.ProducerConfig::new(
+    ["b:9092"],
+    "events",
+    partitioner=@moonkafka.Murmur2RoundRobin,
+  )
+  assert_true(rr_unkeyed.partitioner is @moonkafka.Murmur2RoundRobin)
+}
+
+///|
 test "consumer config defaults to earliest" {
   let config = @moonkafka.ConsumerConfig::new(["b:9092"], "events")
   assert_true(config.start_from is Earliest)
