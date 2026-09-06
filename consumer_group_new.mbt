@@ -13,6 +13,13 @@
 // (`group_instance_id`) keep their identity across restarts.
 
 ///|
+/// Which membership protocol the member loop runs.
+priv enum MemberKind {
+  Kip848Member
+  ClassicMember
+}
+
+///|
 /// Rebalance hooks fired around assignment changes: on_revoke with the
 // revoked topic-partitions before they are dropped, on_assign with the
 // newly gained ones after they are added.
@@ -114,6 +121,7 @@ pub fn Consumer::subscribe(
   self.rebalance_listener = listener.unwrap_or(self.rebalance_listener)
   self.subscribed_names = Some(topics)
   self.subscribed_regex = None
+  self.member_kind = Kip848Member
   self.start_membership()
 }
 
@@ -132,6 +140,7 @@ pub async fn Consumer::subscribe_regex(
   self.rebalance_listener = listener.unwrap_or(self.rebalance_listener)
   self.subscribed_regex = Some(pattern)
   self.subscribed_names = Some([])
+  self.member_kind = Kip848Member
   // Load the topic catalog once; the loop re-expands as it refreshes.
   let _ = self.cluster.refresh_metadata(None) catch { _ => () }
   self.start_membership()
@@ -158,8 +167,12 @@ fn Consumer::start_membership(self : Consumer) -> Unit raise {
   self.member_active = true
   if !self.member_spawned {
     self.member_spawned = true
+    let kind = self.member_kind
     self.group.spawn_bg(no_wait=false, allow_failure=true, () => {
-      self.member_loop()
+      match kind {
+        Kip848Member => self.member_loop()
+        ClassicMember => self.classic_loop()
+      }
     })
   }
 }

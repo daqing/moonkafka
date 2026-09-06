@@ -7,7 +7,7 @@
 fn fake_api_versions_response(throttle_ms : Int) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i16(0) // error_code
-  e.write_compact_len(16)
+  e.write_compact_len(20)
   let apis : Array[(Int, Int)] = [
     (0, 13),
     (1, 16),
@@ -25,6 +25,10 @@ fn fake_api_versions_response(throttle_ms : Int) -> Bytes {
     (26, 5),
     (28, 4),
     (75, 0),
+    (11, 9),
+    (12, 4),
+    (13, 5),
+    (14, 5),
   ]
   for pair in apis {
     let (key, max) = pair
@@ -269,6 +273,7 @@ fn fake_metadata_response(
   topic : String,
   broker_port : Int,
   version : Int,
+  partition_count? : Int = 1,
 ) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(0) // throttle
@@ -285,15 +290,17 @@ fn fake_metadata_response(
   e.write_compact_string(topic)
   e.write_bytes(fake_topic_id) // topic id
   e.write_bool(false) // is_internal
-  e.write_compact_len(1) // one partition
-  e.write_i16(0) // no error
-  e.write_i32(0) // index
-  e.write_i32(0) // leader node
-  e.write_i32(0) // leader epoch
-  e.write_compact_len(0) // replicas
-  e.write_compact_len(0) // isr
-  e.write_compact_len(0) // offline replicas
-  e.write_tag_buffer()
+  e.write_compact_len(partition_count)
+  for p in 0..<partition_count {
+    e.write_i16(0) // no error
+    e.write_i32(p) // index
+    e.write_i32(0) // leader node
+    e.write_i32(0) // leader epoch
+    e.write_compact_len(0) // replicas
+    e.write_compact_len(0) // isr
+    e.write_compact_len(0) // offline replicas
+    e.write_tag_buffer()
+  }
   e.write_i32(0) // authorized operations (skipped by the decoder)
   e.write_tag_buffer()
   if version >= 13 {
@@ -387,19 +394,25 @@ fn fake_produce_response(
 }
 
 ///|
-/// ListOffsets v7 response body: one partition at the given offset.
-fn fake_list_offsets_response(topic : String, offset : Int64) -> Bytes {
+/// ListOffsets v7 response body: every partition at the given offset.
+fn fake_list_offsets_response(
+  topic : String,
+  offset : Int64,
+  partition_count? : Int = 1,
+) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(0) // throttle
   e.write_compact_len(1) // one topic
   e.write_compact_string(topic)
-  e.write_compact_len(1) // one partition
-  e.write_i32(0) // index
-  e.write_i16(0) // no error
-  e.write_i64(-1L) // timestamp
-  e.write_i64(offset)
-  e.write_i32(-1) // leader epoch
-  e.write_tag_buffer()
+  e.write_compact_len(partition_count)
+  for p in 0..<partition_count {
+    e.write_i32(p) // index
+    e.write_i16(0) // no error
+    e.write_i64(-1L) // timestamp
+    e.write_i64(offset)
+    e.write_i32(-1) // leader epoch
+    e.write_tag_buffer()
+  }
   e.write_tag_buffer()
   e.write_tag_buffer()
   e.to_bytes()
@@ -421,6 +434,290 @@ fn fake_fetch_request_session_epoch(rest : Bytes) -> Int raise {
   ignore(d.read_i8()) // isolation level
   ignore(d.read_i32()) // session id
   d.read_i32() // session epoch
+}
+
+///|
+/// Shared state of the fake classic group coordinator. Wrapped in a
+/// single-entry array so every connection task mutates the same cell.
+struct FakeCoordinator {
+  mut next_member : Int
+  /// member id -> instance id ("" = none)
+  members : Map[String, String]
+  /// Current completed round == the group's generation.
+  mut round : Int
+  /// member -> round of its last join.
+  arrived : Map[String, Int]
+  /// member -> subscription metadata (first protocol entry).
+  subscriptions : Map[String, Bytes]
+  /// member -> assignment bytes the leader synced.
+  assignments : Map[String, Bytes]
+  /// member -> generation of the stored assignment.
+  sync_generations : Map[String, Int]
+  mut protocol : String
+  joins : Array[(String, Int)]
+  syncs : Array[(String, Int)]
+  leaves : Array[String]
+}
+
+///|
+fn FakeCoordinator::new() -> FakeCoordinator {
+  {
+    next_member: 0,
+    members: Map([]),
+    round: 0,
+    arrived: Map([]),
+    subscriptions: Map([]),
+    assignments: Map([]),
+    sync_generations: Map([]),
+    protocol: "",
+    joins: [],
+    syncs: [],
+    leaves: [],
+  }
+}
+
+///|
+/// Parse a JoinGroup v9 request: (group, member id, instance id,
+/// protocol entries).
+fn fake_join_group_request(
+  rest : Bytes,
+) -> (String, String, String?, Array[(String, Bytes)]) raise {
+  let d = @buf.Decoder::new(rest)
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  ignore(d.read_compact_string()) // client id
+  d.skip_tag_buffer()
+  let group_id = d.read_compact_string()
+  ignore(d.read_i32()) // session timeout
+  ignore(d.read_i32()) // rebalance timeout
+  let member_id = d.read_compact_string()
+  let instance_id = d.read_compact_nullable_string()
+  ignore(d.read_compact_string()) // protocol type
+  let n = d.read_compact_len()
+  let protocols : Array[(String, Bytes)] = []
+  for _ in 0..<n {
+    let name = d.read_compact_string()
+    let len = d.read_compact_len()
+    let metadata = d.read_bytes(len)
+    d.skip_tag_buffer()
+    protocols.push((name, metadata))
+  }
+  (group_id, member_id, instance_id, protocols)
+}
+
+///|
+/// JoinGroup v9 response body.
+fn fake_join_group_response(
+  error_code : Int,
+  generation : Int,
+  protocol : String,
+  leader : String,
+  member_id : String,
+  members : Array[(String, Bytes)],
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_i16(error_code)
+  e.write_i32(generation)
+  e.write_compact_nullable_string(Some("consumer")) // protocol type
+  e.write_compact_string(protocol)
+  e.write_compact_string(leader)
+  e.write_bool(false) // skip assignment
+  e.write_compact_string(member_id)
+  e.write_compact_len(members.length())
+  for member in members {
+    let (id, metadata) = member
+    e.write_compact_string(id)
+    e.write_compact_nullable_string(None)
+    e.write_compact_len(metadata.length())
+    e.write_bytes(metadata)
+    e.write_tag_buffer()
+  }
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse a SyncGroup v5 request: (member id, generation, assignments).
+fn fake_sync_group_request(
+  rest : Bytes,
+) -> (String, Int, Array[(String, Bytes)]) raise {
+  let d = @buf.Decoder::new(rest)
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  ignore(d.read_compact_string()) // client id
+  d.skip_tag_buffer()
+  ignore(d.read_compact_string()) // group
+  let generation = d.read_i32()
+  let member_id = d.read_compact_string()
+  ignore(d.read_compact_nullable_string()) // instance
+  ignore(d.read_compact_nullable_string()) // protocol type
+  ignore(d.read_compact_nullable_string()) // protocol name
+  let n = d.read_compact_len()
+  let assignments : Array[(String, Bytes)] = []
+  for _ in 0..<n {
+    let id = d.read_compact_string()
+    let len = d.read_compact_len()
+    let bytes = d.read_bytes(len)
+    d.skip_tag_buffer()
+    assignments.push((id, bytes))
+  }
+  (member_id, generation, assignments)
+}
+
+///|
+/// SyncGroup v5 response body.
+fn fake_sync_group_response(assignment : Bytes) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_i16(0) // no error
+  e.write_compact_nullable_string(None) // protocol type
+  e.write_compact_nullable_string(None) // protocol name
+  e.write_compact_len(assignment.length())
+  e.write_bytes(assignment)
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse a Heartbeat v4 request: (member id, generation).
+fn fake_classic_heartbeat_request(rest : Bytes) -> (String, Int) raise {
+  let d = @buf.Decoder::new(rest)
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  ignore(d.read_compact_string()) // client id
+  d.skip_tag_buffer()
+  ignore(d.read_compact_string()) // group
+  let generation = d.read_i32()
+  let member_id = d.read_compact_string()
+  (member_id, generation)
+}
+
+///|
+/// Heartbeat v4 response body.
+fn fake_classic_heartbeat_response(error_code : Int) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_i16(error_code)
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse a LeaveGroup v5 request: the leaving member id.
+fn fake_leave_group_request(rest : Bytes) -> String raise {
+  let d = @buf.Decoder::new(rest)
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  ignore(d.read_compact_string()) // client id
+  d.skip_tag_buffer()
+  ignore(d.read_compact_string()) // group
+  let n = d.read_compact_len()
+  let mut member_id = ""
+  for _ in 0..<n {
+    member_id = d.read_compact_string()
+    ignore(d.read_compact_nullable_string()) // instance
+    ignore(d.read_compact_nullable_string()) // reason
+    d.skip_tag_buffer()
+  }
+  member_id
+}
+
+///|
+/// LeaveGroup v5 response body.
+fn fake_leave_group_response(member_id : String) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_i16(0) // no error
+  e.write_compact_len(1) // members
+  e.write_compact_string(member_id)
+  e.write_compact_nullable_string(None) // instance
+  e.write_i16(0) // no error
+  e.write_tag_buffer()
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Run one classic-group JoinGroup through the mini coordinator: fresh
+/// members start a new round, the round completes when every registered
+/// member has arrived, and the generation equals the round number.
+async fn fake_classic_join(
+  coord : FakeCoordinator,
+  member_id : String,
+  protocols : Array[(String, Bytes)],
+) -> Bytes {
+  let mut id = member_id
+  if id.is_empty() {
+    coord.next_member += 1
+    id = "classic-member-\{coord.next_member}"
+  }
+  // A fresh member, or any join landing on a settled group, starts a
+  // new rebalance round (a new generation).
+  if !coord.members.contains(id) || coord.round_complete() {
+    coord.round += 1
+    coord.arrived.clear()
+  }
+  coord.members[id] = ""
+  if !protocols.is_empty() {
+    coord.subscriptions[id] = protocols[0].1
+    let leader = coord.leader()
+    if id == leader && coord.protocol.is_empty() {
+      coord.protocol = protocols[0].0
+    }
+  }
+  coord.arrived[id] = coord.round
+  let deadline = @async.now() + 3000L
+  for ;; {
+    if coord.round_complete() || @async.now() > deadline {
+      break
+    }
+    // Round completion runs on the event loop; yield to it.
+    @async.sleep(1)
+  }
+  if !coord.round_complete() {
+    // The round stalled: tell the member to retry rather than let it
+    // compute against a partial group.
+    coord.arrived[id] = -1
+    return fake_join_group_response(15, -1, "", "", id, [])
+  }
+  coord.joins.push((id, coord.round))
+  let leader = coord.leader()
+  let members : Array[(String, Bytes)] = []
+  if id == leader {
+    for m, _ in coord.members {
+      match coord.subscriptions.get(m) {
+        Some(metadata) => members.push((m, metadata))
+        None => members.push((m, Bytes::make(0, 0)))
+      }
+    }
+  }
+  fake_join_group_response(0, coord.round, coord.protocol, leader, id, members)
+}
+
+///|
+fn FakeCoordinator::leader(self : FakeCoordinator) -> String {
+  let mut best = ""
+  for m, _ in self.members {
+    if best.is_empty() || m < best {
+      best = m
+    }
+  }
+  best
+}
+
+///|
+fn FakeCoordinator::round_complete(self : FakeCoordinator) -> Bool {
+  for m, _ in self.members {
+    if self.arrived.get(m) != Some(self.round) {
+      return false
+    }
+  }
+  true
 }
 
 ///|
@@ -1044,6 +1341,8 @@ async fn fake_serve_conn(
   heartbeat_regexes? : Array[String?] = [],
   heartbeat_errors? : Array[Int] = [],
   heartbeat_partitions? : Array[Int] = [0],
+  coordinator? : FakeCoordinator? = None,
+  metadata_partitions? : Int = 1,
 ) -> Unit {
   // per-connection SASL state
   let mut sasl_mechanism : String? = None
@@ -1095,7 +1394,12 @@ async fn fake_serve_conn(
           fake_produce_response(topic, version, 42L)
         }
       }
-      2 => fake_list_offsets_response(topic, 42L)
+      2 =>
+        fake_list_offsets_response(
+          topic,
+          42L,
+          partition_count=metadata_partitions,
+        )
       1 => {
         fetch_epochs.push(fake_fetch_request_session_epoch(rest))
         fetch_offsets.push(fake_fetch_request_first_offset(rest))
@@ -1108,6 +1412,65 @@ async fn fake_serve_conn(
         }
       }
       23 => fake_offset_for_leader_epoch_response(epoch_end_offset)
+      11 => {
+        // Classic JoinGroup through the mini coordinator.
+        let coord = coordinator.unwrap_or(FakeCoordinator::new())
+        let (_, member, _, protocols) = fake_join_group_request(rest)
+        fake_classic_join(coord, member, protocols)
+      }
+      12 => {
+        let coord = coordinator.unwrap_or(FakeCoordinator::new())
+        let (member, _) = fake_classic_heartbeat_request(rest)
+        // Rebalance signal: members below the current round rejoin.
+        let code = if coord.arrived.get(member) == Some(coord.round) {
+          0
+        } else {
+          27
+        }
+        fake_classic_heartbeat_response(code)
+      }
+      13 => {
+        let coord = coordinator.unwrap_or(FakeCoordinator::new())
+        let member = fake_leave_group_request(rest)
+        let _ = coord.members.remove(member)
+        let _ = coord.arrived.remove(member)
+        coord.leaves.push(member)
+        coord.round += 1
+        coord.arrived.clear()
+        fake_leave_group_response(member)
+      }
+      14 => {
+        let coord = coordinator.unwrap_or(FakeCoordinator::new())
+        let (member, generation, assigns) = fake_sync_group_request(rest)
+        coord.syncs.push((member, generation))
+        // The leader's sync registers everyone's assignment (tagged
+        // with the generation); a member waits for its generation to
+        // be registered before reading its assignment back.
+        for entry in assigns {
+          let (id, bytes) = entry
+          coord.assignments[id] = bytes
+          coord.sync_generations[id] = generation
+        }
+        if !assigns.is_empty() {
+          fake_sync_group_response(
+            coord.assignments.get(member).unwrap_or(Bytes::make(0, 0)),
+          )
+        } else {
+          let deadline = @async.now() + 3000L
+          for ;; {
+            if coord.sync_generations.get(member) == Some(generation) {
+              break
+            }
+            if @async.now() > deadline {
+              break
+            }
+            @async.sleep(2)
+          }
+          fake_sync_group_response(
+            coord.assignments.get(member).unwrap_or(Bytes::make(0, 0)),
+          )
+        }
+      }
       68 => {
         let (group, member, epoch, instance, regex) = fake_consumer_group_heartbeat_request(
           rest,
@@ -1130,7 +1493,12 @@ async fn fake_serve_conn(
       }
       3 => {
         metadata_requests.push(1)
-        fake_metadata_response(topic, broker_port, version)
+        fake_metadata_response(
+          topic,
+          broker_port,
+          version,
+          partition_count=metadata_partitions,
+        )
       }
       10 =>
         fake_find_coordinator_response(
@@ -1326,6 +1694,8 @@ async fn fake_broker(
   heartbeat_regexes? : Array[String?] = [],
   heartbeat_errors? : Array[Int] = [],
   heartbeat_partitions? : Array[Int] = [0],
+  coordinator? : FakeCoordinator? = None,
+  metadata_partitions? : Int = 1,
 ) -> Unit {
   for ;; {
     let (tcp, _) = server.accept()
@@ -1379,6 +1749,8 @@ async fn fake_broker(
         heartbeat_regexes~,
         heartbeat_errors~,
         heartbeat_partitions~,
+        coordinator~,
+        metadata_partitions~,
       )
     }
   }
@@ -2659,6 +3031,294 @@ async test "regex subscription rides the heartbeat and expands locally" {
     // (expanded from the cached catalog) still lands.
     assert_true(heartbeat_regexes[0] == Some("ev*"))
     assert_eq(assigned, [("events", 0)])
+    server.close()
+  }
+}
+
+///|
+async test "classic member joins, syncs the range assignment, and leaves" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let coord = FakeCoordinator::new()
+    let assigned : Array[(String, Int)] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, coordinator=Some(coord))
+    }
+    let consumer = @moonkafka.Consumer::connect_with_config(
+      group=root,
+      @moonkafka.ConsumerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        request_timeout_ms=10000,
+        group_id=Some("gid-c1"),
+        enable_auto_commit=false,
+        heartbeat_interval_ms=20,
+      ),
+    )
+    defer consumer.close()
+    consumer.subscribe_classic(
+      ["events"],
+      listener=Some(
+        @moonkafka.RebalanceListener::new(
+          on_assign=fn(pairs) {
+            for pair in pairs {
+              assigned.push(pair)
+            }
+          },
+          on_revoke=fn(_pairs) { () },
+        ),
+      ),
+    )
+    for _ in 0..<1000 {
+      if assigned.length() == 1 {
+        break
+      }
+      @async.sleep(5)
+    }
+    assert_true(consumer.membership_error() is None)
+    assert_eq(assigned, [("events", 0)])
+    // The member joined at generation 1 under the range protocol and
+    // synced before heartbeating.
+    assert_eq(coord.joins[0].1, 1)
+    assert_eq(coord.protocol, "range")
+    assert_true(coord.syncs.length() >= 1)
+    assert_eq(coord.syncs[0].1, 1)
+    // Graceful leave lands at the coordinator (capture the identity
+    // first: unsubscribe clears it once the leave lands).
+    let member_id = consumer.member_identity()
+    consumer.unsubscribe()
+    for _ in 0..<1000 {
+      if coord.leaves.length() == 1 {
+        break
+      }
+      @async.sleep(5)
+    }
+    assert_eq(coord.leaves, [member_id])
+    server.close()
+  }
+}
+
+///|
+async test "two classic members split partitions and rebalance on join" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let coord = FakeCoordinator::new()
+    let assigned_a : Array[(String, Int)] = []
+    let revoked_a : Array[(String, Int)] = []
+    let assigned_b : Array[(String, Int)] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(
+        server,
+        root,
+        "events",
+        accepted,
+        coordinator=Some(coord),
+        metadata_partitions=2,
+      )
+    }
+    let listener = fn(
+      on_assign : Array[((String, Int)) -> Unit],
+    ) -> @moonkafka.RebalanceListener {
+      ignore(on_assign)
+      @moonkafka.RebalanceListener::default()
+    }
+    ignore(listener)
+    let a = @moonkafka.Consumer::connect_with_config(
+      group=root,
+      @moonkafka.ConsumerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        request_timeout_ms=10000,
+        group_id=Some("gid-c2"),
+        enable_auto_commit=false,
+        heartbeat_interval_ms=20,
+      ),
+    )
+    defer a.close()
+    a.subscribe_classic(
+      ["events"],
+      listener=Some(
+        @moonkafka.RebalanceListener::new(
+          on_assign=fn(pairs) {
+            for pair in pairs {
+              assigned_a.push(pair)
+            }
+          },
+          on_revoke=fn(pairs) {
+            for pair in pairs {
+              revoked_a.push(pair)
+            }
+          },
+        ),
+      ),
+    )
+    for _ in 0..<1000 {
+      if assigned_a.length() == 2 {
+        break
+      }
+      @async.sleep(5)
+    }
+    // The lone member takes everything.
+    assert_eq(assigned_a, [("events", 0), ("events", 1)])
+    // A second member joins: the range assignment splits one each.
+    let b = @moonkafka.Consumer::connect_with_config(
+      group=root,
+      @moonkafka.ConsumerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        request_timeout_ms=10000,
+        group_id=Some("gid-c2"),
+        enable_auto_commit=false,
+        heartbeat_interval_ms=20,
+      ),
+    )
+    defer b.close()
+    b.subscribe_classic(
+      ["events"],
+      listener=Some(
+        @moonkafka.RebalanceListener::new(
+          on_assign=fn(pairs) {
+            for pair in pairs {
+              assigned_b.push(pair)
+            }
+          },
+          on_revoke=fn(_pairs) { () },
+        ),
+      ),
+    )
+    for _ in 0..<1000 {
+      if assigned_b.length() == 1 {
+        break
+      }
+      @async.sleep(5)
+    }
+    // The split is order-agnostic: one partition each, no overlap, and
+    // "a" surrendered one of its original two. Wait for the group to
+    // converge (transient transport chaos may force extra rounds; the
+    // heartbeat loop heals them).
+    for _ in 0..<2000 {
+      if a.assignment().length() == 1 &&
+        b.assignment().length() == 1 &&
+        a.assignment()[0].1 != b.assignment()[0].1 {
+        break
+      }
+      @async.sleep(5)
+    }
+    assert_true(assigned_b.length() >= 1)
+    assert_eq(a.assignment().length(), 1)
+    assert_eq(b.assignment().length(), 1)
+    assert_true(a.assignment()[0].1 != b.assignment()[0].1)
+    assert_true(revoked_a.length() >= 1)
+    assert_true(revoked_a[0].1 != a.assignment()[0].1)
+    server.close()
+  }
+}
+
+///|
+async test "cooperative sticky revokes first and assigns in a second round" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let coord = FakeCoordinator::new()
+    let assigned_a : Array[(String, Int)] = []
+    let revoked_a : Array[(String, Int)] = []
+    let assigned_b : Array[(String, Int)] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(
+        server,
+        root,
+        "events",
+        accepted,
+        coordinator=Some(coord),
+        metadata_partitions=2,
+      )
+    }
+    let a = @moonkafka.Consumer::connect_with_config(
+      group=root,
+      @moonkafka.ConsumerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        request_timeout_ms=10000,
+        group_id=Some("gid-c3"),
+        enable_auto_commit=false,
+        heartbeat_interval_ms=20,
+      ),
+    )
+    defer a.close()
+    a.subscribe_classic(
+      ["events"],
+      assignors=[@moonkafka.CooperativeStickyAssignor],
+      listener=Some(
+        @moonkafka.RebalanceListener::new(
+          on_assign=fn(pairs) {
+            for pair in pairs {
+              assigned_a.push(pair)
+            }
+          },
+          on_revoke=fn(pairs) {
+            for pair in pairs {
+              revoked_a.push(pair)
+            }
+          },
+        ),
+      ),
+    )
+    for _ in 0..<1000 {
+      if assigned_a.length() == 2 {
+        break
+      }
+      @async.sleep(5)
+    }
+    assert_eq(assigned_a, [("events", 0), ("events", 1)])
+    let b = @moonkafka.Consumer::connect_with_config(
+      group=root,
+      @moonkafka.ConsumerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        request_timeout_ms=10000,
+        group_id=Some("gid-c3"),
+        enable_auto_commit=false,
+        heartbeat_interval_ms=20,
+      ),
+    )
+    defer b.close()
+    b.subscribe_classic(
+      ["events"],
+      assignors=[@moonkafka.CooperativeStickyAssignor],
+      listener=Some(
+        @moonkafka.RebalanceListener::new(
+          on_assign=fn(pairs) {
+            for pair in pairs {
+              assigned_b.push(pair)
+            }
+          },
+          on_revoke=fn(_pairs) { () },
+        ),
+      ),
+    )
+    // The cooperative protocol converges: "a" revokes exactly one
+    // partition (a separate on_revoke), "b" gains exactly one in the
+    // follow-up round, and the final assignment covers both partitions
+    // without overlap.
+    for _ in 0..<2000 {
+      if assigned_b.length() >= 1 &&
+        revoked_a.length() >= 1 &&
+        a.assignment().length() == 1 &&
+        b.assignment().length() == 1 &&
+        a.assignment()[0].1 != b.assignment()[0].1 {
+        break
+      }
+      @async.sleep(5)
+    }
+    assert_true(assigned_b.length() >= 1)
+    assert_true(revoked_a.length() >= 1)
+    assert_eq(a.assignment().length(), 1)
+    assert_eq(b.assignment().length(), 1)
+    assert_true(a.assignment()[0].1 != b.assignment()[0].1)
+    assert_true(a.membership_error() is None)
+    assert_true(b.membership_error() is None)
     server.close()
   }
 }

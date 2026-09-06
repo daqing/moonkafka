@@ -28,7 +28,13 @@ pub const API_FETCH : Int = 1
 
 pub const API_FIND_COORDINATOR : Int = 10
 
+pub const API_HEARTBEAT : Int = 12
+
 pub const API_INIT_PRODUCER_ID : Int = 22
+
+pub const API_JOIN_GROUP : Int = 11
+
+pub const API_LEAVE_GROUP : Int = 13
 
 pub const API_LIST_OFFSETS : Int = 2
 
@@ -46,7 +52,13 @@ pub const API_SASL_AUTHENTICATE : Int = 36
 
 pub const API_SASL_HANDSHAKE : Int = 17
 
+pub const API_SYNC_GROUP : Int = 14
+
 pub const API_TXN_OFFSET_COMMIT : Int = 28
+
+pub const CONSUMER_PROTOCOL_ASSIGNMENT_VERSION : Int = 0
+
+pub const CONSUMER_PROTOCOL_SUBSCRIPTION_VERSION : Int = 0
 
 pub const FETCH_FULL_EPOCH : Int = 0
 
@@ -70,6 +82,8 @@ pub fn backoff_ms(Int, Int, Int) -> Int
 
 pub fn collect_committed(Array[DecodedBatch], Array[AbortedTx]) -> Array[Record]
 
+pub fn compute_assignment(Assignor, Array[Assignee], Map[String, Int], owned? : Map[String, Array[(String, Int)]]) -> Map[String, Array[(String, Int)]]
+
 pub async fn connect_bootstrap(BootstrapServers, String, timeout_ms? : Int, sasl? : SaslConfig?, use_tls? : Bool, tls? : TlsClientOptions?) -> BrokerConnection
 
 pub fn decode_add_offsets_to_txn_response(@buf.Decoder) -> (Int, Int) raise
@@ -80,6 +94,10 @@ pub fn decode_api_versions_response(@buf.Decoder) -> (BrokerVersions, Int) raise
 
 pub fn decode_consumer_group_heartbeat_response(@buf.Decoder) -> (ConsumerGroupHeartbeatResult, Int) raise
 
+pub fn decode_consumer_protocol_assignment(Bytes) -> Array[(String, Array[Int])] raise
+
+pub fn decode_consumer_protocol_subscription(Bytes) -> Array[String] raise
+
 pub fn decode_describe_topic_partitions_response(@buf.Decoder) -> (DescribeTopicPartitions, Int) raise
 
 pub fn decode_end_txn_response(@buf.Decoder) -> (EndTxnResult, Int) raise
@@ -88,7 +106,13 @@ pub fn decode_fetch_response(Int, @buf.Decoder) -> (FetchResult, Int) raise
 
 pub fn decode_find_coordinator_response(@buf.Decoder) -> (Array[CoordinatorInfo], Int) raise
 
+pub fn decode_heartbeat_response(@buf.Decoder) -> (Int, Int) raise
+
 pub fn decode_init_producer_id_response(@buf.Decoder) -> (InitProducerIdResult, Int) raise
+
+pub fn decode_join_group_response(@buf.Decoder) -> (JoinGroupResult, Int) raise
+
+pub fn decode_leave_group_response(@buf.Decoder) -> (Int, Array[LeaveGroupMemberResult], Int) raise
 
 pub fn decode_list_offsets_response(@buf.Decoder) -> (Map[Int, Int64], Int) raise
 
@@ -112,6 +136,8 @@ pub fn decode_sasl_authenticate_response(@buf.Decoder) -> SaslAuthenticateResult
 
 pub fn decode_sasl_handshake_response(@buf.Decoder) -> SaslHandshakeResult raise
 
+pub fn decode_sync_group_response(@buf.Decoder) -> (SyncGroupResult, Int) raise
+
 pub fn decode_txn_offset_commit_response(@buf.Decoder) -> (Array[TxnPartitionResult], Int) raise
 
 pub fn driver_api_range(Int) -> ApiRange?
@@ -124,6 +150,10 @@ pub fn encode_api_versions_request() -> Bytes
 
 pub fn encode_consumer_group_heartbeat_request(Int, String, String, Int, instance_id? : String?, rack_id? : String?, rebalance_timeout_ms? : Int, subscribed_topic_names? : Array[String]?, subscribed_topic_regex? : String?, server_assignor? : String?) -> Bytes raise
 
+pub fn encode_consumer_protocol_assignment(Array[(String, Array[Int])]) -> Bytes
+
+pub fn encode_consumer_protocol_subscription(Array[String]) -> Bytes
+
 pub fn encode_describe_topic_partitions_request(Array[String], Int, cursor? : TopicPartitionCursor?) -> Bytes
 
 pub fn encode_end_txn_request(String, Int64, Int, Bool) -> Bytes
@@ -132,7 +162,13 @@ pub fn encode_fetch_request(Int, Array[FetchTopicReq], session~ : FetchSessionRe
 
 pub fn encode_find_coordinator_request(Array[String], CoordinatorType) -> Bytes
 
+pub fn encode_heartbeat_request(String, Int, String, group_instance_id? : String?) -> Bytes
+
 pub fn encode_init_producer_id_request(String?, Int, Int64, Int) -> Bytes
+
+pub fn encode_join_group_request(String, Int, Int, String, group_instance_id? : String?, protocols~ : Array[JoinGroupProtocol]) -> Bytes
+
+pub fn encode_leave_group_request(String, String, group_instance_id? : String?) -> Bytes
 
 pub fn encode_list_offsets_request(Int, String, Array[PartitionInfo], Int64, timeout_ms? : Int) -> Bytes raise
 
@@ -155,6 +191,8 @@ pub fn encode_request(Int, Int, Int, String, Bytes, flexible? : Bool) -> Bytes
 pub fn encode_sasl_authenticate_request(Bytes) -> Bytes
 
 pub fn encode_sasl_handshake_request(String) -> Bytes
+
+pub fn encode_sync_group_request(String, Int, String, group_instance_id? : String?, protocol_name? : String, assignments~ : Array[SyncGroupAssignment]) -> Bytes
 
 pub fn encode_txn_offset_commit_request(String, String, Int64, Int, Int, String, Array[(String, Array[TxnOffset])]) -> Bytes
 
@@ -212,6 +250,19 @@ pub(all) struct ApiRange {
   max : Int
 } derive(@debug.Debug)
 
+pub(all) struct Assignee {
+  member_id : String
+  topics : Array[String]
+} derive(@debug.Debug)
+
+pub(all) enum Assignor {
+  RangeAssignor
+  RoundRobinAssignor
+  StickyAssignor
+  CooperativeStickyAssignor
+} derive(Eq, @debug.Debug)
+pub fn Assignor::name(Self) -> String
+
 pub(all) enum AutoOffsetReset {
   ResetEarliest
   ResetLatest
@@ -260,7 +311,10 @@ pub async fn BrokerConnection::end_txn(Self, String, Int64, Int, Bool, timeout_m
 pub async fn BrokerConnection::fetch(Self, Array[FetchTopicReq], session~ : FetchSessionReq, max_wait_ms~ : Int, min_bytes? : Int, max_bytes? : Int, isolation_level? : Int, timeout_ms? : Int) -> FetchResult
 pub async fn BrokerConnection::fetch_metadata(Self, Array[String]?, timeout_ms? : Int) -> Metadata
 pub async fn BrokerConnection::find_coordinator(Self, Array[String], CoordinatorType, timeout_ms? : Int) -> Array[CoordinatorInfo]
+pub async fn BrokerConnection::group_heartbeat(Self, String, Int, String, group_instance_id? : String?, timeout_ms? : Int) -> Int
 pub async fn BrokerConnection::init_producer_id(Self, transactional_id? : String?, transaction_timeout_ms? : Int, producer_id? : Int64, producer_epoch? : Int, timeout_ms? : Int) -> InitProducerIdResult
+pub async fn BrokerConnection::join_group(Self, String, Int, Int, String, group_instance_id? : String?, protocols~ : Array[JoinGroupProtocol], timeout_ms? : Int) -> JoinGroupResult
+pub async fn BrokerConnection::leave_group(Self, String, String, group_instance_id? : String?, timeout_ms? : Int) -> Int
 pub async fn BrokerConnection::list_offsets(Self, String, Array[PartitionInfo], Int64, timeout_ms? : Int) -> Map[Int, Int64]
 pub async fn BrokerConnection::negotiate_api_versions(Self, timeout_ms? : Int) -> Unit
 pub fn BrokerConnection::note_throttle(Self, Int) -> Unit
@@ -271,6 +325,7 @@ pub async fn BrokerConnection::produce(Self, String, topic_id? : Uuid, transacti
 pub async fn BrokerConnection::request(Self, Int, Int, Bytes, timeout_ms? : Int) -> @buf.Decoder
 pub async fn BrokerConnection::request_raw(Self, Int, Int, Bytes, timeout_ms? : Int, flexible? : Bool) -> @buf.Decoder
 pub async fn BrokerConnection::send_only(Self, Int, Int, Bytes) -> Unit
+pub async fn BrokerConnection::sync_group(Self, String, Int, String, group_instance_id? : String?, protocol_name? : String, assignments~ : Array[SyncGroupAssignment], timeout_ms? : Int) -> SyncGroupResult
 pub fn BrokerConnection::throttle_total_ms(Self) -> Int64
 pub async fn BrokerConnection::txn_offset_commit(Self, String, String, Int64, Int, Array[(String, Array[TxnOffset])], timeout_ms? : Int) -> Array[TxnPartitionResult]
 
@@ -371,6 +426,7 @@ pub struct Consumer {
   max_partition_fetch_bytes : Int
   enable_read_committed : Bool
   mut heartbeat_interval_ms : Int
+  session_timeout_ms : Int
   mut topic_id : Uuid
   fetch_sessions : Map[Int, FetchSession]
   partitions : Array[PartitionState]
@@ -396,6 +452,7 @@ pub async fn Consumer::seek_by_timestamp(Self, Int, Int64) -> Unit
 pub async fn Consumer::seek_to_beginning(Self, partitions? : Array[Int]?) -> Unit
 pub async fn Consumer::seek_to_end(Self, partitions? : Array[Int]?) -> Unit
 pub fn Consumer::subscribe(Self, Array[String], listener? : RebalanceListener?) -> Unit raise
+pub fn Consumer::subscribe_classic(Self, Array[String], assignors? : Array[Assignor], listener? : RebalanceListener?) -> Unit raise
 pub async fn Consumer::subscribe_regex(Self, String, listener? : RebalanceListener?) -> Unit
 pub async fn Consumer::unsubscribe(Self) -> Unit
 
@@ -411,8 +468,10 @@ pub struct ConsumerConfig {
   max_partition_fetch_bytes : Int
   enable_read_committed : Bool
   group_instance_id : String?
+  heartbeat_interval_ms : Int
+  session_timeout_ms : Int
 } derive(@debug.Debug)
-pub fn ConsumerConfig::new(Array[String], String, start_from? : StartFrom, request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?, tls? : TlsClientOptions?, metadata_max_age_ms? : Int, group_id? : String?, enable_auto_commit? : Bool, auto_commit_interval_ms? : Int, auto_offset_reset? : AutoOffsetReset?, max_poll_records? : Int, max_partition_fetch_bytes? : Int, enable_read_committed? : Bool, group_instance_id? : String?) -> Self raise
+pub fn ConsumerConfig::new(Array[String], String, start_from? : StartFrom, request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?, tls? : TlsClientOptions?, metadata_max_age_ms? : Int, group_id? : String?, enable_auto_commit? : Bool, auto_commit_interval_ms? : Int, auto_offset_reset? : AutoOffsetReset?, max_poll_records? : Int, max_partition_fetch_bytes? : Int, enable_read_committed? : Bool, group_instance_id? : String?, heartbeat_interval_ms? : Int, session_timeout_ms? : Int) -> Self raise
 
 pub struct ConsumerGroupHeartbeatResult {
   error_code : Int
@@ -555,6 +614,31 @@ pub fn HostPort::parse(String) -> Self raise ProtocolError
 pub struct InitProducerIdResult {
   producer_id : Int64
   producer_epoch : Int
+  error_code : Int
+} derive(@debug.Debug)
+
+pub struct JoinGroupMember {
+  member_id : String
+  group_instance_id : String?
+  metadata : Bytes
+} derive(@debug.Debug)
+
+pub(all) struct JoinGroupProtocol {
+  name : String
+  metadata : Bytes
+} derive(@debug.Debug)
+
+pub struct JoinGroupResult {
+  error_code : Int
+  generation_id : Int
+  protocol_name : String
+  leader_id : String
+  member_id : String
+  members : Array[JoinGroupMember]
+} derive(@debug.Debug)
+
+pub struct LeaveGroupMemberResult {
+  member_id : String
   error_code : Int
 } derive(@debug.Debug)
 
@@ -761,6 +845,17 @@ pub(all) enum SendResult {
 pub(all) enum StartFrom {
   Earliest
   Latest
+} derive(@debug.Debug)
+
+pub(all) struct SyncGroupAssignment {
+  member_id : String
+  assignment : Bytes
+} derive(@debug.Debug)
+
+pub struct SyncGroupResult {
+  error_code : Int
+  protocol_name : String
+  assignment : Bytes
 } derive(@debug.Debug)
 
 pub(all) struct TlsClientOptions {
