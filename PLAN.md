@@ -332,7 +332,9 @@ lands on the same partitions as the Java/librdkafka clients on the same topic.
       with backoff (bounded by `retries`, default now 10 until
       delivery.timeout arrives in Phase 3); consumer `poll` recovers and
       keeps read positions across metadata refreshes. `REBOOTSTRAP_REQUIRED`
-      handling arrives with the Phase 2 version-negotiation rework.
+      handling landed with the Phase 2 version-negotiation rework
+      (commit e8afa08): produce errors 5/6/129 all route to recovery,
+      which re-dials the bootstrap set.
 - [x] **Throttling.** DONE (commit 738dad9): every response decoder returns
       the parsed `throttle_time_ms`; the connection records the furthest
       deadline and delays subsequent requests. Tested via the fake broker
@@ -372,42 +374,105 @@ callback path unit-tested against a mock broker.
 
 ### Phase 2 — Protocol completeness (data plane)
 
-- [ ] **Version negotiation matrix.** `protocol/versions.mbt`: per API key
-      the implemented floor/ceiling; `ApiVersions` handshake stores the
-      broker's ranges; helper `pick(api, want) -> Int` centralizing the
-      choose-highest-common logic; the current hard failure in
-      `decode_api_versions_response` becomes negotiation.
-- [ ] **Metadata**: implement v12 **and** v13; add
-      `DescribeTopicPartitions` v0 (paginated, cursor-based) used by admin and
-      for regex subscription expansion.
-- [ ] **Produce**: v12 + v13 (topic-id), with `record_errors` surfaced;
-      keep acks validation; response is now per-batch with
-      `base_offset/log_append_time` proper.
-- [ ] **Fetch**: v12 (names) + v13–v16 (topic-ids; v15 drops replica_id,
-      v16 `node_endpoints`); **incremental fetch sessions** — session
-      acquisition (epoch 0 → id), incremental updates (added/forgotten
-      partitions), session eviction handling (`FETCH_SESSION_ID_NOT_FOUND`
-      → re-establish full request); `last_fetched_epoch`/leader-epoch
-      validation; truncated-batch handling with `max_bytes` and
-      `MaxBytesExceeded`-style backoff (current code drops the tail batch —
-      keep, but make it explicit and offset-safe).
-- [ ] **ListOffsets** v10/v11 with `timeout_ms`; timestamp queries
-      (`OffsetForTimestamp`) exposed.
-- [ ] **Record layer** (`record.mbt`): decode **and** encode record headers;
-      expose headers on `Record`; `is_control`/`is_transactional` flags;
-      aborted-transaction filter primitive for read_committed
-      (aborted-tx list from Fetch + producerId/firstOffset bookkeeping);
-      batch builder API for the accumulator (append records, size accounting,
-      finalize + crc).
-- [ ] **Compression** (`compression/`): interface
-      `Codec { compress(Bytes) -> Bytes; decompress(Bytes) -> Bytes raise }` +
-      attr-bit mapping; implementations gzip (async/gzip wrapper), snappy
-      (xerial framing), lz4 (LZ4 frame format with magic number, block
-      checksums optional-off as Kafka writes them), zstd (C FFI). Cross-check
-      every codec against batches produced by the Java client (golden files
-      committed under `test/golden/`).
-- [ ] **Decoder robustness.** Property/fuzz-ish tests: random and truncated
-      inputs must raise, never panic/index-OOB, on every codec.
+- [x] **Version negotiation matrix.** DONE (commit e8afa08): `versions.mbt`
+      (root scope; folds into the later `protocol/` split) holds the API
+      key constants and the driver's per-API floor/ceiling matrix;
+      `decode_api_versions_response` now parses the broker's ranges into
+      `BrokerVersions`, stored on every connection (the handshake runs in
+      `connect_bootstrap` and on leader dials, like the Java client);
+      `BrokerVersions::pick` / `BrokerConnection::api_version` centralize
+      the choose-highest-common logic and raise clear no-overlap errors
+      (the old hard failure). Requests in `client.mbt` negotiate their
+      version per call. This also delivered the deferred
+      `REBOOTSTRAP_REQUIRED` (129) handling: the producer's recovery path
+      re-bootstraps on it.
+- [x] **Metadata**: DONE (commit 2164447): codecs moved to `metadata.mbt`
+      (root scope; folds into the `protocol/` split) and now dispatch on
+      the negotiated version — v12 and v13 (v13 appends a top-level
+      error code). `TopicMetadata` exposes `topic_id` (needed by Fetch
+      v13+) and `is_internal`; requests take a topic list where None
+      means all topics (regex-expansion ready). `DescribeTopicPartitions`
+      v0 added with cursor pagination (nullable struct = signed-byte
+      marker per the Java generator; ELR arrays skipped), exposed as
+      `BrokerConnection::describe_topic_partitions` and exercised
+      end-to-end against the fake broker across two pages. Bonus:
+      `@buf` decoder bounds checks hardened (subtraction-based) so
+      malformed huge lengths raise instead of panicking — the start of
+      the decoder-robustness bullet below.
+- [x] **Produce**: DONE (commit 63ce59b): codecs moved to `produce.mbt`,
+      dispatching on the negotiated version — v12 (topic names) and v13
+      (topic-id, KIP-516), with the zero-id fail-fast when metadata has
+      not supplied an id. `ProducePartitionResult` now carries
+      `base_offset`, `log_append_time`, `log_start_offset`, and surfaced
+      `record_errors`/`error_message` (KIP-467); the producer's error
+      paths include the broker's message and offending batch indices.
+      Acks validation stays in `ProducerConfig` (1 or -1). The fake
+      broker advertises and serves v13, so end-to-end produce runs over
+      topic-id addressing. Note for Phase 3 transactions: per the 4.3
+      schema comment, a producer without txn v2 must cap at v11 inside
+      transactions — the txn manager needs its own version choice.
+- [x] **Fetch**: DONE (commit 84447fd): codecs in `fetch.mbt` cover the
+      whole implemented range — v12 (names), v13+ (topic ids), v15
+      (replica_id dropped from the mandatory fields, KIP-903), v16
+      (tagged NodeEndpoints skipped); `last_fetched_epoch` is encoded
+      (-1 until the P4 epoch tracking lands). **Incremental fetch
+      sessions** (KIP-227) via `FetchSession`: full request (epoch 0) →
+      adopt the granted session id → incremental requests carrying only
+      changed positions and forgotten partitions; eviction
+      (`FETCH_SESSION_ID_NOT_FOUND` / `INVALID_FETCH_SESSION_EPOCH`),
+      broker-closed sessions (id 0 reply), and epoch wrap all restart
+      from a full request. The consumer polls through one session per
+      leader, re-establishes once after eviction, and drops sessions on
+      metadata refresh. Truncated-batch handling is explicit:
+      `decode_record_batches_ex` reports a max_bytes-split trailing
+      batch, results carry `records_complete`, and the read position
+      stays offset-safe. Leader-epoch validation
+      (`OffsetForLeaderEpoch`, diverging-epoch tagged fields) stays
+      queued for P4 as planned.
+- [x] **ListOffsets** v10/v11 DONE (commit 9f0f0f7): codecs moved to
+      `offsets.mbt`; v10 appends `timeout_ms` (KIP-1075), v11 adds the
+      earliest pending upload sentinel (KIP-1023); all sentinels are
+      public constants and a timestamp query is this API with a
+      wall-clock timestamp (`OffsetForTimestamp`). The fake broker
+      advertises v11.
+- [x] **Record layer** DONE (commit 60d07c5): `Record` carries its
+      `headers` array through encode and decode; `decode_record_batches_detailed`
+      exposes per-batch `producer_id`/`producer_epoch`/`base_sequence` and the
+      `is_control`/`is_transactional` flags (flat views still hide control
+      batches from consumers); `collect_committed` is the read_committed
+      primitive (drop control batches + records of aborted transactions by
+      producerId/firstOffset); `RecordBatchBuilder` does incremental append,
+      size accounting, and CRC finalizing for the Phase 3 accumulator.
+- [x] **Compression** (`compression/`) DONE (commit 6b59a10): one
+      `Codec` interface (`compress`/`decompress`, raising
+      `@buf.DecodeError`) mapped to the RecordBatch attribute bits
+      0-4. Snappy (raw block codec + xerial chunk framing) and LZ4
+      (block codec with greedy matcher, Kafka's frame framing with
+      XXH32 descriptor checksum) are pure MoonBit. Gzip wraps the
+      system zlib through native FFI — deviation from D4: the
+      async/gzip package is `@io`-async while batch decoding is
+      synchronous, so the buffer-to-buffer wrapper was not usable;
+      native-only module made FFI the pragmatic choice. Zstd decodes
+      via the vendored zstd single-file decompressor
+      (`compression/zstddeclib.c`); zstd *compression* is deferred to
+      the Phase 3 producer codec config (the vendored tree is
+      decode-only). Batch decode unwraps the whole-batch records
+      region per the attribute bits, so consumers read whatever
+      producers wrote. Golden fixtures under `test/golden/` (with
+      `generate.py`) come from independent implementations — cramjam's
+      Rust snappy/lz4/zstd and Python gzip — as raw streams and as
+      whole batches with foreign-compressed record regions spliced in
+      (the Java-client golden capture itself remains deferred to the
+      Docker integration phase).
+- [x] **Decoder robustness** DONE (commit 6b59a10,
+      `robustness_test.mbt`): deterministic-xorshift fuzz over the four
+      compressed streams (truncation at every 17th offset plus random
+      blobs), the record-batch decoder (every truncation offset of a
+      valid batch plus 200 random blobs), and five wire decoders
+      (ApiVersions/Metadata/Produce/ListOffsets/DescribeTopicPartitions)
+      — everything must raise a decode error or succeed, never panic.
+      Backed by the subtraction-based bounds checks hardened earlier in
+      this phase.
 
 **Acceptance:** codec round-trip tests for all implemented APIs at both
 implemented versions (encode → decode equality via `debug_inspect`
@@ -596,9 +661,11 @@ concurrently; acks release records for redelivery after timeout.
 - **AddPartitionsToTxn v4/v5 shape**: KIP-890 reshaped this API;
   confirm which version a *producer* (vs broker) negotiates on 4.3 before
   implementing (small spike, Phase 3).
-- **zstd via C FFI**: adds a native build dependency (libzstd); decide
-  between vendoring, dlopen-style binding, or pure-MoonBit decoder (largest
-  effort, only worth it if wasm-gc support ever lands for the socket layer).
+- ~~**zstd via C FFI**~~ RESOLVED (Phase 2): the zstd single-file
+  DECOMPRESSOR is vendored (`compression/zstddeclib.c`) — no external
+  libzstd dependency. Gzip links the universally present system zlib
+  (`-lz` from the root and cmd/main moon.pkg). Zstd compression is
+  deferred to Phase 3, when the producer codec config lands.
 - **moonbitlang/async maturity**: long-lived background tasks + cancellation
   semantics for heartbeat/sender loops need care (leaks on close paths);
   mock-broker tests should cover close-under-load.

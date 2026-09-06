@@ -14,6 +14,8 @@ import {
 // Values
 pub const API_API_VERSIONS : Int = 18
 
+pub const API_DESCRIBE_TOPIC_PARTITIONS : Int = 75
+
 pub const API_FETCH : Int = 1
 
 pub const API_LIST_OFFSETS : Int = 2
@@ -22,37 +24,73 @@ pub const API_METADATA : Int = 3
 
 pub const API_PRODUCE : Int = 0
 
+pub const API_SASL_AUTHENTICATE : Int = 36
+
+pub const API_SASL_HANDSHAKE : Int = 17
+
+pub const FETCH_FULL_EPOCH : Int = 0
+
+pub const FETCH_SESSION_ID_NOT_FOUND : Int = 70
+
+pub const INVALID_FETCH_SESSION_EPOCH : Int = 71
+
+pub const OFFSET_EARLIEST : Int64 = -2
+
+pub const OFFSET_EARLIEST_PENDING_UPLOAD : Int64 = -6
+
+pub const OFFSET_LAST_TIERED : Int64 = -5
+
+pub const OFFSET_LATEST : Int64 = -1
+
+pub const OFFSET_LOCAL_LOG_START : Int64 = -4
+
+pub const OFFSET_MAX_TIMESTAMP : Int64 = -3
+
 pub fn backoff_ms(Int, Int, Int) -> Int
+
+pub fn collect_committed(Array[DecodedBatch], Array[AbortedTx]) -> Array[Record]
 
 pub async fn connect_bootstrap(BootstrapServers, String, timeout_ms? : Int, sasl? : SaslConfig?, use_tls? : Bool, tls? : TlsClientOptions?) -> BrokerConnection
 
-pub fn decode_api_versions_response(@buf.Decoder) -> Int raise
+pub fn decode_api_versions_response(@buf.Decoder) -> (BrokerVersions, Int) raise
 
-pub fn decode_fetch_response(@buf.Decoder) -> (Array[FetchPartitionResult], Int) raise
+pub fn decode_describe_topic_partitions_response(@buf.Decoder) -> (DescribeTopicPartitions, Int) raise
+
+pub fn decode_fetch_response(Int, @buf.Decoder) -> (FetchResult, Int) raise
 
 pub fn decode_list_offsets_response(@buf.Decoder) -> (Map[Int, Int64], Int) raise
 
-pub fn decode_metadata_response(@buf.Decoder) -> (Metadata, Int) raise
+pub fn decode_metadata_response(Int, @buf.Decoder) -> (Metadata, Int) raise
 
-pub fn decode_produce_response(@buf.Decoder) -> (Array[ProducePartitionResult], Int) raise
+pub fn decode_produce_response(Int, @buf.Decoder) -> (Array[ProducePartitionResult], Int) raise
 
 pub fn decode_record_batches(Bytes) -> Array[Record] raise @buf.DecodeError
+
+pub fn decode_record_batches_detailed(Bytes) -> (Array[DecodedBatch], Bool) raise @buf.DecodeError
+
+pub fn decode_record_batches_ex(Bytes) -> (Array[Record], Bool) raise @buf.DecodeError
 
 pub fn decode_sasl_authenticate_response(@buf.Decoder) -> SaslAuthenticateResult raise
 
 pub fn decode_sasl_handshake_response(@buf.Decoder) -> SaslHandshakeResult raise
 
+pub fn driver_api_range(Int) -> ApiRange?
+
 pub fn encode_api_versions_request() -> Bytes
 
-pub fn encode_fetch_request(String, Array[(PartitionInfo, Int64)], Int, Int) -> Bytes
+pub fn encode_describe_topic_partitions_request(Array[String], Int, cursor? : TopicPartitionCursor?) -> Bytes
 
-pub fn encode_list_offsets_request(String, Array[PartitionInfo], Int64) -> Bytes
+pub fn encode_fetch_request(Int, Array[FetchTopicReq], session~ : FetchSessionReq, max_wait_ms~ : Int, min_bytes? : Int, max_bytes? : Int, isolation_level? : Int, rack_id? : String) -> Bytes raise
 
-pub fn encode_metadata_request(String) -> Bytes
+pub fn encode_list_offsets_request(Int, String, Array[PartitionInfo], Int64, timeout_ms? : Int) -> Bytes raise
 
-pub fn encode_produce_request(String, Array[(Int, Bytes)], Int, Int) -> Bytes
+pub fn encode_metadata_request(Array[String]?) -> Bytes
+
+pub fn encode_produce_request(Int, String, Uuid, Array[(Int, Bytes)], transactional_id? : String?, acks~ : Int, timeout_ms~ : Int) -> Bytes raise
 
 pub fn encode_record_batch(Array[Record]) -> Bytes
+
+pub fn encode_record_batch_with_base_offset(Int64, Array[Record]) -> Bytes
 
 pub fn encode_request(Int, Int, Int, String, Bytes, flexible? : Bool) -> Bytes
 
@@ -101,6 +139,18 @@ pub(all) suberror TransportError {
 }
 
 // Types and methods
+pub(all) struct AbortedTx {
+  producer_id : Int64
+  first_offset : Int64
+} derive(@debug.Debug)
+
+pub(all) struct ApiRange {
+  key : Int
+  name : String
+  min : Int
+  max : Int
+} derive(@debug.Debug)
+
 pub struct Backoff {
   base_ms : Int
   max_ms : Int
@@ -128,16 +178,19 @@ pub struct BrokerConnection {
   mut closed : Bool
   in_flight : @semaphore.Semaphore
   mut throttled_until_ms : Int64
+  mut versions : BrokerVersions?
 }
+pub fn BrokerConnection::api_version(Self, Int, want? : Int?) -> Int raise
 pub async fn BrokerConnection::authenticate(Self, SaslConfig, timeout_ms? : Int) -> Unit
-pub async fn BrokerConnection::check_api_versions(Self, timeout_ms? : Int) -> Unit
 pub fn BrokerConnection::close(Self) -> Unit
 pub async fn BrokerConnection::connect(String, Int, client_id? : String, max_in_flight? : Int, timeout_ms? : Int, tls? : TlsClientOptions?) -> Self
-pub async fn BrokerConnection::fetch(Self, String, Array[(PartitionInfo, Int64)], max_wait_ms~ : Int, max_bytes~ : Int, timeout_ms? : Int) -> Array[FetchPartitionResult]
+pub async fn BrokerConnection::describe_topic_partitions(Self, Array[String], response_partition_limit? : Int, cursor? : TopicPartitionCursor?, timeout_ms? : Int) -> DescribeTopicPartitions
+pub async fn BrokerConnection::fetch(Self, Array[FetchTopicReq], session~ : FetchSessionReq, max_wait_ms~ : Int, min_bytes? : Int, max_bytes? : Int, timeout_ms? : Int) -> FetchResult
 pub async fn BrokerConnection::fetch_metadata(Self, String, timeout_ms? : Int) -> Metadata
 pub async fn BrokerConnection::list_offsets(Self, String, Array[PartitionInfo], Int64, timeout_ms? : Int) -> Map[Int, Int64]
+pub async fn BrokerConnection::negotiate_api_versions(Self, timeout_ms? : Int) -> Unit
 pub fn BrokerConnection::note_throttle(Self, Int) -> Unit
-pub async fn BrokerConnection::produce(Self, String, Array[(Int, Bytes)], acks~ : Int, timeout_ms~ : Int) -> Array[ProducePartitionResult]
+pub async fn BrokerConnection::produce(Self, String, topic_id? : Uuid, partitions~ : Array[(Int, Bytes)], acks~ : Int, timeout_ms~ : Int) -> Array[ProducePartitionResult]
 pub async fn BrokerConnection::request(Self, Int, Int, Bytes, timeout_ms? : Int) -> @buf.Decoder
 pub async fn BrokerConnection::request_raw(Self, Int, Int, Bytes, timeout_ms? : Int, flexible? : Bool) -> @buf.Decoder
 
@@ -154,6 +207,12 @@ pub(all) enum BrokerStream {
 pub async fn BrokerStream::read_exactly(Self, Int) -> Bytes
 pub fn BrokerStream::shutdown(Self) -> Unit
 pub async fn BrokerStream::write(Self, Bytes) -> Unit
+
+pub struct BrokerVersions {
+  ranges : Map[Int, (Int, Int)]
+}
+pub fn BrokerVersions::pick(Self, Int, want? : Int?) -> Int raise
+pub fn BrokerVersions::range(Self, Int) -> (Int, Int)?
 
 pub struct CommonConfig {
   bootstrap_servers : Array[String]
@@ -179,7 +238,9 @@ pub struct Consumer {
   sasl : SaslConfig?
   mut meta_conn : BrokerConnection
   mut brokers : Map[Int, BrokerInfo]
+  mut topic_id : Uuid
   leader_conns : Map[Int, BrokerConnection]
+  fetch_sessions : Map[Int, FetchSession]
   partitions : Array[PartitionState]
   mut closed : Bool
 }
@@ -202,11 +263,78 @@ pub fn Deadline::after_ms(Int64) -> Self
 pub fn Deadline::expired(Self) -> Bool
 pub fn Deadline::remaining_ms(Self) -> Int64
 
+pub(all) struct DecodedBatch {
+  records : Array[Record]
+  producer_id : Int64
+  producer_epoch : Int
+  base_sequence : Int
+  is_control : Bool
+  is_transactional : Bool
+  truncated : Bool
+} derive(@debug.Debug)
+
+pub struct DescribeTopicPartitions {
+  topics : Array[TopicMetadata]
+  next_cursor : TopicPartitionCursor?
+}
+
+pub(all) struct FetchPartitionReq {
+  index : Int
+  leader_epoch : Int
+  fetch_offset : Int64
+  max_bytes : Int
+} derive(@debug.Debug)
+
 pub struct FetchPartitionResult {
   partition : Int
   error_code : Int
   high_watermark : Int64
+  last_stable_offset : Int64
+  log_start_offset : Int64
   records : Array[Record]
+  records_complete : Bool
+}
+
+pub struct FetchResult {
+  top_error_code : Int
+  session_id : Int
+  topics : Array[FetchTopicResult]
+}
+
+pub struct FetchSession {
+  mut session_id : Int
+  mut next_epoch : Int
+  mut sent : Map[Int, (Int64, Int)]
+} derive(@debug.Debug)
+pub fn FetchSession::established(Self) -> Bool
+pub fn FetchSession::handle_response(Self, Int, Int) -> Unit
+pub fn FetchSession::invalidate(Self) -> Unit
+pub fn FetchSession::new() -> Self
+pub fn FetchSession::prepare(Self, String, Uuid, Map[Int, (Int64, Int)], Int) -> FetchSessionReq
+
+pub(all) struct FetchSessionReq {
+  session_id : Int
+  session_epoch : Int
+  partitions : Array[FetchPartitionReq]
+  forgotten : Array[FetchTopicForgotten]
+} derive(@debug.Debug)
+
+pub(all) struct FetchTopicForgotten {
+  name : String
+  topic_id : Uuid
+  partitions : Array[Int]
+} derive(@debug.Debug)
+
+pub(all) struct FetchTopicReq {
+  name : String
+  topic_id : Uuid
+  partitions : Array[FetchPartitionReq]
+} derive(@debug.Debug)
+
+pub struct FetchTopicResult {
+  name : String
+  topic_id : Uuid
+  partitions : Array[FetchPartitionResult]
 }
 
 pub(all) struct HostPort {
@@ -232,7 +360,16 @@ pub struct ProducePartitionResult {
   partition : Int
   error_code : Int
   base_offset : Int64
+  log_append_time : Int64
+  log_start_offset : Int64
+  record_errors : Array[ProduceRecordError]
+  error_message : String?
 }
+
+pub(all) struct ProduceRecordError {
+  batch_index : Int
+  message : String?
+} derive(@debug.Debug)
 
 pub struct Producer {
   topic : String
@@ -247,6 +384,7 @@ pub struct Producer {
   tls_options : TlsClientOptions?
   mut meta_conn : BrokerConnection
   mut brokers : Map[Int, BrokerInfo]
+  mut topic_id : Uuid
   leader_conns : Map[Int, BrokerConnection]
   mut partitions : Array[PartitionInfo]
   mut round_robin : Int
@@ -269,7 +407,23 @@ pub(all) struct Record {
   timestamp : Int64
   key : Bytes?
   value : Bytes?
-}
+  headers : Array[(Bytes, Bytes)]
+} derive(@debug.Debug)
+
+pub struct RecordBatchBuilder {
+  base_offset : Int64
+  bodies : Array[Bytes]
+  mut body_bytes : Int
+  mut base_timestamp : Int64
+  mut max_timestamp : Int64
+  mut last_offset : Int64
+} derive(@debug.Debug)
+pub fn RecordBatchBuilder::append(Self, Int64, key? : Bytes?, value? : Bytes?, headers? : Array[(Bytes, Bytes)]) -> Unit
+pub fn RecordBatchBuilder::count(Self) -> Int
+pub fn RecordBatchBuilder::estimated_size(Self) -> Int
+pub fn RecordBatchBuilder::last_assigned_offset(Self) -> Int64
+pub fn RecordBatchBuilder::new(base_offset? : Int64) -> Self
+pub fn RecordBatchBuilder::to_bytes(Self) -> Bytes
 
 pub(all) struct SaslAuthenticateResult {
   error_code : Int
@@ -326,8 +480,15 @@ pub fn TlsClientOptions::new(String, verify_certificates? : Bool, ca_pem_file? :
 
 pub struct TopicMetadata {
   name : String
+  topic_id : Uuid
+  is_internal : Bool
   partitions : Array[PartitionInfo]
 }
+
+pub(all) struct TopicPartitionCursor {
+  topic_name : String
+  partition_index : Int
+} derive(@debug.Debug)
 
 pub struct Uuid {
   bytes : Bytes
