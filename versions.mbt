@@ -15,6 +15,12 @@ pub const API_PRODUCE : Int = 0
 pub const API_FETCH : Int = 1
 
 ///|
+pub const API_OFFSET_COMMIT : Int = 8
+
+///|
+pub const API_OFFSET_FETCH : Int = 9
+
+///|
 pub const API_LIST_OFFSETS : Int = 2
 
 ///|
@@ -74,6 +80,12 @@ pub fn driver_api_range(api_key : Int) -> ApiRange? {
     API_PRODUCE =>
       Some({ key: API_PRODUCE, name: "Produce", min: 12, max: 13, })
     API_FETCH => Some({ key: API_FETCH, name: "Fetch", min: 12, max: 16, })
+    // OffsetCommit/OffsetFetch v10 address topics by id (KIP-848); v8/v9
+    // keep the classic wire shape.
+    API_OFFSET_COMMIT =>
+      Some({ key: API_OFFSET_COMMIT, name: "OffsetCommit", min: 8, max: 10, })
+    API_OFFSET_FETCH =>
+      Some({ key: API_OFFSET_FETCH, name: "OffsetFetch", min: 8, max: 10, })
     API_LIST_OFFSETS =>
       Some({ key: API_LIST_OFFSETS, name: "ListOffsets", min: 10, max: 11, })
     API_METADATA =>

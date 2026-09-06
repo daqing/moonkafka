@@ -416,6 +416,13 @@ pub struct ConsumerConfig {
   common : CommonConfig
   topic : String
   start_from : StartFrom
+  /// Consumer group id; required for offset commits and group joins.
+  /// None keeps the consumer group-less (read-only, offsets in memory).
+  group_id : String?
+  /// Commit the polled positions every auto_commit_interval_ms and once
+  /// more on close; requires a group id.
+  enable_auto_commit : Bool
+  auto_commit_interval_ms : Int
 } derive(@debug.Debug)
 
 ///|
@@ -428,10 +435,27 @@ pub fn ConsumerConfig::new(
   sasl? : SaslConfig? = None,
   tls? : TlsClientOptions? = None,
   metadata_max_age_ms? : Int = 300000,
+  group_id? : String? = None,
+  enable_auto_commit? : Bool = true,
+  auto_commit_interval_ms? : Int = 5000,
 ) -> ConsumerConfig raise {
   if topic.length() == 0 {
     raise ProtocolError::ProtocolError("topic must not be empty")
   }
+  match group_id {
+    Some(id) =>
+      if id.is_empty() {
+        raise ProtocolError::ProtocolError("group_id must not be empty")
+      }
+    None => ()
+  }
+  if auto_commit_interval_ms <= 0 {
+    raise ProtocolError::ProtocolError(
+      "auto_commit_interval_ms must be positive, got \{auto_commit_interval_ms}",
+    )
+  }
+  // Auto-commit without a group is inert (nothing to commit to); the
+  // flag only takes effect alongside a group id.
   {
     common: CommonConfig::new(
       bootstrap_servers,
@@ -443,5 +467,8 @@ pub fn ConsumerConfig::new(
     ),
     topic,
     start_from,
+    group_id,
+    enable_auto_commit,
+    auto_commit_interval_ms,
   }
 }

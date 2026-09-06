@@ -18,6 +18,21 @@ pub struct Consumer {
   topic : String
   start_from : StartFrom
   request_timeout_ms : Int
+  retries : Int
+  retry_backoff_ms : Int
+  retry_backoff_max_ms : Int
+  /// The user's task group; hosts the autocommit loop, which the group
+  /// joins on exit (close lets the final commit land first).
+  group : @async.TaskGroup[Unit]
+  /// Set when the consumer can commit offsets; the group coordinator
+  /// node id is cached next to it until NOT_COORDINATOR.
+  priv group_id : String?
+  priv mut group_coordinator : Int?
+  enable_auto_commit : Bool
+  auto_commit_interval_ms : Int
+  /// Last known committed offset per partition (-1 = none), refreshed
+  /// by commit() and committed().
+  priv committed_offsets : Map[Int, Int64]
   priv cluster : ClusterClient
   mut topic_id : Uuid
   /// Fetch session per leader, driving incremental fetches.
@@ -29,20 +44,25 @@ pub struct Consumer {
 ///|
 /// Connect to a bootstrap broker, negotiate API versions, resolve the
 /// topic's partitions and their leaders, and initialize fetch offsets.
+/// The autocommit loop (when configured) joins `group`.
 pub async fn Consumer::connect(
+  group~ : @async.TaskGroup[Unit],
   host~ : String,
   port~ : Int,
   topic~ : String,
   start_from? : StartFrom = Earliest,
 ) -> Consumer {
   let config = ConsumerConfig::new(["\{host}:\{port}"], topic, start_from~)
-  Consumer::connect_with_config(config)
+  Consumer::connect_with_config(group~, config)
 }
 
 ///|
 /// Connect using explicit configuration, which is validated first. The
 /// meta connection lands on the first bootstrap server that accepts.
-pub async fn Consumer::connect_with_config(config : ConsumerConfig) -> Consumer {
+pub async fn Consumer::connect_with_config(
+  group~ : @async.TaskGroup[Unit],
+  config : ConsumerConfig,
+) -> Consumer {
   // SASL credentials only apply on SASL security protocols.
   let sasl = match config.common.security_protocol {
     SaslPlaintext | SaslSsl => config.common.sasl
@@ -65,6 +85,15 @@ pub async fn Consumer::connect_with_config(config : ConsumerConfig) -> Consumer 
     topic: config.topic,
     start_from: config.start_from,
     request_timeout_ms: config.common.request_timeout_ms,
+    retries: config.common.retries,
+    retry_backoff_ms: config.common.retry_backoff_ms,
+    retry_backoff_max_ms: config.common.retry_backoff_max_ms,
+    group,
+    group_id: config.group_id,
+    group_coordinator: None,
+    enable_auto_commit: config.enable_auto_commit,
+    auto_commit_interval_ms: config.auto_commit_interval_ms,
+    committed_offsets: Map([]),
     cluster,
     topic_id: Uuid::zero(),
     fetch_sessions: Map([]),
@@ -73,15 +102,32 @@ pub async fn Consumer::connect_with_config(config : ConsumerConfig) -> Consumer 
   }
   consumer.refresh_metadata()
   consumer.reset_offsets()
+  if consumer.autocommit_enabled() {
+    // The autocommit loop tears the cluster down on exit, so close()
+    // only flips the flag and the group joins after the final commit.
+    group.spawn_bg(no_wait=false, allow_failure=false, () => {
+      consumer.autocommit_loop()
+    })
+  }
   consumer
 }
 
 ///|
+/// Stop the consumer: the autocommit loop (if any) commits the current
+/// positions once more, then tears the cluster connections down before
+/// the group joins it.
 pub fn Consumer::close(self : Consumer) -> Unit {
   if !self.closed {
     self.closed = true
-    self.cluster.close()
+    if !self.autocommit_enabled() {
+      self.cluster.close()
+    }
   }
+}
+
+///|
+fn Consumer::autocommit_enabled(self : Consumer) -> Bool {
+  self.group_id is Some(_) && self.enable_auto_commit
 }
 
 ///|
