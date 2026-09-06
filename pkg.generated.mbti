@@ -427,12 +427,15 @@ pub struct Consumer {
   enable_read_committed : Bool
   mut heartbeat_interval_ms : Int
   session_timeout_ms : Int
+  mut last_poll_ms : Int64
+  max_poll_interval_ms : Int
   mut topic_id : Uuid
   fetch_sessions : Map[Int, FetchSession]
   partitions : Array[PartitionState]
   mut closed : Bool
   // private fields
 }
+pub async fn Consumer::assign(Self, Array[(String, Int)]) -> Unit
 pub fn Consumer::assignment(Self) -> Array[(String, Int)]
 pub fn Consumer::close(Self) -> Unit
 pub async fn Consumer::commit(Self, offsets? : Map[Int, Int64]) -> Unit
@@ -441,11 +444,13 @@ pub async fn Consumer::committed(Self, partitions? : Array[Int]?) -> Map[Int, In
 pub fn Consumer::committed_cached(Self, Int) -> Int64?
 pub async fn Consumer::connect(group~ : @async.TaskGroup[Unit], host~ : String, port~ : Int, topic~ : String, start_from? : StartFrom) -> Self
 pub async fn Consumer::connect_with_config(group~ : @async.TaskGroup[Unit], ConsumerConfig) -> Self
+pub fn Consumer::group_metadata(Self) -> GroupMetadata?
 pub fn Consumer::member_identity(Self) -> String
 pub fn Consumer::membership_error(Self) -> String?
 pub fn Consumer::pause(Self, partitions? : Array[Int]) -> Unit
 pub fn Consumer::paused(Self) -> Array[Int]
 pub async fn Consumer::poll(Self, max_wait_ms? : Int, max_bytes? : Int) -> Array[Record]
+pub fn Consumer::position(Self, Int) -> Int64?
 pub fn Consumer::resume(Self, partitions? : Array[Int]) -> Unit
 pub fn Consumer::seek(Self, Int, Int64) -> Unit raise
 pub async fn Consumer::seek_by_timestamp(Self, Int, Int64) -> Unit
@@ -454,6 +459,7 @@ pub async fn Consumer::seek_to_end(Self, partitions? : Array[Int]?) -> Unit
 pub fn Consumer::subscribe(Self, Array[String], listener? : RebalanceListener?) -> Unit raise
 pub fn Consumer::subscribe_classic(Self, Array[String], assignors? : Array[Assignor], listener? : RebalanceListener?) -> Unit raise
 pub async fn Consumer::subscribe_regex(Self, String, listener? : RebalanceListener?) -> Unit
+pub fn Consumer::unassign(Self) -> Unit
 pub async fn Consumer::unsubscribe(Self) -> Unit
 
 pub struct ConsumerConfig {
@@ -470,8 +476,9 @@ pub struct ConsumerConfig {
   group_instance_id : String?
   heartbeat_interval_ms : Int
   session_timeout_ms : Int
+  max_poll_interval_ms : Int
 } derive(@debug.Debug)
-pub fn ConsumerConfig::new(Array[String], String, start_from? : StartFrom, request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?, tls? : TlsClientOptions?, metadata_max_age_ms? : Int, group_id? : String?, enable_auto_commit? : Bool, auto_commit_interval_ms? : Int, auto_offset_reset? : AutoOffsetReset?, max_poll_records? : Int, max_partition_fetch_bytes? : Int, enable_read_committed? : Bool, group_instance_id? : String?, heartbeat_interval_ms? : Int, session_timeout_ms? : Int) -> Self raise
+pub fn ConsumerConfig::new(Array[String], String, start_from? : StartFrom, request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?, tls? : TlsClientOptions?, metadata_max_age_ms? : Int, group_id? : String?, enable_auto_commit? : Bool, auto_commit_interval_ms? : Int, auto_offset_reset? : AutoOffsetReset?, max_poll_records? : Int, max_partition_fetch_bytes? : Int, enable_read_committed? : Bool, group_instance_id? : String?, heartbeat_interval_ms? : Int, session_timeout_ms? : Int, max_poll_interval_ms? : Int) -> Self raise
 
 pub struct ConsumerGroupHeartbeatResult {
   error_code : Int
@@ -599,6 +606,12 @@ pub struct FetchTopicResult {
   topic_id : Uuid
   partitions : Array[FetchPartitionResult]
 }
+
+pub(all) struct GroupMetadata {
+  group_id : String
+  member_id : String
+  generation_id : Int
+} derive(@debug.Debug)
 
 pub(all) struct HeartbeatTopicPartitions {
   topic_id : Uuid
@@ -757,6 +770,8 @@ pub(all) struct Record {
   value : Bytes?
   headers : Array[(Bytes, Bytes)]
 } derive(@debug.Debug)
+pub fn Record::key_utf8(Self) -> String?
+pub fn Record::value_utf8(Self) -> String?
 
 pub struct RecordBatchBuilder {
   base_offset : Int64

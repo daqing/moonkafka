@@ -124,6 +124,18 @@ pub fn decode_record_batches_ex(
 }
 
 ///|
+/// The record key as UTF-8, when present.
+pub fn Record::key_utf8(self : Record) -> String? {
+  self.key.map(fn(bytes) { @utf8.decode_lossy(bytes[:]) })
+}
+
+///|
+/// The record value as UTF-8, when present (tombstones decode to None).
+pub fn Record::value_utf8(self : Record) -> String? {
+  self.value.map(fn(bytes) { @utf8.decode_lossy(bytes[:]) })
+}
+
+///|
 /// Decode all record batches, ignoring any truncated trailing batch.
 pub fn decode_record_batches(
   data : Bytes,
