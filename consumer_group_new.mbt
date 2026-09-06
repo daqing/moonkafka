@@ -121,8 +121,54 @@ pub fn Consumer::subscribe(
   self.rebalance_listener = listener.unwrap_or(self.rebalance_listener)
   self.subscribed_names = Some(topics)
   self.subscribed_regex = None
-  self.member_kind = Kip848Member
+  self.member_kind = self.resolve_group_protocol()
   self.start_membership()
+}
+
+///|
+/// Resolve the configured group protocol against the broker's
+/// advertised APIs, applying the fallback ordering.
+fn Consumer::resolve_group_protocol(self : Consumer) -> MemberKind raise {
+  let consumer_ok = self.cluster.supports_api(API_CONSUMER_GROUP_HEARTBEAT)
+  let classic_ok = self.cluster.supports_api(API_JOIN_GROUP)
+  match self.group_protocol {
+    ConsumerProtocol =>
+      if consumer_ok {
+        Kip848Member
+      } else {
+        raise ProtocolError::ProtocolError(
+          "the broker does not advertise ConsumerGroupHeartbeat; the consumer group protocol requires KIP-848 support",
+        )
+      }
+    ClassicProtocol =>
+      if classic_ok {
+        ClassicMember
+      } else {
+        raise ProtocolError::ProtocolError(
+          "the broker does not advertise the classic group APIs",
+        )
+      }
+    PreferConsumer =>
+      if consumer_ok {
+        Kip848Member
+      } else if classic_ok {
+        ClassicMember
+      } else {
+        raise ProtocolError::ProtocolError(
+          "the broker advertises neither group protocol",
+        )
+      }
+    PreferClassic =>
+      if classic_ok {
+        ClassicMember
+      } else if consumer_ok {
+        Kip848Member
+      } else {
+        raise ProtocolError::ProtocolError(
+          "the broker advertises neither group protocol",
+        )
+      }
+  }
 }
 
 ///|

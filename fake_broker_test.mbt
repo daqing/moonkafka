@@ -4,11 +4,13 @@
 // crash — without a Kafka installation.
 
 ///|
-fn fake_api_versions_response(throttle_ms : Int) -> Bytes {
+fn fake_api_versions_response(
+  throttle_ms : Int,
+  hide_apis? : Array[Int] = [],
+) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i16(0) // error_code
-  e.write_compact_len(20)
-  let apis : Array[(Int, Int)] = [
+  let all_apis : Array[(Int, Int)] = [
     (0, 13),
     (1, 16),
     (2, 11),
@@ -30,6 +32,8 @@ fn fake_api_versions_response(throttle_ms : Int) -> Bytes {
     (13, 5),
     (14, 5),
   ]
+  let apis = all_apis.filter(fn(pair) { !hide_apis.contains(pair.0) })
+  e.write_compact_len(apis.length())
   for pair in apis {
     let (key, max) = pair
     e.write_i16(key)
@@ -1365,6 +1369,7 @@ async fn fake_serve_conn(
   heartbeat_partitions? : Array[Int] = [0],
   coordinator? : FakeCoordinator? = None,
   metadata_partitions? : Int = 1,
+  hide_apis? : Array[Int] = [],
 ) -> Unit {
   // per-connection SASL state
   let mut sasl_mechanism : String? = None
@@ -1381,7 +1386,7 @@ async fn fake_serve_conn(
       (rest[6].to_int() << 8) |
       rest[7].to_int()
     let body = match key {
-      18 => fake_api_versions_response(api_throttle_ms)
+      18 => fake_api_versions_response(api_throttle_ms, hide_apis~)
       17 => {
         sasl_mechanism = Some(fake_sasl_handshake_mechanism(rest))
         fake_sasl_handshake_response()
@@ -1729,6 +1734,7 @@ async fn fake_broker(
   heartbeat_partitions? : Array[Int] = [0],
   coordinator? : FakeCoordinator? = None,
   metadata_partitions? : Int = 1,
+  hide_apis? : Array[Int] = [],
 ) -> Unit {
   for ;; {
     let (tcp, _) = server.accept()
@@ -1784,6 +1790,7 @@ async fn fake_broker(
         heartbeat_partitions~,
         coordinator~,
         metadata_partitions~,
+        hide_apis~,
       )
     }
   }
@@ -3519,6 +3526,160 @@ async test "records decode through the utf8 helpers" {
     assert_eq(records[0].value_utf8(), Some("one"))
     assert_eq(records[1].value_utf8(), Some("two"))
     assert_true(records[0].key_utf8() is None)
+    server.close()
+  }
+}
+
+///|
+async test "group_protocol classic routes subscribe through JoinGroup" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let coord = FakeCoordinator::new()
+    let assigned : Array[(String, Int)] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, coordinator=Some(coord))
+    }
+    let consumer = @moonkafka.Consumer::connect_with_config(
+      group=root,
+      @moonkafka.ConsumerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        request_timeout_ms=10000,
+        group_id=Some("gid-p1"),
+        enable_auto_commit=false,
+        heartbeat_interval_ms=20,
+        group_protocol=@moonkafka.ClassicProtocol,
+      ),
+    )
+    defer consumer.close()
+    // The plain subscribe() entry honors the configured protocol.
+    consumer.subscribe(["events"])
+    for _ in 0..<1000 {
+      if consumer.assignment().length() == 1 {
+        break
+      }
+      @async.sleep(5)
+    }
+    assert_eq(consumer.assignment(), [("events", 0)])
+    assert_eq(coord.joins[0].1, 1)
+    assert_eq(coord.protocol, "range")
+    server.close()
+  }
+}
+
+///|
+async test "fallback prefers consumer and degrades to classic" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let coord = FakeCoordinator::new()
+    let heartbeat_requests : Array[(String, String, Int, String?)] = []
+    let assigned : Array[(String, Int)] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, coordinator=Some(coord), hide_apis=[
+        68,
+      ])
+    }
+    let consumer = @moonkafka.Consumer::connect_with_config(
+      group=root,
+      @moonkafka.ConsumerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        request_timeout_ms=10000,
+        group_id=Some("gid-p2"),
+        enable_auto_commit=false,
+        heartbeat_interval_ms=20,
+        group_protocol=@moonkafka.PreferConsumer,
+      ),
+    )
+    defer consumer.close()
+    // The broker hides ConsumerGroupHeartbeat: the member degrades to
+    // the classic path and still gets its assignment.
+    consumer.subscribe(["events"])
+    for _ in 0..<1000 {
+      if consumer.assignment().length() == 1 {
+        break
+      }
+      @async.sleep(5)
+    }
+    assert_eq(consumer.assignment(), [("events", 0)])
+    assert_true(coord.joins.length() >= 1)
+    assert_true(heartbeat_requests.is_empty())
+    server.close()
+  }
+}
+
+///|
+async test "fallback prefers consumer over an advertising broker" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let coord = FakeCoordinator::new()
+    let heartbeat_requests : Array[(String, String, Int, String?)] = []
+    let assigned : Array[(String, Int)] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(
+        server,
+        root,
+        "events",
+        accepted,
+        coordinator=Some(coord),
+        heartbeat_requests~,
+      )
+    }
+    let consumer = @moonkafka.Consumer::connect_with_config(
+      group=root,
+      @moonkafka.ConsumerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        request_timeout_ms=10000,
+        group_id=Some("gid-p3"),
+        enable_auto_commit=false,
+        heartbeat_interval_ms=20,
+        group_protocol=@moonkafka.PreferConsumer,
+      ),
+    )
+    defer consumer.close()
+    // The broker advertises KIP-848: the consumer protocol wins.
+    consumer.subscribe(["events"])
+    for _ in 0..<1000 {
+      if heartbeat_requests.length() >= 1 {
+        break
+      }
+      @async.sleep(5)
+    }
+    assert_true(heartbeat_requests.length() >= 1)
+    assert_true(coord.joins.is_empty())
+    server.close()
+  }
+}
+
+///|
+async test "consumer protocol raises without KIP-848 broker support" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, hide_apis=[68])
+    }
+    let consumer = @moonkafka.Consumer::connect_with_config(
+      group=root,
+      @moonkafka.ConsumerConfig::new(
+        ["127.0.0.1:\{server.addr.port()}"],
+        "events",
+        request_timeout_ms=10000,
+        group_id=Some("gid-p4"),
+        group_protocol=@moonkafka.ConsumerProtocol,
+      ),
+    )
+    defer consumer.close()
+    try {
+      consumer.subscribe(["events"])
+      abort("subscribe must fail without broker KIP-848 support")
+    } catch {
+      _ => ()
+    }
     server.close()
   }
 }

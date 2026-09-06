@@ -80,6 +80,7 @@ pub struct Consumer {
   priv mut manual_assignment : Array[(String, Int)]?
   mut last_poll_ms : Int64
   max_poll_interval_ms : Int
+  group_protocol : GroupProtocol
   /// Classic-protocol membership state.
   priv mut generation_id : Int
   priv mut classic_assignors : Array[Assignor]
@@ -169,6 +170,7 @@ pub async fn Consumer::connect_with_config(
     manual_assignment: None,
     last_poll_ms: 0L,
     max_poll_interval_ms: config.max_poll_interval_ms,
+    group_protocol: config.group_protocol,
     cluster,
     topic_id: Uuid::zero(),
     fetch_sessions: Map([]),

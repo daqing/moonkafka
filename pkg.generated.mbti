@@ -375,6 +375,7 @@ pub fn ClusterClient::invalidate_metadata(Self) -> Unit
 pub async fn ClusterClient::reconnect(Self) -> Unit
 pub async fn ClusterClient::refresh_if_stale(Self) -> Unit
 pub async fn ClusterClient::refresh_metadata(Self, Array[String]?) -> Unit
+pub fn ClusterClient::supports_api(Self, Int) -> Bool
 pub fn ClusterClient::topic(Self, String) -> TopicMetadata?
 pub fn ClusterClient::topic_name(Self, Uuid) -> String?
 pub fn ClusterClient::topics_snapshot(Self) -> Array[String]
@@ -429,6 +430,7 @@ pub struct Consumer {
   session_timeout_ms : Int
   mut last_poll_ms : Int64
   max_poll_interval_ms : Int
+  group_protocol : GroupProtocol
   mut topic_id : Uuid
   fetch_sessions : Map[Int, FetchSession]
   partitions : Array[PartitionState]
@@ -477,8 +479,9 @@ pub struct ConsumerConfig {
   heartbeat_interval_ms : Int
   session_timeout_ms : Int
   max_poll_interval_ms : Int
+  group_protocol : GroupProtocol
 } derive(@debug.Debug)
-pub fn ConsumerConfig::new(Array[String], String, start_from? : StartFrom, request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?, tls? : TlsClientOptions?, metadata_max_age_ms? : Int, group_id? : String?, enable_auto_commit? : Bool, auto_commit_interval_ms? : Int, auto_offset_reset? : AutoOffsetReset?, max_poll_records? : Int, max_partition_fetch_bytes? : Int, enable_read_committed? : Bool, group_instance_id? : String?, heartbeat_interval_ms? : Int, session_timeout_ms? : Int, max_poll_interval_ms? : Int) -> Self raise
+pub fn ConsumerConfig::new(Array[String], String, start_from? : StartFrom, request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?, tls? : TlsClientOptions?, metadata_max_age_ms? : Int, group_id? : String?, enable_auto_commit? : Bool, auto_commit_interval_ms? : Int, auto_offset_reset? : AutoOffsetReset?, max_poll_records? : Int, max_partition_fetch_bytes? : Int, enable_read_committed? : Bool, group_instance_id? : String?, heartbeat_interval_ms? : Int, session_timeout_ms? : Int, max_poll_interval_ms? : Int, group_protocol? : GroupProtocol) -> Self raise
 
 pub struct ConsumerGroupHeartbeatResult {
   error_code : Int
@@ -612,6 +615,13 @@ pub(all) struct GroupMetadata {
   member_id : String
   generation_id : Int
 } derive(@debug.Debug)
+
+pub(all) enum GroupProtocol {
+  ConsumerProtocol
+  ClassicProtocol
+  PreferConsumer
+  PreferClassic
+} derive(Eq, @debug.Debug)
 
 pub(all) struct HeartbeatTopicPartitions {
   topic_id : Uuid
