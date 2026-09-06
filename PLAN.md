@@ -640,16 +640,31 @@ same PID/sequence (mock broker test).
       2. E2E: pause/resume wire behavior, cap+rewind sequencing,
       read_committed filtering against an aborted batch, epoch-error
       rewind.
-- [ ] **KIP-848 member** (`consumer/group_new.mbt`) — the primary path:
-      client-generated member id (uuid); ConsumerGroupHeartbeat v1 loop
-      (`heartbeat_interval_ms` from server); server-driven assignment applied
-      atomically; handle `FENCED_MEMBER_EPOCH`, `UNKNOWN_MEMBER_ID`,
-      `STALE_MEMBER_EPOCH`, `GROUP_MAX_SIZE_REACHED`,
-      `UNSUPPORTED_ASSIGNOR`; `group_instance_id` static membership;
-      regex subscription (`subscribed_topic_regex`, v1) driving metadata
-      expansion; graceful leave (heartbeat with member-epoch -1 semantics per
-      KIP-848); `RebalanceListener` hooks (on_assign/on_revoke incl.
-      incremental assign/revoke sets).
+- [x] **KIP-848 member**: DONE (commit d00bb89, root scope
+      `consumer_group_new.mbt` + `consumer_group_heartbeat.mbt`):
+      ConsumerGroupHeartbeat v0/v1 pinned from the 4.3 schemas (v1
+      carries SubscribedTopicRegex). The member generates its own id
+      (clock-seeded uuid-hex, kept for the consumer's lifetime), joins
+      with epoch 0, and re-issues the heartbeat every server-guided
+      interval (slept in tick-sized steps so close() lands promptly).
+      Server-driven assignments apply atomically: revoke-set diff,
+      assignment swap, assign-set — firing RebalanceListener on_revoke /
+      on_assign around the swap. UNKNOWN_MEMBER_ID, STALE_MEMBER_EPOCH,
+      and FENCED_MEMBER_EPOCH restart the join from epoch 0;
+      GROUP_MAX_SIZE_REACHED and coordinator hiccups (load/unavailable/
+      moved) retry with backoff (NOT_COORDINATOR re-resolves);
+      UNSUPPORTED_ASSIGNOR, UNRELEASED_INSTANCE_ID, and
+      INVALID_REGULAR_EXPRESSION are fatal and surface via
+      `membership_error()`. Static membership sends the configured
+      `group_instance_id` on every heartbeat. Regex subscription rides
+      v1 heartbeats verbatim and expands client-side against the
+      metadata catalog (refreshed periodically) through a
+      glob-style matcher (`*`, `?`/`.` — a documented subset of Java
+      regex; full patterns land with the polish pass). `unsubscribe`
+      leaves gracefully with the epoch -1 heartbeat, firing the revoke
+      on the way out; poll fetches only assigned partitions. E2E:
+      join/reconcile/leave with listener hooks and epoch progression,
+      fenced-epoch restart, static instance id, regex expansion.
 - [ ] **Classic member** (`consumer/group_classic.mbt`) — compat path:
       FindCoordinator v4 → JoinGroup v9 → SyncGroup v5 → Heartbeat v4 loop;
       protocol negotiation (subscription → assignment strategy set);
