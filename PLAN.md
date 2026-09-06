@@ -490,6 +490,23 @@ compression codec; `moon coverage analyze` shows codec branches covered.
       connection. `send` takes a manual `partition` override validated
       against the partition count. Boundary switching is driven per send
       until the accumulator batches records.
+- [x] **Batching accumulator**: DONE (this commit, root scope
+      `accumulator.mbt`; folds into the `producer/` split with the sender
+      work): per-partition queues of `ProducerBatch` over the Phase 2
+      `RecordBatchBuilder` (new `estimated_append_size` dry-run for the
+      has-room check); `batch_size` rotation, `linger_ms` readiness, and
+      `buffer_memory` accounting raising the new `BufferExhausted`
+      suberror. One flusher claims each batch (`close_and_claim`), puts it
+      on the wire, and publishes the terminal result through a
+      per-batch semaphore; coalesced senders derive `base_offset + index`.
+      `send` now appends instead of encoding one record per request, takes
+      `headers`, and drains queued predecessors first so per-partition
+      order survives coalescing (the inline stand-in for the sender
+      task's front-first drain); recoverable failures requeue the batch at
+      the queue head and retry within the existing backoff/attempts bound.
+      Sticky boundaries moved from per-pick to batch-close. E2E: two
+      concurrent sends coalesce into one Produce request and take offsets
+      base+0/base+1.
 - [ ] **Batching accumulator** (`producer/accumulator.mbt`): per-partition
       batch deque; `linger_ms`, `batch_size`, `buffer_memory` accounting with
       blocking/`BufferExhausted` error; append API the public `send` uses.
