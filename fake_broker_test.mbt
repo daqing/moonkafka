@@ -36,6 +36,18 @@ fn fake_api_versions_response(
     (21, 2),
     (37, 3),
     (47, 0),
+    (60, 2),
+    (32, 4),
+    (44, 1),
+    (33, 2),
+    (74, 1),
+    (35, 5),
+    (43, 2),
+    (45, 1),
+    (46, 0),
+    (64, 0),
+    (55, 2),
+    (57, 2),
   ]
   let apis = all_apis.filter(fn(pair) { !hide_apis.contains(pair.0) })
   e.write_compact_len(apis.length())
@@ -995,6 +1007,658 @@ fn fake_offset_delete_response(results : Array[(String, Int, Int)]) -> Bytes {
 }
 
 ///|
+/// Capture arrays and canned knobs for the cluster/config admin ops.
+/// Handlers append what they receive so tests can assert on the wire
+/// bytes they produced.
+struct FakeClusterOps {
+  describe_cluster : Array[Bool] // include-authorized-operations flags
+  describe_configs : Array[(Int, String, Array[String]?)]
+  incremental_alters : Array[(Int, String, Array[(String, Int, String?)])]
+  alter_configs : Array[(Int, String, Array[(String, String?)])]
+  list_config_resources : Array[Array[Int]] // requested type filters
+  log_dirs : Array[Array[(String, Array[Int])]?] // requested topics
+  elect_leaders : Array[(Int, Array[(String, Array[Int])]?)] // (type, topics)
+  alter_reassignments : Array[(String, Int, Array[Int]?)] // (topic, index, replicas)
+  list_reassignments : Array[Array[(String, Array[Int])]?]
+  unregister_broker : Array[Int]
+  quorum_requests : Array[(String, Int)]
+  update_features : Array[(String, Int, Int, Bool)] // (feature, level, type, validate-only)
+  mut update_features_error : Int
+}
+
+///|
+fn FakeClusterOps::new() -> FakeClusterOps {
+  {
+    describe_cluster: [],
+    describe_configs: [],
+    incremental_alters: [],
+    alter_configs: [],
+    list_config_resources: [],
+    log_dirs: [],
+    elect_leaders: [],
+    alter_reassignments: [],
+    list_reassignments: [],
+    unregister_broker: [],
+    quorum_requests: [],
+    update_features: [],
+    update_features_error: 0,
+  }
+}
+
+///|
+/// Flexible request header: skip api key/version/correlation/client id.
+fn fake_skip_flexible_header(d : @buf.Decoder) -> Unit raise {
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  ignore(d.read_compact_string()) // client id
+  d.skip_tag_buffer()
+}
+
+///|
+/// Parse a DescribeCluster v0-v2 request: the include-operations flag
+/// (the endpoint type is fixed at brokers, fenced brokers at v2+).
+fn fake_describe_cluster_request(rest : Bytes) -> Bool raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  d.read_bool()
+}
+
+///|
+/// DescribeCluster v0-v2 response body: one broker (node 0), the fake
+/// cluster id, node 0 as controller.
+fn fake_describe_cluster_response(port : Int, version : Int) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_i16(0) // error
+  e.write_compact_nullable_string(None) // error message
+  if version >= 1 {
+    e.write_i8(1) // endpoint type: brokers
+  }
+  e.write_compact_string("fake-cluster")
+  e.write_i32(0) // controller id
+  e.write_compact_len(1)
+  e.write_i32(0) // broker id
+  e.write_compact_string("127.0.0.1")
+  e.write_i32(port)
+  e.write_compact_nullable_string(None) // rack
+  if version >= 2 {
+    e.write_bool(false) // is_fenced
+  }
+  e.write_tag_buffer()
+  e.write_i32(-2147483648) // cluster authorized operations
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse a DescribeConfigs v4 request: (type, name, keys-or-null) per
+/// resource plus the include flags.
+fn fake_describe_configs_request(
+  rest : Bytes,
+) -> (Array[(Int, String, Array[String]?)], Bool, Bool) raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  let resources : Array[(Int, String, Array[String]?)] = []
+  let n = d.read_compact_len()
+  for _ in 0..<n {
+    let resource_type = d.read_i8()
+    let resource_name = d.read_compact_string()
+    // Null arrays carry the compact-length marker 0 (read back as -1).
+    let keys : Array[String]? = match d.read_compact_len() {
+      -1 => None
+      count => {
+        let out : Array[String] = []
+        for _ in 0..<count {
+          out.push(d.read_compact_string())
+        }
+        Some(out)
+      }
+    }
+    d.skip_tag_buffer()
+    resources.push((resource_type, resource_name, keys))
+  }
+  let include_synonyms = d.read_bool()
+  let include_documentation = d.read_bool()
+  (resources, include_synonyms, include_documentation)
+}
+
+///|
+/// DescribeConfigs v4 response body: per resource, one config entry per
+/// requested key (or two canned entries for the null key filter).
+fn fake_describe_configs_response(
+  resources : Array[(Int, String, Array[String]?)],
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(resources.length())
+  for resource in resources {
+    let (resource_type, resource_name, keys) = resource
+    e.write_i16(0) // error
+    e.write_compact_nullable_string(None)
+    e.write_i8(resource_type)
+    e.write_compact_string(resource_name)
+    let names : Array[String] = match keys {
+      Some(keys) => keys
+      None => ["retention.ms", "cleanup.policy"]
+    }
+    e.write_compact_len(names.length())
+    for name in names {
+      e.write_compact_string(name)
+      e.write_compact_nullable_string(Some("604800000"))
+      e.write_bool(false) // read only
+      e.write_i8(2) // config source
+      e.write_bool(false) // sensitive
+      e.write_compact_len(0) // synonyms
+      e.write_i8(2) // config type
+      e.write_compact_nullable_string(None) // documentation
+      e.write_tag_buffer()
+    }
+    e.write_tag_buffer()
+  }
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse an IncrementalAlterConfigs v1 request: (type, name, (key, op,
+/// value)) per resource plus the validate-only flag.
+fn fake_incremental_alter_configs_request(
+  rest : Bytes,
+) -> (Array[(Int, String, Array[(String, Int, String?)])], Bool) raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  let resources : Array[(Int, String, Array[(String, Int, String?)])] = []
+  let n = d.read_compact_len()
+  for _ in 0..<n {
+    let resource_type = d.read_i8()
+    let resource_name = d.read_compact_string()
+    let configs : Array[(String, Int, String?)] = []
+    let count = d.read_compact_len()
+    for _ in 0..<count {
+      let name = d.read_compact_string()
+      let operation = d.read_i8()
+      let value = d.read_compact_nullable_string()
+      d.skip_tag_buffer()
+      configs.push((name, operation, value))
+    }
+    d.skip_tag_buffer()
+    resources.push((resource_type, resource_name, configs))
+  }
+  let validate_only = d.read_bool()
+  (resources, validate_only)
+}
+
+///|
+/// Parse an AlterConfigs v2 request: (type, name, (key, value)) per
+/// resource plus the validate-only flag.
+fn fake_alter_configs_request(
+  rest : Bytes,
+) -> (Array[(Int, String, Array[(String, String?)])], Bool) raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  let resources : Array[(Int, String, Array[(String, String?)])] = []
+  let n = d.read_compact_len()
+  for _ in 0..<n {
+    let resource_type = d.read_i8()
+    let resource_name = d.read_compact_string()
+    let configs : Array[(String, String?)] = []
+    let count = d.read_compact_len()
+    for _ in 0..<count {
+      let name = d.read_compact_string()
+      let value = d.read_compact_nullable_string()
+      d.skip_tag_buffer()
+      configs.push((name, value))
+    }
+    d.skip_tag_buffer()
+    resources.push((resource_type, resource_name, configs))
+  }
+  let validate_only = d.read_bool()
+  (resources, validate_only)
+}
+
+///|
+/// AlterConfigs/IncrementalAlterConfigs response body: per-resource
+/// success echoing (type, name).
+fn fake_alter_configs_response(resources : Array[(Int, String)]) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(resources.length())
+  for resource in resources {
+    let (resource_type, resource_name) = resource
+    e.write_i16(0) // error
+    e.write_compact_nullable_string(None)
+    e.write_i8(resource_type)
+    e.write_compact_string(resource_name)
+    e.write_tag_buffer()
+  }
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse a ListConfigResources v0/v1 request: the requested type filter
+/// (empty at v0, which carries no filter field).
+fn fake_list_config_resources_request(rest : Bytes) -> Array[Int] raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  let version = rest[3].to_int()
+  let types : Array[Int] = []
+  if version >= 1 {
+    let n = d.read_compact_len()
+    for _ in 0..<n {
+      types.push(d.read_i8())
+    }
+  }
+  types
+}
+
+///|
+/// ListConfigResources v0/v1 response body: a topic and a broker
+/// resource (types only ride v1+).
+fn fake_list_config_resources_response(version : Int) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_i16(0) // error
+  e.write_compact_len(2)
+  e.write_compact_string("events")
+  if version >= 1 {
+    e.write_i8(2) // topic
+  }
+  e.write_tag_buffer()
+  e.write_compact_string("1")
+  if version >= 1 {
+    e.write_i8(4) // broker
+  }
+  e.write_tag_buffer()
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse a DescribeLogDirs request: the requested topics (None = all).
+fn fake_describe_log_dirs_request(
+  rest : Bytes,
+) -> Array[(String, Array[Int])]? raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  // Null arrays carry the compact-length marker 0 (read back as -1).
+  let topics : Array[(String, Array[Int])]? = match d.read_compact_len() {
+    -1 => None
+    n => {
+      let out : Array[(String, Array[Int])] = []
+      for _ in 0..<n {
+        let name = d.read_compact_string()
+        let parts = d.read_compact_len()
+        let partitions : Array[Int] = []
+        for _ in 0..<parts {
+          partitions.push(d.read_i32())
+        }
+        d.skip_tag_buffer()
+        out.push((name, partitions))
+      }
+      Some(out)
+    }
+  }
+  topics
+}
+
+///|
+/// DescribeLogDirs v2-v5 response body: one log dir holding the
+/// requested topics (or both fake partitions of "events" when the
+/// request asked for all), sizes echoing the partition index.
+fn fake_describe_log_dirs_response(
+  topics : Array[(String, Array[Int])],
+  version : Int,
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  if version >= 3 {
+    e.write_i16(0) // top-level error
+  }
+  e.write_compact_len(1) // one log dir
+  e.write_i16(0) // error
+  e.write_compact_string("/tmp/kafka-logs")
+  e.write_compact_len(topics.length())
+  for entry in topics {
+    let (name, partitions) = entry
+    e.write_compact_string(name)
+    e.write_compact_len(partitions.length())
+    for partition in partitions {
+      e.write_i32(partition)
+      e.write_i64(100L + partition.to_int64()) // size
+      e.write_i64(0L) // lag
+      e.write_bool(false) // future
+      e.write_tag_buffer()
+    }
+    e.write_tag_buffer()
+  }
+  if version >= 4 {
+    e.write_i64(1000000L) // total bytes
+    e.write_i64(500000L) // usable bytes
+  }
+  if version >= 5 {
+    e.write_bool(false) // is_cordoned
+  }
+  e.write_tag_buffer()
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse an ElectLeaders v2 request: (election type, topics-or-null,
+/// timeout).
+fn fake_elect_leaders_request(
+  rest : Bytes,
+) -> (Int, Array[(String, Array[Int])]?) raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  let election_type = d.read_i8()
+  // Null arrays carry the compact-length marker 0 (read back as -1).
+  let topics : Array[(String, Array[Int])]? = match d.read_compact_len() {
+    -1 => None
+    n => {
+      let out : Array[(String, Array[Int])] = []
+      for _ in 0..<n {
+        let name = d.read_compact_string()
+        let parts = d.read_compact_len()
+        let partitions : Array[Int] = []
+        for _ in 0..<parts {
+          partitions.push(d.read_i32())
+        }
+        d.skip_tag_buffer()
+        out.push((name, partitions))
+      }
+      Some(out)
+    }
+  }
+  ignore(d.read_i32()) // timeout
+  (election_type, topics)
+}
+
+///|
+/// ElectLeaders v2 response body: per-partition success for the
+/// requested (or canned all) partitions.
+fn fake_elect_leaders_response(topics : Array[(String, Array[Int])]) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_i16(0) // top-level error
+  e.write_compact_len(topics.length())
+  for entry in topics {
+    let (name, partitions) = entry
+    e.write_compact_string(name)
+    e.write_compact_len(partitions.length())
+    for partition in partitions {
+      e.write_i32(partition)
+      e.write_i16(0) // error
+      e.write_compact_nullable_string(None)
+      e.write_tag_buffer()
+    }
+    e.write_tag_buffer()
+  }
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse an AlterPartitionReassignments request: (topic, partition,
+/// replicas-or-null) triples.
+fn fake_alter_reassignments_request(
+  rest : Bytes,
+) -> Array[(String, Int, Array[Int]?)] raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  ignore(d.read_i32()) // timeout
+  if rest[3].to_int() >= 1 {
+    ignore(d.read_bool()) // allow replication factor change (v1+)
+  }
+  let out : Array[(String, Int, Array[Int]?)] = []
+  let n = d.read_compact_len()
+  for _ in 0..<n {
+    let name = d.read_compact_string()
+    let count = d.read_compact_len()
+    for _ in 0..<count {
+      let index = d.read_i32()
+      // Null arrays carry the compact-length marker 0 (read back as -1).
+      let replicas : Array[Int]? = match d.read_compact_len() {
+        -1 => None
+        parts => {
+          let ids : Array[Int] = []
+          for _ in 0..<parts {
+            ids.push(d.read_i32())
+          }
+          Some(ids)
+        }
+      }
+      d.skip_tag_buffer()
+      out.push((name, index, replicas))
+    }
+    d.skip_tag_buffer()
+  }
+  out
+}
+
+///|
+/// AlterPartitionReassignments response body: success per (topic,
+/// partition, message-null).
+fn fake_alter_reassignments_response(
+  reassignments : Array[(String, Int, Array[Int]?)],
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_bool(true) // allow replication factor change echo (v1+)
+  e.write_i16(0) // top-level error
+  e.write_compact_nullable_string(None)
+  let by_topic : Map[String, Array[Int]] = Map([])
+  let order : Array[String] = []
+  for entry in reassignments {
+    let (name, index, _) = entry
+    match by_topic.get(name) {
+      Some(indexes) => indexes.push(index)
+      None => {
+        by_topic[name] = [index]
+        order.push(name)
+      }
+    }
+  }
+  e.write_compact_len(order.length())
+  for name in order {
+    e.write_compact_string(name)
+    let indexes = by_topic[name]
+    e.write_compact_len(indexes.length())
+    for index in indexes {
+      e.write_i32(index)
+      e.write_i16(0) // error
+      e.write_compact_nullable_string(None)
+      e.write_tag_buffer()
+    }
+    e.write_tag_buffer()
+  }
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse a ListPartitionReassignments request: the requested topic
+/// filter (None = all).
+fn fake_list_reassignments_request(
+  rest : Bytes,
+) -> Array[(String, Array[Int])]? raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  ignore(d.read_i32()) // timeout
+  // Null arrays carry the compact-length marker 0 (read back as -1).
+  let topics : Array[(String, Array[Int])]? = match d.read_compact_len() {
+    -1 => None
+    n => {
+      let out : Array[(String, Array[Int])] = []
+      for _ in 0..<n {
+        let name = d.read_compact_string()
+        let parts = d.read_compact_len()
+        let partitions : Array[Int] = []
+        for _ in 0..<parts {
+          partitions.push(d.read_i32())
+        }
+        d.skip_tag_buffer()
+        out.push((name, partitions))
+      }
+      Some(out)
+    }
+  }
+  topics
+}
+
+///|
+/// ListPartitionReassignments response body: one ongoing reassignment
+/// of "events" partition 0 (empty when the request filters others out).
+fn fake_list_reassignments_response(
+  filter : Array[(String, Array[Int])]?,
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_i16(0) // top-level error
+  e.write_compact_nullable_string(None)
+  let wanted = match filter {
+    None => true
+    Some(topics) => topics.get(0) is Some((name, _)) && name == "events"
+  }
+  if wanted {
+    e.write_compact_len(1)
+    e.write_compact_string("events")
+    e.write_compact_len(1)
+    e.write_i32(0) // partition
+    e.write_compact_len(2)
+    e.write_i32(1)
+    e.write_i32(2)
+    e.write_compact_len(1)
+    e.write_i32(2)
+    e.write_compact_len(1)
+    e.write_i32(1)
+    e.write_tag_buffer()
+    e.write_tag_buffer()
+  } else {
+    e.write_compact_len(0)
+  }
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse an UnregisterBroker request: the broker id.
+fn fake_unregister_broker_request(rest : Bytes) -> Int raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  d.read_i32()
+}
+
+///|
+/// UnregisterBroker response body.
+fn fake_unregister_broker_response() -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_i16(0) // error
+  e.write_compact_nullable_string(None)
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse a DescribeQuorum request: (topic, partition) pairs.
+fn fake_describe_quorum_request(rest : Bytes) -> Array[(String, Int)] raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  let out : Array[(String, Int)] = []
+  let n = d.read_compact_len()
+  for _ in 0..<n {
+    let name = d.read_compact_string()
+    let count = d.read_compact_len()
+    for _ in 0..<count {
+      let index = d.read_i32()
+      d.skip_tag_buffer()
+      out.push((name, index))
+    }
+    d.skip_tag_buffer()
+  }
+  out
+}
+
+///|
+/// DescribeQuorum v2 response body: node 0 leading with one voter
+/// (itself), plus the quorum node/listener map. No throttle field in
+/// this API.
+fn fake_describe_quorum_response(requests : Array[(String, Int)]) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i16(0) // top-level error
+  e.write_compact_nullable_string(None)
+  e.write_compact_len(requests.length())
+  for entry in requests {
+    let (name, index) = entry
+    e.write_compact_string(name)
+    e.write_compact_len(1)
+    e.write_i32(index)
+    e.write_i16(0) // error
+    e.write_compact_nullable_string(None)
+    e.write_i32(0) // leader id
+    e.write_i32(5) // leader epoch
+    e.write_i64(42L) // high watermark
+    e.write_compact_len(1) // voters
+    e.write_i32(0) // replica id
+    e.write_bytes(Bytes::make(16, 0)) // directory id
+    e.write_i64(42L) // log end offset
+    e.write_i64(-1L) // last fetch
+    e.write_i64(-1L) // last caught up
+    e.write_tag_buffer()
+    e.write_compact_len(0) // observers
+    e.write_tag_buffer()
+    e.write_tag_buffer()
+  }
+  e.write_compact_len(1) // nodes
+  e.write_i32(0) // node id
+  e.write_compact_len(1)
+  e.write_compact_string("CONTROLLER")
+  e.write_compact_string("127.0.0.1")
+  e.write_i16(9093) // port (uint16)
+  e.write_tag_buffer()
+  e.write_tag_buffer()
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse an UpdateFeatures v2 request: (feature, level, upgrade type,
+/// validate-only).
+fn fake_update_features_request(
+  rest : Bytes,
+) -> (Array[(String, Int, Int)], Bool) raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  ignore(d.read_i32()) // timeout
+  let updates : Array[(String, Int, Int)] = []
+  let n = d.read_compact_len()
+  for _ in 0..<n {
+    let feature = d.read_compact_string()
+    let level = d.read_i16()
+    let upgrade_type = d.read_i8()
+    d.skip_tag_buffer()
+    updates.push((feature, level, upgrade_type))
+  }
+  let validate_only = d.read_bool()
+  (updates, validate_only)
+}
+
+///|
+/// UpdateFeatures v2 response body: top-level error only (v2 dropped
+/// the per-feature results).
+fn fake_update_features_response(error_code : Int) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_i16(error_code)
+  e.write_compact_nullable_string(None)
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
 /// Parse a ConsumerGroupHeartbeat v1 request: (group, member id, epoch,
 /// instance id, subscribed regex).
 fn fake_consumer_group_heartbeat_request(
@@ -1648,6 +2312,7 @@ async fn fake_serve_conn(
   create_partitions? : Array[(String, Int)] = [],
   delete_records? : Array[(String, Int, Int64)] = [],
   offset_deletes? : Array[(String, String, Int)] = [],
+  cluster_ops? : FakeClusterOps = FakeClusterOps::new(),
 ) -> Unit {
   // per-connection SASL state
   let mut dtp_frames = 0
@@ -2027,6 +2692,109 @@ async fn fake_serve_conn(
           }
         }
       }
+      60 => {
+        cluster_ops.describe_cluster.push(fake_describe_cluster_request(rest))
+        fake_describe_cluster_response(broker_port, version)
+      }
+      32 => {
+        let (resources, _, _) = fake_describe_configs_request(rest)
+        for resource in resources {
+          let (resource_type, resource_name, keys) = resource
+          cluster_ops.describe_configs.push(
+            (resource_type, resource_name, keys),
+          )
+        }
+        fake_describe_configs_response(resources)
+      }
+      44 => {
+        let (resources, _) = fake_incremental_alter_configs_request(rest)
+        for resource in resources {
+          let (resource_type, resource_name, configs) = resource
+          cluster_ops.incremental_alters.push(
+            (resource_type, resource_name, configs),
+          )
+        }
+        fake_alter_configs_response(
+          resources.map(fn(r) {
+            let (t, n, _) = r
+            (t, n)
+          }),
+        )
+      }
+      33 => {
+        let (resources, _) = fake_alter_configs_request(rest)
+        for resource in resources {
+          let (resource_type, resource_name, configs) = resource
+          cluster_ops.alter_configs.push(
+            (resource_type, resource_name, configs),
+          )
+        }
+        fake_alter_configs_response(
+          resources.map(fn(r) {
+            let (t, n, _) = r
+            (t, n)
+          }),
+        )
+      }
+      74 => {
+        cluster_ops.list_config_resources.push(
+          fake_list_config_resources_request(rest),
+        )
+        fake_list_config_resources_response(version)
+      }
+      35 => {
+        let topics = fake_describe_log_dirs_request(rest)
+        cluster_ops.log_dirs.push(topics)
+        let effective = match topics {
+          Some(topics) => topics
+          None => [("events", [0, 1])]
+        }
+        fake_describe_log_dirs_response(effective, version)
+      }
+      43 => {
+        let (election_type, topics) = fake_elect_leaders_request(rest)
+        cluster_ops.elect_leaders.push((election_type, topics))
+        let effective = match topics {
+          Some(topics) => topics
+          None => [("events", [0, 1])]
+        }
+        fake_elect_leaders_response(effective)
+      }
+      45 => {
+        let reassignments = fake_alter_reassignments_request(rest)
+        for entry in reassignments {
+          let (name, index, replicas) = entry
+          cluster_ops.alter_reassignments.push((name, index, replicas))
+        }
+        fake_alter_reassignments_response(reassignments)
+      }
+      46 => {
+        let filter = fake_list_reassignments_request(rest)
+        cluster_ops.list_reassignments.push(filter)
+        fake_list_reassignments_response(filter)
+      }
+      64 => {
+        cluster_ops.unregister_broker.push(fake_unregister_broker_request(rest))
+        fake_unregister_broker_response()
+      }
+      55 => {
+        let requests = fake_describe_quorum_request(rest)
+        for entry in requests {
+          let (name, index) = entry
+          cluster_ops.quorum_requests.push((name, index))
+        }
+        fake_describe_quorum_response(requests)
+      }
+      57 => {
+        let (updates, validate_only) = fake_update_features_request(rest)
+        for update in updates {
+          let (feature, level, upgrade_type) = update
+          cluster_ops.update_features.push(
+            (feature, level, upgrade_type, validate_only),
+          )
+        }
+        fake_update_features_response(cluster_ops.update_features_error)
+      }
       _ => continue
     }
     // ApiVersions and SaslHandshake v1 responses use header v0: no tag
@@ -2091,6 +2859,7 @@ async fn fake_broker(
   create_partitions? : Array[(String, Int)] = [],
   delete_records? : Array[(String, Int, Int64)] = [],
   offset_deletes? : Array[(String, String, Int)] = [],
+  cluster_ops? : FakeClusterOps = FakeClusterOps::new(),
 ) -> Unit {
   for ;; {
     let (tcp, _) = server.accept()
@@ -2154,6 +2923,7 @@ async fn fake_broker(
         create_partitions~,
         delete_records~,
         offset_deletes~,
+        cluster_ops~,
       )
     }
   }
@@ -4176,6 +4946,292 @@ async test "admin topic lifecycle: create, grow, truncate, delete offsets, delet
     assert_eq(deleted_by_id[0].topic_id, created[0].topic_id)
     assert_eq(deleted_by_id[0].error_code, 0)
     assert_eq(delete_topics.length(), 2)
+    server.close()
+  }
+}
+
+///|
+async test "admin describes the cluster and its brokers" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let ops = FakeClusterOps::new()
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, cluster_ops=ops)
+    }
+    let admin = @moonkafka.Admin::connect(
+      group=root,
+      host="127.0.0.1",
+      port=server.addr.port(),
+    )
+    defer admin.close()
+    let described = admin.describe_cluster(
+      include_authorized_operations=true,
+      include_fenced_brokers=true,
+    )
+    assert_eq(described.error_code, 0)
+    assert_eq(described.cluster_id, Some("fake-cluster"))
+    assert_eq(described.controller_id, 0)
+    assert_eq(described.endpoint_type, @moonkafka.ENDPOINT_TYPE_BROKERS)
+    assert_eq(described.brokers.length(), 1)
+    assert_eq(described.brokers[0].node_id, 0)
+    assert_eq(described.brokers[0].host, "127.0.0.1")
+    assert_eq(described.brokers[0].port, server.addr.port())
+    assert_true(described.brokers[0].rack is None)
+    assert_true(!described.brokers[0].is_fenced)
+    // The fake serves the requested-operations bitfield verbatim.
+    assert_eq(described.cluster_authorized_operations, -2147483648)
+    assert_eq(ops.describe_cluster, [true])
+    server.close()
+  }
+}
+
+///|
+async test "admin describes and alters configs" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let ops = FakeClusterOps::new()
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, cluster_ops=ops)
+    }
+    let admin = @moonkafka.Admin::connect(
+      group=root,
+      host="127.0.0.1",
+      port=server.addr.port(),
+    )
+    defer admin.close()
+    // Filtered describe of one topic config key.
+    let filtered = admin.describe_configs([
+      {
+        resource_type: @moonkafka.CONFIG_RESOURCE_TOPIC,
+        resource_name: "events",
+        config_keys: Some(["retention.ms"]),
+      },
+    ])
+    assert_eq(filtered.length(), 1)
+    assert_eq(filtered[0].error_code, 0)
+    assert_eq(filtered[0].resource_name, "events")
+    assert_eq(filtered[0].configs.length(), 1)
+    assert_eq(filtered[0].configs[0].name, "retention.ms")
+    assert_eq(filtered[0].configs[0].value, Some("604800000"))
+    assert_true(!filtered[0].configs[0].read_only)
+    assert_true(!filtered[0].configs[0].is_sensitive)
+    // A null key filter asks for every key; the fake serves two.
+    let all = admin.describe_configs([
+      {
+        resource_type: @moonkafka.CONFIG_RESOURCE_TOPIC,
+        resource_name: "events",
+        config_keys: None,
+      },
+    ])
+    assert_eq(all[0].configs.length(), 2)
+    assert_eq(ops.describe_configs.length(), 2)
+    assert_true(ops.describe_configs[1].2 is None)
+    // Incremental set + delete ride AlterableConfig ops.
+    let altered = admin.incremental_alter_configs([
+      {
+        resource_type: @moonkafka.CONFIG_RESOURCE_TOPIC,
+        resource_name: "events",
+        configs: [
+          {
+            name: "retention.ms",
+            operation: @moonkafka.CONFIG_OP_SET,
+            value: Some("86400000"),
+          },
+          {
+            name: "cleanup.policy",
+            operation: @moonkafka.CONFIG_OP_DELETE,
+            value: None,
+          },
+        ],
+      },
+    ])
+    assert_eq(altered.length(), 1)
+    assert_eq(altered[0].error_code, 0)
+    assert_eq(altered[0].resource_type, @moonkafka.CONFIG_RESOURCE_TOPIC)
+    assert_eq(ops.incremental_alters.length(), 1)
+    assert_eq(ops.incremental_alters[0].2.length(), 2)
+    let (key, op, value) = ops.incremental_alters[0].2[0]
+    assert_eq(key, "retention.ms")
+    assert_eq(op, @moonkafka.CONFIG_OP_SET)
+    assert_eq(value, Some("86400000"))
+    // Legacy full-replace alter.
+    let legacy = admin.alter_configs([
+      {
+        resource_type: @moonkafka.CONFIG_RESOURCE_BROKER,
+        resource_name: "1",
+        configs: [{ name: "log.retention.hours", value: Some("48"), }],
+      },
+    ])
+    assert_eq(legacy[0].error_code, 0)
+    assert_eq(ops.alter_configs, [
+      (
+        @moonkafka.CONFIG_RESOURCE_BROKER,
+        "1",
+        [("log.retention.hours", Some("48"))],
+      ),
+    ])
+    // Config resource listings, unfiltered and broker-only.
+    let listed = admin.list_config_resources()
+    assert_eq(listed.error_code, 0)
+    assert_eq(listed.resources.length(), 2)
+    assert_eq(listed.resources[0].resource_name, "events")
+    assert_eq(
+      listed.resources[0].resource_type,
+      @moonkafka.CONFIG_RESOURCE_TOPIC,
+    )
+    let brokers_only = admin.list_config_resources(resource_types=[
+      @moonkafka.CONFIG_RESOURCE_BROKER,
+    ])
+    assert_eq(brokers_only.error_code, 0)
+    assert_eq(ops.list_config_resources, [
+      [],
+      [@moonkafka.CONFIG_RESOURCE_BROKER],
+    ])
+    server.close()
+  }
+}
+
+///|
+async test "admin describes log dirs, elects leaders, and reassigns" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let ops = FakeClusterOps::new()
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, cluster_ops=ops)
+    }
+    let admin = @moonkafka.Admin::connect(
+      group=root,
+      host="127.0.0.1",
+      port=server.addr.port(),
+    )
+    defer admin.close()
+    // All topics: the fake serves both partitions with sizes.
+    let dirs = admin.describe_log_dirs()
+    assert_eq(dirs.error_code, 0)
+    assert_eq(dirs.results.length(), 1)
+    assert_eq(dirs.results[0].log_dir, "/tmp/kafka-logs")
+    assert_eq(dirs.results[0].topics.length(), 1)
+    assert_eq(dirs.results[0].topics[0].partitions.length(), 2)
+    assert_eq(dirs.results[0].topics[0].partitions[1].partition_size, 101L)
+    assert_eq(dirs.results[0].total_bytes, 1000000L)
+    assert_eq(dirs.results[0].usable_bytes, 500000L)
+    assert_true(!dirs.results[0].is_cordoned)
+    // Filtered describe carries the requested partitions on the wire.
+    let filtered = admin.describe_log_dirs(topics=Some([("events", [0])]))
+    assert_eq(filtered.results[0].topics[0].partitions.length(), 1)
+    assert_eq(ops.log_dirs.length(), 2)
+    assert_true(ops.log_dirs[0] is None)
+    // Preferred leader election for explicit partitions.
+    let elected = admin.elect_leaders(
+      @moonkafka.ELECTION_PREFERRED,
+      topic_partitions=Some([("events", [0, 1])]),
+    )
+    assert_eq(elected.error_code, 0)
+    assert_eq(elected.results.length(), 1)
+    assert_eq(elected.results[0].partitions.length(), 2)
+    assert_eq(elected.results[0].partitions[1].error_code, 0)
+    // Unclean election with a null topic list elects everywhere.
+    let unclean = admin.elect_leaders(@moonkafka.ELECTION_UNCLEAN)
+    assert_eq(unclean.error_code, 0)
+    assert_eq(ops.elect_leaders, [
+      (@moonkafka.ELECTION_PREFERRED, Some([("events", [0, 1])])),
+      (@moonkafka.ELECTION_UNCLEAN, None),
+    ])
+    // Move partition 0 to replicas [1, 2] and cancel partition 1.
+    let reassigned = admin.alter_partition_reassignments([
+      {
+        name: "events",
+        partitions: [
+          { partition_index: 0, replicas: Some([1, 2]), },
+          { partition_index: 1, replicas: None, },
+        ],
+      },
+    ])
+    assert_eq(reassigned.error_code, 0)
+    assert_eq(reassigned.responses.length(), 1)
+    assert_eq(reassigned.responses[0].1.length(), 2)
+    assert_eq(ops.alter_reassignments, [
+      ("events", 0, Some([1, 2])),
+      ("events", 1, None),
+    ])
+    // Ongoing reassignments: unfiltered shows the fake's in-flight one.
+    let ongoing = admin.list_partition_reassignments()
+    assert_eq(ongoing.error_code, 0)
+    assert_eq(ongoing.topics.length(), 1)
+    let (_, ongoing_partitions) = ongoing.topics[0]
+    assert_eq(ongoing_partitions[0].partition_index, 0)
+    assert_eq(ongoing_partitions[0].replicas, [1, 2])
+    assert_eq(ongoing_partitions[0].adding_replicas, [2])
+    assert_eq(ongoing_partitions[0].removing_replicas, [1])
+    // A filter that misses the fake's topic yields no results.
+    let none = admin.list_partition_reassignments(topics=Some([("other", [0])]))
+    assert_eq(none.topics.length(), 0)
+    assert_eq(ops.list_reassignments.length(), 2)
+    server.close()
+  }
+}
+
+///|
+async test "admin reads the quorum, updates features, unregisters brokers" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let ops = FakeClusterOps::new()
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, cluster_ops=ops)
+    }
+    let admin = @moonkafka.Admin::connect(
+      group=root,
+      host="127.0.0.1",
+      port=server.addr.port(),
+    )
+    defer admin.close()
+    let quorum = admin.describe_quorum()
+    assert_eq(quorum.error_code, 0)
+    assert_eq(quorum.topics.length(), 1)
+    assert_eq(quorum.topics[0].topic_name, "__cluster_metadata")
+    let partition = quorum.topics[0].partitions[0]
+    assert_eq(partition.partition_index, 0)
+    assert_eq(partition.leader_id, 0)
+    assert_eq(partition.leader_epoch, 5)
+    assert_eq(partition.high_watermark, 42L)
+    assert_eq(partition.current_voters.length(), 1)
+    assert_eq(partition.current_voters[0].replica_id, 0)
+    assert_eq(partition.current_voters[0].log_end_offset, 42L)
+    assert_eq(partition.current_voters[0].last_fetch_timestamp, -1L)
+    assert_eq(quorum.nodes.length(), 1)
+    assert_eq(quorum.nodes[0].listeners, [("CONTROLLER", "127.0.0.1", 9093)])
+    assert_eq(ops.quorum_requests, [("__cluster_metadata", 0)])
+    // Feature update rides the controller route.
+    let updated = admin.update_features([
+      {
+        feature: "metadata.version",
+        max_version_level: 22,
+        upgrade_type: @moonkafka.FEATURE_UPGRADE,
+      },
+    ])
+    assert_eq(updated.error_code, 0)
+    assert_eq(ops.update_features, [
+      ("metadata.version", 22, @moonkafka.FEATURE_UPGRADE, false),
+    ])
+    // A terminal broker error surfaces as a value.
+    ops.update_features_error = 95
+    let failed = admin.update_features([
+      {
+        feature: "metadata.version",
+        max_version_level: 21,
+        upgrade_type: @moonkafka.FEATURE_SAFE_DOWNGRADE,
+      },
+    ])
+    assert_eq(failed.error_code, 95)
+    ops.update_features_error = 0
+    // Unregistering a fenced broker rides the controller route too.
+    let unregistered = admin.unregister_broker(5)
+    assert_eq(unregistered.error_code, 0)
+    assert_eq(ops.unregister_broker, [5])
     server.close()
   }
 }
