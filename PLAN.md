@@ -217,7 +217,7 @@ P6 = share/telemetry.
 | AddOffsetsToTxn | 4 | v4 | P3 | |
 | EndTxn | 5 | v5 | P3 | |
 | TxnOffsetCommit | 5 | v5 | P3 | |
-| DescribeAcls / CreateAcls / DeleteAcls | 3 | v3 | P5 | |
+| DescribeAcls / CreateAcls / DeleteAcls | 3 | v2-v3 (one wire shape; v3 adds the USER resource type) | P5 (done) | |
 | DescribeConfigs | 4 | v4 | P5 | |
 | AlterConfigs | 2 | v2 | P5 | |
 | DescribeLogDirs | 5 | v5 (adds `is_cordoned`) | P5 | 4.3 broker cordoning adjacent (KIP-1066) |
