@@ -20,6 +20,14 @@ pub const API_API_VERSIONS : Int = 18
 
 pub const API_CONSUMER_GROUP_HEARTBEAT : Int = 68
 
+pub const API_CREATE_PARTITIONS : Int = 37
+
+pub const API_CREATE_TOPICS : Int = 19
+
+pub const API_DELETE_RECORDS : Int = 21
+
+pub const API_DELETE_TOPICS : Int = 20
+
 pub const API_DESCRIBE_TOPIC_PARTITIONS : Int = 75
 
 pub const API_END_TXN : Int = 26
@@ -41,6 +49,8 @@ pub const API_LIST_OFFSETS : Int = 2
 pub const API_METADATA : Int = 3
 
 pub const API_OFFSET_COMMIT : Int = 8
+
+pub const API_OFFSET_DELETE : Int = 47
 
 pub const API_OFFSET_FETCH : Int = 9
 
@@ -98,6 +108,14 @@ pub fn decode_consumer_protocol_assignment(Bytes) -> Array[(String, Array[Int])]
 
 pub fn decode_consumer_protocol_subscription(Bytes) -> Array[String] raise
 
+pub fn decode_create_partitions_response(@buf.Decoder) -> (Array[CreatePartitionsResult], Int) raise
+
+pub fn decode_create_topics_response(@buf.Decoder) -> (Array[CreateTopicsResult], Int) raise
+
+pub fn decode_delete_records_response(@buf.Decoder) -> (Array[DeleteRecordsResult], Int) raise
+
+pub fn decode_delete_topics_response(@buf.Decoder) -> (Array[DeleteTopicsResult], Int) raise
+
 pub fn decode_describe_topic_partitions_response(@buf.Decoder) -> (DescribeTopicPartitions, Int) raise
 
 pub fn decode_end_txn_response(@buf.Decoder) -> (EndTxnResult, Int) raise
@@ -119,6 +137,8 @@ pub fn decode_list_offsets_response(@buf.Decoder) -> (Map[Int, Int64], Int) rais
 pub fn decode_metadata_response(Int, @buf.Decoder) -> (Metadata, Int) raise
 
 pub fn decode_offset_commit_response(Int, @buf.Decoder) -> (Array[OffsetCommitPartitionResult], Int) raise
+
+pub fn decode_offset_delete_response(@buf.Decoder) -> (OffsetDeleteResult, Int) raise
 
 pub fn decode_offset_fetch_response(Int, @buf.Decoder) -> (Array[OffsetFetchGroupResult], Int) raise
 
@@ -154,6 +174,14 @@ pub fn encode_consumer_protocol_assignment(Array[(String, Array[Int])]) -> Bytes
 
 pub fn encode_consumer_protocol_subscription(Array[String]) -> Bytes
 
+pub fn encode_create_partitions_request(Array[CreatePartitionsSpec], Int, Bool) -> Bytes
+
+pub fn encode_create_topics_request(Array[CreatableTopic], Int, Bool) -> Bytes
+
+pub fn encode_delete_records_request(Array[(String, Array[(Int, Int64)])], Int) -> Bytes
+
+pub fn encode_delete_topics_request(Array[String], Array[Uuid], Int) -> Bytes
+
 pub fn encode_describe_topic_partitions_request(Array[String], Int, cursor? : TopicPartitionCursor?) -> Bytes
 
 pub fn encode_end_txn_request(String, Int64, Int, Bool) -> Bytes
@@ -175,6 +203,8 @@ pub fn encode_list_offsets_request(Int, String, Array[PartitionInfo], Int64, tim
 pub fn encode_metadata_request(Array[String]?) -> Bytes
 
 pub fn encode_offset_commit_request(Int, String, Int, String, String?, Array[CommitTopic]) -> Bytes raise
+
+pub fn encode_offset_delete_request(String, Array[(String, Array[Int])]) -> Bytes
 
 pub fn encode_offset_fetch_request(Int, String, String, Int, Array[FetchOffsetTopic], require_stable? : Bool) -> Bytes raise
 
@@ -254,7 +284,12 @@ pub struct Admin {
 pub fn Admin::close(Self) -> Unit
 pub async fn Admin::connect(group~ : @async.TaskGroup[Unit], host~ : String, port~ : Int) -> Self
 pub async fn Admin::connect_with_config(group~ : @async.TaskGroup[Unit], AdminConfig) -> Self
+pub async fn Admin::create_partitions(Self, Array[CreatePartitionsSpec], validate_only? : Bool) -> Array[CreatePartitionsResult]
+pub async fn Admin::create_topics(Self, Array[CreatableTopic], validate_only? : Bool) -> Array[CreateTopicsResult]
+pub async fn Admin::delete_records(Self, Array[(String, Array[(Int, Int64)])]) -> Array[DeleteRecordsResult]
+pub async fn Admin::delete_topics(Self, Array[String], Array[Uuid]) -> Array[DeleteTopicsResult]
 pub async fn Admin::describe_topic_partitions(Self, Array[String]) -> Array[AdminTopicDescription]
+pub async fn Admin::offset_delete(Self, String, Array[(String, Array[Int])]) -> OffsetDeleteResult
 
 pub struct AdminConfig {
   common : CommonConfig
@@ -332,6 +367,10 @@ pub async fn BrokerConnection::authenticate(Self, SaslConfig, timeout_ms? : Int)
 pub fn BrokerConnection::close(Self) -> Unit
 pub async fn BrokerConnection::connect(String, Int, client_id? : String, max_in_flight? : Int, timeout_ms? : Int, tls? : TlsClientOptions?) -> Self
 pub async fn BrokerConnection::consumer_group_heartbeat(Self, String, String, Int, instance_id? : String?, rebalance_timeout_ms? : Int, subscribed_topic_names? : Array[String]?, subscribed_topic_regex? : String?, server_assignor? : String?, timeout_ms? : Int) -> ConsumerGroupHeartbeatResult
+pub async fn BrokerConnection::create_partitions(Self, Array[CreatePartitionsSpec], Int, validate_only? : Bool) -> Array[CreatePartitionsResult]
+pub async fn BrokerConnection::create_topics(Self, Array[CreatableTopic], Int, validate_only? : Bool) -> Array[CreateTopicsResult]
+pub async fn BrokerConnection::delete_records(Self, Array[(String, Array[(Int, Int64)])], Int) -> Array[DeleteRecordsResult]
+pub async fn BrokerConnection::delete_topics(Self, Array[String], Array[Uuid], Int) -> Array[DeleteTopicsResult]
 pub async fn BrokerConnection::describe_topic_partitions(Self, Array[String], response_partition_limit? : Int, cursor? : TopicPartitionCursor?, timeout_ms? : Int) -> DescribeTopicPartitions
 pub async fn BrokerConnection::end_txn(Self, String, Int64, Int, Bool, timeout_ms? : Int) -> EndTxnResult
 pub async fn BrokerConnection::fetch(Self, Array[FetchTopicReq], session~ : FetchSessionReq, max_wait_ms~ : Int, min_bytes? : Int, max_bytes? : Int, isolation_level? : Int, timeout_ms? : Int) -> FetchResult
@@ -345,6 +384,7 @@ pub async fn BrokerConnection::list_offsets(Self, String, Array[PartitionInfo], 
 pub async fn BrokerConnection::negotiate_api_versions(Self, timeout_ms? : Int) -> Unit
 pub fn BrokerConnection::note_throttle(Self, Int) -> Unit
 pub async fn BrokerConnection::offset_commit(Self, String, Int, String, group_instance_id? : String?, topics~ : Array[CommitTopic], timeout_ms? : Int) -> Array[OffsetCommitPartitionResult]
+pub async fn BrokerConnection::offset_delete(Self, String, Array[(String, Array[Int])], Int) -> OffsetDeleteResult
 pub async fn BrokerConnection::offset_fetch(Self, String, member_id? : String, member_epoch? : Int, topics~ : Array[FetchOffsetTopic], require_stable? : Bool, timeout_ms? : Int) -> Array[OffsetFetchGroupResult]
 pub async fn BrokerConnection::offset_for_leader_epoch(Self, String, Array[(Int, Int, Int)], timeout_ms? : Int) -> Array[EpochEndOffset]
 pub async fn BrokerConnection::produce(Self, String, topic_id? : Uuid, transactional_id? : String?, partitions~ : Array[(Int, Bytes)], acks~ : Int, timeout_ms~ : Int) -> Array[ProducePartitionResult]
@@ -535,6 +575,33 @@ pub(all) enum CoordinatorType {
   Share
 } derive(Eq, @debug.Debug)
 
+pub(all) struct CreatableTopic {
+  name : String
+  num_partitions : Int
+  replication_factor : Int
+  assignments : Array[(Int, Array[Int])]
+  configs : Array[(String, String?)]
+} derive(@debug.Debug)
+
+pub struct CreatePartitionsResult {
+  name : String
+  error_code : Int
+  error_message : String?
+} derive(@debug.Debug)
+
+pub(all) struct CreatePartitionsSpec {
+  name : String
+  count : Int
+  assignments : Array[Array[Int]]?
+} derive(@debug.Debug)
+
+pub struct CreateTopicsResult {
+  name : String
+  topic_id : Uuid
+  error_code : Int
+  error_message : String?
+} derive(@debug.Debug)
+
 pub struct Deadline {
   at_ms : Int64
 } derive(@debug.Debug)
@@ -551,6 +618,20 @@ pub(all) struct DecodedBatch {
   is_control : Bool
   is_transactional : Bool
   truncated : Bool
+} derive(@debug.Debug)
+
+pub struct DeleteRecordsResult {
+  topic : String
+  partition : Int
+  low_watermark : Int64
+  error_code : Int
+} derive(@debug.Debug)
+
+pub struct DeleteTopicsResult {
+  name : String?
+  topic_id : Uuid
+  error_code : Int
+  error_message : String?
 } derive(@debug.Debug)
 
 pub struct DescribeTopicPartitions {
@@ -702,6 +783,17 @@ pub struct Metadata {
 pub struct OffsetCommitPartitionResult {
   partition : Int
   error_code : Int
+} derive(@debug.Debug)
+
+pub struct OffsetDeletePartitionResult {
+  topic : String
+  partition : Int
+  error_code : Int
+} derive(@debug.Debug)
+
+pub struct OffsetDeleteResult {
+  error_code : Int
+  partitions : Array[OffsetDeletePartitionResult]
 } derive(@debug.Debug)
 
 pub struct OffsetFetchGroupResult {
