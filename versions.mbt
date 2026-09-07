@@ -168,6 +168,30 @@ pub const API_API_VERSIONS : Int = 18
 pub const API_SASL_AUTHENTICATE : Int = 36
 
 ///|
+pub const API_SHARE_GROUP_HEARTBEAT : Int = 76
+
+///|
+pub const API_SHARE_FETCH : Int = 78
+
+///|
+pub const API_SHARE_ACKNOWLEDGE : Int = 79
+
+///|
+pub const API_DESCRIBE_SHARE_GROUP_OFFSETS : Int = 90
+
+///|
+pub const API_ALTER_SHARE_GROUP_OFFSETS : Int = 91
+
+///|
+pub const API_DELETE_SHARE_GROUP_OFFSETS : Int = 92
+
+///|
+pub const API_GET_TELEMETRY_SUBSCRIPTIONS : Int = 71
+
+///|
+pub const API_PUSH_TELEMETRY : Int = 72
+
+///|
 // The handshake's own version cannot itself be negotiated: it is the
 // newest version every 4.0+ broker accepts.
 const API_VERSIONS_VERSION : Int = 3
@@ -472,6 +496,57 @@ pub fn driver_api_range(api_key : Int) -> ApiRange? {
         min: 2,
         max: 2,
       })
+    // Share groups (KIP-932). ShareGroupHeartbeat is v1-only (the
+    // initial GA shape); ShareFetch/ShareAcknowledge span v1-v2; the
+    // share-offset admin set uses v0 (Alter/Delete) and v0-v1
+    // (Describe, the v1 default for Lag = -1).
+    API_SHARE_GROUP_HEARTBEAT =>
+      Some({
+        key: API_SHARE_GROUP_HEARTBEAT,
+        name: "ShareGroupHeartbeat",
+        min: 1,
+        max: 1,
+      })
+    API_SHARE_FETCH =>
+      Some({ key: API_SHARE_FETCH, name: "ShareFetch", min: 1, max: 2, })
+    API_SHARE_ACKNOWLEDGE =>
+      Some({
+        key: API_SHARE_ACKNOWLEDGE,
+        name: "ShareAcknowledge",
+        min: 1,
+        max: 2,
+      })
+    API_DESCRIBE_SHARE_GROUP_OFFSETS =>
+      Some({
+        key: API_DESCRIBE_SHARE_GROUP_OFFSETS,
+        name: "DescribeShareGroupOffsets",
+        min: 0,
+        max: 1,
+      })
+    API_ALTER_SHARE_GROUP_OFFSETS =>
+      Some({
+        key: API_ALTER_SHARE_GROUP_OFFSETS,
+        name: "AlterShareGroupOffsets",
+        min: 0,
+        max: 0,
+      })
+    API_DELETE_SHARE_GROUP_OFFSETS =>
+      Some({
+        key: API_DELETE_SHARE_GROUP_OFFSETS,
+        name: "DeleteShareGroupOffsets",
+        min: 0,
+        max: 0,
+      })
+    // Telemetry (KIP-714): both are v0-only and flexible from v0.
+    API_GET_TELEMETRY_SUBSCRIPTIONS =>
+      Some({
+        key: API_GET_TELEMETRY_SUBSCRIPTIONS,
+        name: "GetTelemetrySubscriptions",
+        min: 0,
+        max: 0,
+      })
+    API_PUSH_TELEMETRY =>
+      Some({ key: API_PUSH_TELEMETRY, name: "PushTelemetry", min: 0, max: 0, })
     _ => None
   }
 }

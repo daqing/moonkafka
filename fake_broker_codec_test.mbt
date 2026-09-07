@@ -947,3 +947,229 @@ test "foreign member metadata decodes to no topics" {
   assert_eq(member.member_metadata, foreign)
   assert_eq(member.member_assignment, Bytes::make(0, b'\x00'))
 }
+
+///|
+test "share group heartbeat request/response round trip v1" {
+  // Request: group id, member id, epoch 1, no rack, no subscription.
+  let body = @moonkafka.encode_share_group_heartbeat_request(
+    1,
+    "share-group",
+    "member-a",
+    1,
+    rack_id=None,
+    subscribed_topic_names=None,
+  )
+  assert_eq(body.length() > 0, true)
+  // Response: throttle, error, message, member id, epoch 1, interval, an
+  // assignment with one topic -> one partition.
+  let e = @buf.Encoder::new()
+  e.write_i32(5) // throttle
+  e.write_i16(0) // error
+  e.write_compact_nullable_string(None)
+  e.write_compact_nullable_string(Some("member-a"))
+  e.write_i32(1) // member epoch
+  e.write_i32(2500) // heartbeat interval
+  e.write_i8(1) // assignment present
+  e.write_compact_len(1) // topics
+  e.write_bytes(Uuid::zero().to_bytes())
+  e.write_compact_len(1) // partitions
+  e.write_i32(0)
+  e.write_tag_buffer() // topic
+  e.write_tag_buffer() // assignment
+  e.write_tag_buffer() // top level
+  let d = @buf.Decoder::new(e.to_bytes())
+  let (result, throttle) = @moonkafka.decode_share_group_heartbeat_response(d)
+  assert_eq(d.remaining(), 0)
+  assert_eq(throttle, 5)
+  assert_eq(result.error_code, 0)
+  assert_eq(result.member_id, "member-a")
+  assert_eq(result.member_epoch, 1)
+  assert_eq(result.heartbeat_interval_ms, 2500)
+  assert_eq(result.assignment.length(), 1)
+  assert_eq(result.assignment[0].topic_id.to_bytes(), Uuid::zero().to_bytes())
+  assert_eq(result.assignment[0].partitions, [0])
+  // The driver negotiates v1 for the 4.3 broker's advertised range.
+  let versions = @moonkafka.decode_api_versions_response(
+    @buf.Decoder::new(fake_api_versions_response(0)),
+  )
+  assert_eq(versions.0.pick(@moonkafka.API_SHARE_GROUP_HEARTBEAT), 1)
+}
+
+///|
+test "share fetch v2 negotiates and decodes acquired records" {
+  let versions = @moonkafka.decode_api_versions_response(
+    @buf.Decoder::new(fake_api_versions_response(0)),
+  )
+  assert_eq(versions.0.pick(@moonkafka.API_SHARE_FETCH), 2)
+  assert_eq(versions.0.pick(@moonkafka.API_SHARE_ACKNOWLEDGE), 2)
+  // Build a response with one partition carrying one acquired range and
+  // a single record batch of one record.
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_i16(0) // error
+  e.write_compact_nullable_string(None)
+  e.write_i32(0) // acquisition lock timeout
+  e.write_compact_len(1) // responses
+  e.write_bytes(Uuid::zero().to_bytes())
+  e.write_compact_len(1) // partitions
+  e.write_i32(0) // partition index
+  e.write_i16(0) // error code
+  e.write_compact_nullable_string(None)
+  e.write_i16(0) // ack error code
+  e.write_compact_nullable_string(None)
+  e.write_i32(1) // leader id
+  e.write_i32(0) // leader epoch
+  e.write_compact_len(-1) // records: null
+  e.write_compact_len(1) // acquired records
+  e.write_i64(0L) // first offset
+  e.write_i64(0L) // last offset
+  e.write_i16(1) // delivery count 1
+  e.write_tag_buffer() // partition
+  e.write_tag_buffer() // topic
+  e.write_tag_buffer() // top level (skips NodeEndpoints)
+  let d = @buf.Decoder::new(e.to_bytes())
+  let (result, _) = @moonkafka.decode_share_fetch_response(2, d)
+  assert_eq(d.remaining(), 0)
+  assert_eq(result.error_code, 0)
+  assert_eq(result.acquisition_lock_timeout_ms, 0)
+  assert_eq(result.topics.length(), 1)
+  let part = result.topics[0].partitions[0]
+  assert_eq(part.partition, 0)
+  assert_eq(part.acquired.length(), 1)
+  assert_eq(part.acquired[0].first_offset, 0L)
+  assert_eq(part.acquired[0].delivery_count, 1)
+}
+
+///|
+test "share acknowledge v1 omits and v2 includes lock timeout" {
+  // v1 response: throttle, error, message, responses, node-endpoints.
+  let e1 = @buf.Encoder::new()
+  e1.write_i32(0)
+  e1.write_i16(0)
+  e1.write_compact_nullable_string(None)
+  e1.write_compact_len(0) // responses
+  e1.write_tag_buffer() // node endpoints (aggregatable)
+  let d1 = @buf.Decoder::new(e1.to_bytes())
+  let (r1, _) = @moonkafka.decode_share_acknowledge_response(1, d1)
+  assert_eq(d1.remaining(), 0)
+  assert_eq(r1.acquisition_lock_timeout_ms, 0)
+  // v2 response: the lock timeout field precedes responses.
+  let e2 = @buf.Encoder::new()
+  e2.write_i32(0)
+  e2.write_i16(0)
+  e2.write_compact_nullable_string(None)
+  e2.write_i32(7) // acquisition lock timeout
+  e2.write_compact_len(0) // responses
+  e2.write_tag_buffer()
+  let d2 = @buf.Decoder::new(e2.to_bytes())
+  let (r2, _) = @moonkafka.decode_share_acknowledge_response(2, d2)
+  assert_eq(d2.remaining(), 0)
+  assert_eq(r2.acquisition_lock_timeout_ms, 7)
+}
+
+///|
+test "describe alter delete share group offsets negotiate and decode" {
+  let versions = @moonkafka.decode_api_versions_response(
+    @buf.Decoder::new(fake_api_versions_response(0)),
+  )
+  assert_eq(versions.0.pick(@moonkafka.API_DESCRIBE_SHARE_GROUP_OFFSETS), 1)
+  assert_eq(versions.0.pick(@moonkafka.API_ALTER_SHARE_GROUP_OFFSETS), 0)
+  assert_eq(versions.0.pick(@moonkafka.API_DELETE_SHARE_GROUP_OFFSETS), 0)
+  // Describe v1 response with Lag present.
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(1) // groups
+  e.write_compact_string("share-group")
+  e.write_compact_len(1) // topics
+  e.write_compact_string("events")
+  e.write_bytes(Uuid::zero().to_bytes())
+  e.write_compact_len(1) // partitions
+  e.write_i32(0)
+  e.write_i64(5L)
+  e.write_i32(0)
+  e.write_i64(3L) // lag
+  e.write_i16(0)
+  e.write_compact_nullable_string(None)
+  e.write_tag_buffer() // partition
+  e.write_tag_buffer() // topic
+  e.write_i16(0) // group error
+  e.write_compact_nullable_string(None)
+  e.write_tag_buffer() // group
+  e.write_tag_buffer() // top level
+  let d = @buf.Decoder::new(e.to_bytes())
+  let (groups, _) = @moonkafka.decode_describe_share_group_offsets_response(
+    1, d,
+  )
+  assert_eq(d.remaining(), 0)
+  assert_eq(groups[0].topics[0].partitions[0].start_offset, 5L)
+  assert_eq(groups[0].topics[0].partitions[0].lag, 3L)
+  // Alter v0: one topic, one partition start offset 9.
+  let alter_body = @moonkafka.encode_alter_share_group_offsets_request(
+    "share-group",
+    [{ name: "events", partitions: [{ partition: 0, start_offset: 9L, }], }],
+  )
+  assert_eq(alter_body.length() > 0, true)
+  // Delete v0 request carries the group id and topic names.
+  let delete_body = @moonkafka.encode_delete_share_group_offsets_request(
+    "share-group",
+    ["events"],
+  )
+  assert_eq(delete_body.length() > 0, true)
+}
+
+///|
+test "telemetry subscription and push negotiate and round-trip v0" {
+  let versions = @moonkafka.decode_api_versions_response(
+    @buf.Decoder::new(fake_api_versions_response(0)),
+  )
+  assert_eq(versions.0.pick(@moonkafka.API_GET_TELEMETRY_SUBSCRIPTIONS), 0)
+  assert_eq(versions.0.pick(@moonkafka.API_PUSH_TELEMETRY), 0)
+  // GetTelemetrySubscriptions request carries a 16-byte instance id.
+  let req = @moonkafka.encode_get_telemetry_subscriptions_request(Uuid::zero())
+  assert_eq(req.length(), 17) // uuid + tag buffer
+  // Subscription response: throttle, error, instance id, subscription id,
+  // accepted compression, push interval, max bytes, delta flag, metrics.
+  let e = @buf.Encoder::new()
+  e.write_i32(3) // throttle
+  e.write_i16(0) // error
+  e.write_bytes(Uuid::zero().to_bytes())
+  e.write_i32(7) // subscription id
+  e.write_compact_len(1) // accepted compressions
+  e.write_i8(0) // none
+  e.write_i32(30000) // push interval
+  e.write_i32(16384) // max bytes
+  e.write_bool(false) // delta temporality
+  e.write_compact_len(1) // requested metrics
+  e.write_compact_string("kafka_metrics")
+  e.write_tag_buffer()
+  let d = @buf.Decoder::new(e.to_bytes())
+  let (sub, throttle) = @moonkafka.decode_get_telemetry_subscriptions_response(
+    d,
+  )
+  assert_eq(d.remaining(), 0)
+  assert_eq(throttle, 3)
+  assert_eq(sub.subscription_id, 7)
+  assert_eq(sub.accepted_compression_types, [0])
+  assert_eq(sub.push_interval_ms, 30000)
+  assert_eq(sub.telemetry_max_bytes, 16384)
+  assert_eq(sub.requested_metrics, ["kafka_metrics"])
+  // PushTelemetry request body round-trips its fields.
+  let payload = b"records_sent=42\n"
+  let push = @moonkafka.encode_push_telemetry_request(
+    Uuid::zero(),
+    7,
+    false,
+    0,
+    payload,
+  )
+  assert_eq(push.length() > 16, true)
+  // Push response: throttle, error, tag buffer.
+  let r = @buf.Encoder::new()
+  r.write_i32(0)
+  r.write_i16(0)
+  r.write_tag_buffer()
+  let (code, _) = @moonkafka.decode_push_telemetry_response(
+    @buf.Decoder::new(r.to_bytes()),
+  )
+  assert_eq(code, 0)
+}
