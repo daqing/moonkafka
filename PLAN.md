@@ -742,13 +742,29 @@ rejoins); read_committed skips aborted txns (producer txn test from P3).
 
 ### Phase 5 — Admin client
 
-- [ ] `Admin` struct over the cluster layer (any-broker or
-      controller-routed as per API); per-item result arrays mirroring the
-      protocol's per-topic/per-partition error codes; retriable-error retry
-      policy knob.
-- [ ] Topic ops: CreateTopics v7 (incl. configs + replication assignment),
-      DeleteTopics v6 (by name/id), CreatePartitions v3,
-      DescribeTopicPartitions, DeleteRecords v2, OffsetDelete v0.
+- [x] `Admin` struct over the cluster layer: DONE (commit 8803fb9,
+      root scope `admin.mbt`; folds into the `admin/` split with the
+      ops): `AdminConfig` carries the admin-specific retry knob
+      (`admin_retries`); ops run through `with_retries` — a result the
+      op classifies retriable re-issues with backoff, transport
+      failures raise. Routing helpers for any-broker (control
+      connection, the default — brokers forward to the controller) and
+      controller-routed ops (`controller_conn`, backed by the
+      controller id metadata now keeps and exposes). Per-item results
+      mirror the protocol: DescribeTopicPartitions per-topic error
+      codes travel as values through `TopicMetadata` (the old
+      raise-on-topic-error behavior became the admin value shape), with
+      pages merged per topic behind the cursor walk.
+- [x] Topic ops: DONE (commit 80fc6e8, root scope `admin_topics.mbt`):
+      CreateTopics v7 (config overrides + explicit replica assignments,
+      topic id echoed), DeleteTopics v6 (by name, by topic id, or
+      mixed), CreatePartitions v3 (counts + new-partition placement),
+      DeleteRecords v2 (low watermarks back), OffsetDelete v0 per
+      group/topic/partition — all per-item error codes as values under
+      the retry policy. OffsetDelete v0 is the one non-flexible API in
+      the set and uses header-v0 framing both directions. E2E against
+      the fake broker: full create → grow → truncate → offset-delete →
+      delete-by-name → delete-by-id lifecycle.
 - [ ] Cluster/config: DescribeCluster v2 (brokers, controller id, cluster id,
       `endpoint_type`), DescribeConfigs v4 + IncrementalAlterConfigs v1 +
       AlterConfigs v2, ListConfigResources v0, DescribeLogDirs v5
@@ -762,8 +778,11 @@ rejoins); read_committed skips aborted txns (producer txn test from P3).
 - [ ] Security: Describe/Create/DeleteAcls v3; quotas
       Describe/AlterClientQuotas; SCRAM credentials
       Describe/AlterUserScramCredentials.
-- [ ] Topic-id-first admin ops where the API supports it (fewer metadata
-      round-trips).
+- [x] Topic-id-first admin ops: DONE (commit 80fc6e8): DeleteTopics v6
+      addresses deletions by topic id alone (null name + id, KIP-516),
+      and DescribeTopicPartitions returns ids for follow-up ops; the
+      remaining admin APIs in range are name-addressed by their v4.3
+      schemas, so there is nothing further to prefer ids on.
 
 **Acceptance:** admin integration tests: create/inspect/alter/delete a topic
 end-to-end; ACL grant → unauthorized client fails with the right error;
