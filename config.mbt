@@ -412,10 +412,68 @@ pub fn ProducerConfig::new(
 }
 
 ///|
+/// Which consumer-group protocol subscribe() runs (Java's
+/// group.protocol). Consumer is the KIP-848 path; Classic the
+/// JoinGroup/SyncGroup compat path; the fallback orders try the
+/// preferred protocol first and degrade to the other when the broker
+/// does not advertise it.
+pub(all) enum GroupProtocol {
+  /// KIP-848 only: subscribe fails against brokers without it.
+  ConsumerProtocol
+  /// Classic only: works on every Kafka 4.x broker.
+  ClassicProtocol
+  /// Prefer KIP-848, fall back to classic when unavailable.
+  PreferConsumer
+  /// Prefer classic, fall back to KIP-848 when classic is unavailable.
+  PreferClassic
+} derive(@debug.Debug, Eq)
+
+///|
+/// Where to move the read position when a fetch reports
+/// OFFSET_OUT_OF_RANGE (Java's auto.offset.reset). ResetNone surfaces
+/// the error to the caller instead of silently repositioning.
+pub(all) enum AutoOffsetReset {
+  ResetEarliest
+  ResetLatest
+  ResetNone
+} derive(@debug.Debug)
+
+///|
 pub struct ConsumerConfig {
   common : CommonConfig
   topic : String
   start_from : StartFrom
+  /// Consumer group id; required for offset commits and group joins.
+  /// None keeps the consumer group-less (read-only, offsets in memory).
+  group_id : String?
+  /// Commit the polled positions every auto_commit_interval_ms and once
+  /// more on close; requires a group id.
+  enable_auto_commit : Bool
+  auto_commit_interval_ms : Int
+  /// Out-of-range recovery policy; defaults to following `start_from`.
+  auto_offset_reset : AutoOffsetReset
+  /// Upper bound on records one poll returns; extra records stay in the
+  /// log and the position rewinds to the first unconsumed record.
+  max_poll_records : Int
+  /// Per-partition byte cap carried in each fetch request (Java's
+  /// max.partition.fetch.bytes).
+  max_partition_fetch_bytes : Int
+  /// Fetch with READ_COMMITTED isolation and filter aborted
+  /// transactions out of polled records.
+  enable_read_committed : Bool
+  /// Static membership identity (KIP-848): a member restarting with the
+  /// same instance id rejoins without triggering a rebalance.
+  group_instance_id : String?
+  /// Classic-protocol pacing: heartbeats must land well inside the
+  /// session timeout or the coordinator evicts the member.
+  heartbeat_interval_ms : Int
+  session_timeout_ms : Int
+  /// The longest allowed gap between poll() calls; exceeding it makes
+  /// the consumer leave its group and surface the error (Java's
+  /// max.poll.interval.ms).
+  max_poll_interval_ms : Int
+  /// Which group protocol subscribe() runs.
+  group_protocol : GroupProtocol
 } derive(@debug.Debug)
 
 ///|
@@ -428,10 +486,61 @@ pub fn ConsumerConfig::new(
   sasl? : SaslConfig? = None,
   tls? : TlsClientOptions? = None,
   metadata_max_age_ms? : Int = 300000,
+  group_id? : String? = None,
+  enable_auto_commit? : Bool = true,
+  auto_commit_interval_ms? : Int = 5000,
+  auto_offset_reset? : AutoOffsetReset? = None,
+  max_poll_records? : Int = 500,
+  max_partition_fetch_bytes? : Int = 1048576,
+  enable_read_committed? : Bool = false,
+  group_instance_id? : String? = None,
+  heartbeat_interval_ms? : Int = 3000,
+  session_timeout_ms? : Int = 45000,
+  max_poll_interval_ms? : Int = 300000,
+  group_protocol? : GroupProtocol = ConsumerProtocol,
 ) -> ConsumerConfig raise {
   if topic.length() == 0 {
     raise ProtocolError::ProtocolError("topic must not be empty")
   }
+  match group_id {
+    Some(id) =>
+      if id.is_empty() {
+        raise ProtocolError::ProtocolError("group_id must not be empty")
+      }
+    None => ()
+  }
+  if auto_commit_interval_ms <= 0 {
+    raise ProtocolError::ProtocolError(
+      "auto_commit_interval_ms must be positive, got \{auto_commit_interval_ms}",
+    )
+  }
+  if max_poll_records <= 0 {
+    raise ProtocolError::ProtocolError(
+      "max_poll_records must be positive, got \{max_poll_records}",
+    )
+  }
+  if heartbeat_interval_ms <= 0 {
+    raise ProtocolError::ProtocolError(
+      "heartbeat_interval_ms must be positive, got \{heartbeat_interval_ms}",
+    )
+  }
+  if max_poll_interval_ms <= 0 {
+    raise ProtocolError::ProtocolError(
+      "max_poll_interval_ms must be positive, got \{max_poll_interval_ms}",
+    )
+  }
+  if session_timeout_ms < heartbeat_interval_ms {
+    raise ProtocolError::ProtocolError(
+      "session_timeout_ms (\{session_timeout_ms}) must be at least heartbeat_interval_ms (\{heartbeat_interval_ms})",
+    )
+  }
+  if max_partition_fetch_bytes <= 0 {
+    raise ProtocolError::ProtocolError(
+      "max_partition_fetch_bytes must be positive, got \{max_partition_fetch_bytes}",
+    )
+  }
+  // Auto-commit without a group is inert (nothing to commit to); the
+  // flag only takes effect alongside a group id.
   {
     common: CommonConfig::new(
       bootstrap_servers,
@@ -443,5 +552,22 @@ pub fn ConsumerConfig::new(
     ),
     topic,
     start_from,
+    group_id,
+    enable_auto_commit,
+    auto_commit_interval_ms,
+    auto_offset_reset: auto_offset_reset.unwrap_or(
+      match start_from {
+        Earliest => ResetEarliest
+        Latest => ResetLatest
+      },
+    ),
+    max_poll_records,
+    max_partition_fetch_bytes,
+    enable_read_committed,
+    group_instance_id,
+    heartbeat_interval_ms,
+    session_timeout_ms,
+    max_poll_interval_ms,
+    group_protocol,
   }
 }

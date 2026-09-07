@@ -133,6 +133,7 @@ pub async fn BrokerConnection::fetch(
   max_wait_ms~ : Int,
   min_bytes? : Int = 1,
   max_bytes? : Int = 0x7fffffff,
+  isolation_level? : Int = 0,
   timeout_ms? : Int = 30000,
 ) -> FetchResult {
   let version = self.api_version(API_FETCH)
@@ -146,6 +147,7 @@ pub async fn BrokerConnection::fetch(
       max_wait_ms~,
       min_bytes~,
       max_bytes~,
+      isolation_level~,
     ),
     timeout_ms~,
   )

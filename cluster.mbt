@@ -230,6 +230,27 @@ pub fn ClusterClient::topic_name(self : ClusterClient, id : Uuid) -> String? {
 }
 
 ///|
+/// Whether the broker advertises the given API key at all (protocol
+/// capability probe for the group-protocol fallback).
+pub fn ClusterClient::supports_api(self : ClusterClient, api_key : Int) -> Bool {
+  match self.control.versions {
+    Some(versions) => versions.range(api_key) is Some(_)
+    None => false
+  }
+}
+
+///|
+/// Names of every topic in the cached metadata snapshot (subscription
+/// expansion for regex consumers).
+pub fn ClusterClient::topics_snapshot(self : ClusterClient) -> Array[String] {
+  let out : Array[String] = []
+  for name, _ in self.topics {
+    out.push(name)
+  }
+  out
+}
+
+///|
 /// Sum of the throttle hints received across the control connection and
 /// every pooled connection.
 pub fn ClusterClient::total_throttle_ms(self : ClusterClient) -> Int64 {

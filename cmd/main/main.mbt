@@ -110,51 +110,63 @@ async fn consume(args : Array[String]) -> Unit {
       }
     None => 9092
   }
-  let consumer = @lib.Consumer::connect(host~, port~, topic~, start_from=Latest) catch {
-    @lib.ProtocolError(msg) => {
-      println("failed to connect: \{msg}")
-      abort("")
-    }
-    @lib.BrokerError(code, msg) => {
-      println("broker error: \{@lib.error_name(code)}: \{msg}")
-      abort("")
-    }
-    @buf.Malformed(msg) => {
-      println("protocol decode error: \{msg}")
-      abort("")
-    }
-    @buf.UnexpectedEof => {
-      println("protocol decode error: unexpected end of response")
-      abort("")
-    }
-    e => {
-      println("failed to connect: \{e}")
-      abort("")
-    }
-  }
-  defer consumer.close()
-  println("consuming topic \"\{topic}\" from \{host}:\{port} (Ctrl-C to stop)")
-  for ;; {
-    let records = consumer.poll() catch {
+  // The consumer's autocommit loop lives in a task group scoped to the
+  // consume call.
+  @async.with_task_group(fn(group) {
+    let consumer = @lib.Consumer::connect(
+      group~,
+      host~,
+      port~,
+      topic~,
+      start_from=Latest,
+    ) catch {
+      @lib.ProtocolError(msg) => {
+        println("failed to connect: \{msg}")
+        abort("")
+      }
+      @lib.BrokerError(code, msg) => {
+        println("broker error: \{@lib.error_name(code)}: \{msg}")
+        abort("")
+      }
+      @buf.Malformed(msg) => {
+        println("protocol decode error: \{msg}")
+        abort("")
+      }
+      @buf.UnexpectedEof => {
+        println("protocol decode error: unexpected end of response")
+        abort("")
+      }
       e => {
-        println("poll error: \{e}; retrying")
-        @async.sleep(1000)
-        continue
+        println("failed to connect: \{e}")
+        abort("")
       }
     }
-    for record in records {
-      let key = match record.key {
-        Some(k) => @utf8.decode_lossy(k[:])
-        None => "<null>"
+    defer consumer.close()
+    println(
+      "consuming topic \"\{topic}\" from \{host}:\{port} (Ctrl-C to stop)",
+    )
+    for ;; {
+      let records = consumer.poll() catch {
+        e => {
+          println("poll error: \{e}; retrying")
+          @async.sleep(1000)
+          continue
+        }
       }
-      let value = match record.value {
-        Some(v) => @utf8.decode_lossy(v[:])
-        None => "<tombstone>"
+      for record in records {
+        let key = match record.key {
+          Some(k) => @utf8.decode_lossy(k[:])
+          None => "<null>"
+        }
+        let value = match record.value {
+          Some(v) => @utf8.decode_lossy(v[:])
+          None => "<tombstone>"
+        }
+        println("offset=\{record.offset} key=\{key} value=\{value}")
       }
-      println("offset=\{record.offset} key=\{key} value=\{value}")
+      if records.is_empty() {
+        @async.sleep(500)
+      }
     }
-    if records.is_empty() {
-      @async.sleep(500)
-    }
-  }
+  })
 }
