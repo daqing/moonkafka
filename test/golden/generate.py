@@ -85,7 +85,7 @@ def records_region():
 
 
 CODECS = {
-    1: lambda region: gzip_mod.compress(region),
+    1: lambda region: gzip_mod.compress(region, mtime=0),
     2: lambda region: xerial_wrap(region),
     3: lambda region: lz4_frame_wrap_data(region),
     4: lambda region: bytes(cramjam.zstd.compress(region)),
@@ -161,7 +161,7 @@ def main():
     with open(os.path.join(HERE, "payload.bin"), "wb") as f:
         f.write(PAYLOAD)
 
-    gzip_stream = gzip_mod.compress(PAYLOAD)
+    gzip_stream = gzip_mod.compress(PAYLOAD, mtime=0)
     snappy_stream = xerial_wrap(PAYLOAD)
     lz4_stream = lz4_frame_wrap_data(PAYLOAD)
     zstd_stream = bytes(cramjam.zstd.compress(PAYLOAD))

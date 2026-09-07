@@ -47,7 +47,14 @@ pub fn encode_produce_request(
       "Produce v13 needs the topic id; refresh metadata first",
     )
   }
-  let body = @buf.Encoder::new()
+  // Preallocate for the fixed body, one topic entry, and the partition
+  // payloads so the common produce request path avoids array growth
+  // reallocations.
+  let mut payload_bytes = 0
+  for entry in partitions {
+    payload_bytes += entry.1.length()
+  }
+  let body = @buf.Encoder::with_capacity(64 + payload_bytes)
   body.write_compact_nullable_string(transactional_id)
   body.write_i16(acks)
   body.write_i32(timeout_ms)
