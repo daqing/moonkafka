@@ -794,9 +794,22 @@ rejoins); read_committed skips aborted txns (producer txn test from P3).
       ListGroups v5 (state/type filters), DeleteGroups v2;
       consumers-of / DescribeProducers v0, DescribeTransactions v0,
       ListTransactions v2.
-- [ ] Security: Describe/Create/DeleteAcls v3; quotas
-      Describe/AlterClientQuotas; SCRAM credentials
-      Describe/AlterUserScramCredentials.
+- [x] Security — ACLs: DONE (this commit, root scope `admin_acls.mbt`):
+      DescribeAcls v2-v3, CreateAcls v2-v3, DeleteAcls v2-v3 (v3 only
+      adds the USER resource type — v2/v3 share one wire shape, so the
+      matrix negotiates either). Enum byte values pinned from
+      `ResourceType.java`, `PatternType.java`, `AclOperation.java`,
+      `AclPermissionType.java` and surfaced as `ACL_RESOURCE_*` /
+      `ACL_PATTERN_*` / `ACL_OPERATION_*` / `ACL_PERMISSION_*`
+      constants. `AclFilter` (None fields match anything) drives
+      describe/delete; `AclCreation`/`AclBinding` carry creations and
+      results; DeleteAcls reports per-filter and per-matching-ACL error
+      codes as values under the retry policy. E2E against the fake
+      broker (create → describe → delete round trip with wire captures)
+      plus codec tests for the shared v2/v3 shape and per-item error
+      paths.
+- [ ] Security — quotas and SCRAM: quotas Describe/AlterClientQuotas;
+      SCRAM credentials Describe/AlterUserScramCredentials.
 - [x] Topic-id-first admin ops: DONE (commit 80fc6e8): DeleteTopics v6
       addresses deletions by topic id alone (null name + id, KIP-516),
       and DescribeTopicPartitions returns ids for follow-up ops; the
