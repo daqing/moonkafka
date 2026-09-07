@@ -508,7 +508,11 @@ pub fn RecordBatchBuilder::to_bytes(self : RecordBatchBuilder) -> Bytes {
   } else {
     self.max_timestamp
   }
-  let batch = @buf.Encoder::new()
+  // Preallocate the full header plus all record bodies so finalization
+  // never reallocates the backing array.
+  let batch = @buf.Encoder::with_capacity(
+    RECORD_BATCH_HEADER_SIZE + self.body_bytes,
+  )
   batch.write_i64(self.base_offset) // baseOffset
   batch.write_i32(0) // batchLength: patched below
   batch.write_i32(-1) // partitionLeaderEpoch: unknown to the producer
