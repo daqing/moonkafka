@@ -31,6 +31,11 @@ fn fake_api_versions_response(
     (12, 4),
     (13, 5),
     (14, 5),
+    (19, 7),
+    (20, 6),
+    (21, 2),
+    (37, 3),
+    (47, 0),
   ]
   let apis = all_apis.filter(fn(pair) { !hide_apis.contains(pair.0) })
   e.write_compact_len(apis.length())
@@ -725,6 +730,271 @@ fn FakeCoordinator::round_complete(self : FakeCoordinator) -> Bool {
 }
 
 ///|
+/// Parse a CreateTopics v7 request: (names, requested partition counts,
+/// replication factors, timeout, validate-only).
+fn fake_create_topics_request(
+  rest : Bytes,
+) -> (Array[(String, Int, Int)], Bool) raise {
+  let d = @buf.Decoder::new(rest)
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  ignore(d.read_compact_string()) // client id
+  d.skip_tag_buffer()
+  let n = d.read_compact_len()
+  let topics : Array[(String, Int, Int)] = []
+  for _ in 0..<n {
+    let name = d.read_compact_string()
+    let num_partitions = d.read_i32()
+    let replication_factor = d.read_i16()
+    let assignments = d.read_compact_len()
+    for _ in 0..<assignments {
+      ignore(d.read_i32())
+      let brokers = d.read_compact_len()
+      d.skip(brokers * 4)
+      d.skip_tag_buffer()
+    }
+    let configs = d.read_compact_len()
+    for _ in 0..<configs {
+      ignore(d.read_compact_string())
+      ignore(d.read_compact_nullable_string())
+      d.skip_tag_buffer()
+    }
+    d.skip_tag_buffer()
+    topics.push((name, num_partitions, replication_factor))
+  }
+  ignore(d.read_i32()) // timeout
+  let validate_only = d.read_bool()
+  (topics, validate_only)
+}
+
+///|
+/// CreateTopics v7 response body: per-topic success with generated ids.
+fn fake_create_topics_response(
+  results : Array[(String, Bytes, Int, String?)],
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(results.length())
+  for result in results {
+    let (name, id, error_code, message) = result
+    e.write_compact_string(name)
+    e.write_bytes(id)
+    e.write_i16(error_code)
+    e.write_compact_nullable_string(message)
+    e.write_i16(0) // topic config error
+    e.write_i32(-1) // num partitions
+    e.write_i16(-1) // replication factor
+    e.write_compact_len(-1) // configs: null
+    e.write_tag_buffer()
+  }
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse a DeleteTopics v6 request: (names, topic ids).
+fn fake_delete_topics_request(
+  rest : Bytes,
+) -> (Array[String], Array[Bytes]) raise {
+  let d = @buf.Decoder::new(rest)
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  ignore(d.read_compact_string()) // client id
+  d.skip_tag_buffer()
+  let n = d.read_compact_len()
+  let names : Array[String] = []
+  let ids : Array[Bytes] = []
+  for _ in 0..<n {
+    let name = d.read_compact_nullable_string()
+    let id = d.read_bytes(16)
+    d.skip_tag_buffer()
+    match name {
+      Some(name) => names.push(name)
+      None => ids.push(id)
+    }
+  }
+  ignore(d.read_i32()) // timeout
+  (names, ids)
+}
+
+///|
+/// DeleteTopics v6 response body.
+fn fake_delete_topics_response(
+  names : Array[String],
+  ids : Array[Bytes],
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(names.length() + ids.length())
+  for name in names {
+    e.write_compact_nullable_string(Some(name))
+    e.write_bytes(Bytes::make(16, 0))
+    e.write_i16(0)
+    e.write_compact_nullable_string(None)
+    e.write_tag_buffer()
+  }
+  for id in ids {
+    e.write_compact_nullable_string(None)
+    e.write_bytes(id)
+    e.write_i16(0)
+    e.write_compact_nullable_string(None)
+    e.write_tag_buffer()
+  }
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse a DeleteRecords v2 request: ((topic, partition, offset) triples,
+/// timeout).
+fn fake_delete_records_request(
+  rest : Bytes,
+) -> (Array[(String, Array[(Int, Int64)])], Int) raise {
+  let d = @buf.Decoder::new(rest)
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  ignore(d.read_compact_string()) // client id
+  d.skip_tag_buffer()
+  let n = d.read_compact_len()
+  let topics : Array[(String, Array[(Int, Int64)])] = []
+  for _ in 0..<n {
+    let name = d.read_compact_string()
+    let parts = d.read_compact_len()
+    let partitions : Array[(Int, Int64)] = []
+    for _ in 0..<parts {
+      let index = d.read_i32()
+      let offset = d.read_i64()
+      d.skip_tag_buffer()
+      partitions.push((index, offset))
+    }
+    d.skip_tag_buffer()
+    topics.push((name, partitions))
+  }
+  let timeout = d.read_i32()
+  (topics, timeout)
+}
+
+///|
+/// DeleteRecords v2 response body: per-partition low watermarks.
+fn fake_delete_records_response(results : Array[(Int, Int64, Int)]) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(1) // one topic
+  e.write_compact_string("events")
+  e.write_compact_len(results.length())
+  for result in results {
+    let (index, watermark, error_code) = result
+    e.write_i32(index)
+    e.write_i64(watermark)
+    e.write_i16(error_code)
+    e.write_tag_buffer()
+  }
+  e.write_tag_buffer()
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse a CreatePartitions v3 request: (names, counts, timeout).
+fn fake_create_partitions_request(
+  rest : Bytes,
+) -> (Array[(String, Int, Int)], Bool) raise {
+  let d = @buf.Decoder::new(rest)
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  ignore(d.read_compact_string()) // client id
+  d.skip_tag_buffer()
+  let n = d.read_compact_len()
+  let topics : Array[(String, Int, Int)] = []
+  for _ in 0..<n {
+    let name = d.read_compact_string()
+    let count = d.read_i32()
+    let assignments = d.read_compact_len()
+    for _ in 0..<assignments {
+      let brokers = d.read_compact_len()
+      d.skip(brokers * 4)
+      d.skip_tag_buffer()
+    }
+    d.skip_tag_buffer()
+    topics.push((name, count, 0))
+  }
+  ignore(d.read_i32()) // timeout
+  let validate_only = d.read_bool()
+  (topics, validate_only)
+}
+
+///|
+/// CreatePartitions v3 response body.
+fn fake_create_partitions_response(
+  results : Array[(String, Int, String?)],
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(results.length())
+  for result in results {
+    let (name, error_code, message) = result
+    e.write_compact_string(name)
+    e.write_i16(error_code)
+    e.write_compact_nullable_string(message)
+    e.write_tag_buffer()
+  }
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse an OffsetDelete v0 request (non-flexible): (group, (topic,
+/// partition) pairs).
+fn fake_offset_delete_request(
+  rest : Bytes,
+) -> (String, Array[(String, Array[Int])]) raise {
+  let d = @buf.Decoder::new(rest)
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  let client_len = d.read_i16()
+  ignore(d.read_bytes(client_len)) // client id (no tag buffer: v0 header)
+  let group_len = d.read_i16()
+  let group_id = @utf8.decode_lossy(d.read_bytes(group_len)[:])
+  let n = d.read_i32()
+  let topics : Array[(String, Array[Int])] = []
+  for _ in 0..<n {
+    let name_len = d.read_i16()
+    let name = @utf8.decode_lossy(d.read_bytes(name_len)[:])
+    let parts = d.read_i32()
+    let partitions : Array[Int] = []
+    for _ in 0..<parts {
+      partitions.push(d.read_i32())
+    }
+    topics.push((name, partitions))
+  }
+  (group_id, topics)
+}
+
+///|
+/// OffsetDelete v0 response body (non-flexible framing).
+fn fake_offset_delete_response(results : Array[(String, Int, Int)]) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i16(0) // top-level error
+  e.write_i32(0) // throttle
+  e.write_i32(1) // one topic
+  let name = @utf8.encode("events")
+  e.write_i16(name.length())
+  e.write_bytes(name)
+  e.write_i32(results.length())
+  for result in results {
+    let (_, index, error_code) = result
+    e.write_i32(index)
+    e.write_i16(error_code)
+  }
+  e.to_bytes()
+}
+
+///|
 /// Parse a ConsumerGroupHeartbeat v1 request: (group, member id, epoch,
 /// instance id, subscribed regex).
 fn fake_consumer_group_heartbeat_request(
@@ -1373,6 +1643,11 @@ async fn fake_serve_conn(
   hide_apis? : Array[Int] = [],
   dtp_requests? : Array[Int] = [],
   dtp_error_rounds? : Int = 0,
+  create_topics? : Array[(String, Bytes)] = [],
+  delete_topics? : Array[(String?, Bytes)] = [],
+  create_partitions? : Array[(String, Int)] = [],
+  delete_records? : Array[(String, Int, Int64)] = [],
+  offset_deletes? : Array[(String, String, Int)] = [],
 ) -> Unit {
   // per-connection SASL state
   let mut dtp_frames = 0
@@ -1512,6 +1787,65 @@ async fn fake_serve_conn(
             coord.assignments.get(member).unwrap_or(Bytes::make(0, 0)),
           )
         }
+      }
+      19 => {
+        let (topics, _) = fake_create_topics_request(rest)
+        let results : Array[(String, Bytes, Int, String?)] = []
+        let mut next_id = 1
+        for entry in topics {
+          let (name, _, _) = entry
+          let id = Bytes::make(16, next_id.to_byte())
+          next_id += 1
+          create_topics.push((name, id))
+          results.push((name, id, 0, None))
+        }
+        fake_create_topics_response(results)
+      }
+      20 => {
+        let (names, ids) = fake_delete_topics_request(rest)
+        for name in names {
+          delete_topics.push((Some(name), Bytes::make(16, 0)))
+        }
+        for id in ids {
+          delete_topics.push((None, id))
+        }
+        fake_delete_topics_response(names, ids)
+      }
+      21 => {
+        let (topics, _) = fake_delete_records_request(rest)
+        let results : Array[(Int, Int64, Int)] = []
+        for entry in topics {
+          let (name, partitions) = entry
+          for part in partitions {
+            let (index, offset) = part
+            delete_records.push((name, index, offset))
+            results.push((index, offset, 0))
+          }
+        }
+        fake_delete_records_response(results)
+      }
+      37 => {
+        let (topics, _) = fake_create_partitions_request(rest)
+        let results : Array[(String, Int, String?)] = []
+        for entry in topics {
+          let (name, count, _) = entry
+          create_partitions.push((name, count))
+          results.push((name, 0, None))
+        }
+        fake_create_partitions_response(results)
+      }
+      47 => {
+        let (group, topics) = fake_offset_delete_request(rest)
+        let results : Array[(String, Int, Int)] = []
+        for entry in topics {
+          let (name, partitions) = entry
+          for part in partitions {
+            let index = part
+            offset_deletes.push((group, name, index))
+            results.push((name, index, 0))
+          }
+        }
+        fake_offset_delete_response(results)
       }
       68 => {
         let (group, member, epoch, instance, regex) = fake_consumer_group_heartbeat_request(
@@ -1697,7 +2031,7 @@ async fn fake_serve_conn(
     }
     // ApiVersions and SaslHandshake v1 responses use header v0: no tag
     // buffer after the correlation id. The rest are flexible (header v1).
-    let has_tag = key != 18 && key != 17
+    let has_tag = key != 18 && key != 17 && key != 47
     let frame = @buf.Encoder::new()
     frame.write_i32(4 + (if has_tag { 1 } else { 0 }) + body.length())
     frame.write_i32(corr)
@@ -1752,6 +2086,11 @@ async fn fake_broker(
   hide_apis? : Array[Int] = [],
   dtp_requests? : Array[Int] = [],
   dtp_error_rounds? : Int = 0,
+  create_topics? : Array[(String, Bytes)] = [],
+  delete_topics? : Array[(String?, Bytes)] = [],
+  create_partitions? : Array[(String, Int)] = [],
+  delete_records? : Array[(String, Int, Int64)] = [],
+  offset_deletes? : Array[(String, String, Int)] = [],
 ) -> Unit {
   for ;; {
     let (tcp, _) = server.accept()
@@ -1810,6 +2149,11 @@ async fn fake_broker(
         hide_apis~,
         dtp_requests~,
         dtp_error_rounds~,
+        create_topics~,
+        delete_topics~,
+        create_partitions~,
+        delete_records~,
+        offset_deletes~,
       )
     }
   }
@@ -3755,6 +4099,83 @@ async test "admin retries retriable topic errors under the policy" {
     assert_eq(topics.length(), 1)
     assert_eq(topics[0].error_code, 0)
     assert_true(dtp_requests.length() >= 3)
+    server.close()
+  }
+}
+
+///|
+async test "admin topic lifecycle: create, grow, truncate, delete offsets, delete" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let create_topics : Array[(String, Bytes)] = []
+    let delete_topics : Array[(String?, Bytes)] = []
+    let create_partitions : Array[(String, Int)] = []
+    let delete_records : Array[(String, Int, Int64)] = []
+    let offset_deletes : Array[(String, String, Int)] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(
+        server,
+        root,
+        "events",
+        accepted,
+        create_topics~,
+        delete_topics~,
+        create_partitions~,
+        delete_records~,
+        offset_deletes~,
+      )
+    }
+    let admin = @moonkafka.Admin::connect(
+      group=root,
+      host="127.0.0.1",
+      port=server.addr.port(),
+    )
+    defer admin.close()
+    // Create with a config override; the fake assigns a fresh topic id.
+    let created = admin.create_topics([
+      {
+        name: "events2",
+        num_partitions: 3,
+        replication_factor: 1,
+        assignments: [],
+        configs: [("retention.ms", Some("86400000"))],
+      },
+    ])
+    assert_eq(created.length(), 1)
+    assert_eq(created[0].error_code, 0)
+    assert_eq(created[0].name, "events2")
+    assert_true(created[0].topic_id != @moonkafka.Uuid::zero())
+    assert_eq(create_topics.length(), 1)
+    // Grow the topic to 5 partitions.
+    let grown = admin.create_partitions([
+      { name: "events2", count: 5, assignments: None, },
+    ])
+    assert_eq(grown[0].error_code, 0)
+    assert_eq(create_partitions, [("events2", 5)])
+    // Truncate partition 0 up to offset 10: the low watermark echoes it.
+    let truncated = admin.delete_records([("events2", [(0, 10L)])])
+    assert_eq(truncated.length(), 1)
+    assert_eq(truncated[0].partition, 0)
+    assert_eq(truncated[0].low_watermark, 10L)
+    assert_eq(truncated[0].error_code, 0)
+    assert_eq(delete_records, [("events2", 0, 10L)])
+    // Delete the group's committed offsets for one partition.
+    let offsets = admin.offset_delete("gid-x", [("events2", [0, 1])])
+    assert_eq(offsets.error_code, 0)
+    assert_eq(offsets.partitions.length(), 2)
+    assert_eq(offset_deletes, [("gid-x", "events2", 0), ("gid-x", "events2", 1)])
+    // Delete by name, then topic-id-first (name null, id set).
+    let deleted = admin.delete_topics(["events2"], [])
+    assert_eq(deleted.length(), 1)
+    assert_eq(deleted[0].name, Some("events2"))
+    assert_eq(deleted[0].error_code, 0)
+    let deleted_by_id = admin.delete_topics([], [created[0].topic_id])
+    assert_eq(deleted_by_id.length(), 1)
+    assert_true(deleted_by_id[0].name is None)
+    assert_eq(deleted_by_id[0].topic_id, created[0].topic_id)
+    assert_eq(deleted_by_id[0].error_code, 0)
+    assert_eq(delete_topics.length(), 2)
     server.close()
   }
 }

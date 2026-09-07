@@ -39,6 +39,21 @@ pub const API_HEARTBEAT : Int = 12
 pub const API_LEAVE_GROUP : Int = 13
 
 ///|
+pub const API_CREATE_TOPICS : Int = 19
+
+///|
+pub const API_DELETE_TOPICS : Int = 20
+
+///|
+pub const API_DELETE_RECORDS : Int = 21
+
+///|
+pub const API_CREATE_PARTITIONS : Int = 37
+
+///|
+pub const API_OFFSET_DELETE : Int = 47
+
+///|
 pub const API_LIST_OFFSETS : Int = 2
 
 ///|
@@ -130,6 +145,24 @@ pub fn driver_api_range(api_key : Int) -> ApiRange? {
       Some({ key: API_HEARTBEAT, name: "Heartbeat", min: 4, max: 4, })
     API_LEAVE_GROUP =>
       Some({ key: API_LEAVE_GROUP, name: "LeaveGroup", min: 5, max: 5, })
+    // Topic admin ops; v7 echoes topic ids, DeleteTopics v6 deletes by
+    // id (topic-id-first, KIP-516).
+    API_CREATE_TOPICS =>
+      Some({ key: API_CREATE_TOPICS, name: "CreateTopics", min: 7, max: 7, })
+    API_DELETE_TOPICS =>
+      Some({ key: API_DELETE_TOPICS, name: "DeleteTopics", min: 6, max: 6, })
+    API_CREATE_PARTITIONS =>
+      Some({
+        key: API_CREATE_PARTITIONS,
+        name: "CreatePartitions",
+        min: 3,
+        max: 3,
+      })
+    API_DELETE_RECORDS =>
+      Some({ key: API_DELETE_RECORDS, name: "DeleteRecords", min: 2, max: 2, })
+    // OffsetDelete v0 is the one non-flexible admin API in the set.
+    API_OFFSET_DELETE =>
+      Some({ key: API_OFFSET_DELETE, name: "OffsetDelete", min: 0, max: 0, })
     API_LIST_OFFSETS =>
       Some({ key: API_LIST_OFFSETS, name: "ListOffsets", min: 10, max: 11, })
     API_METADATA =>
