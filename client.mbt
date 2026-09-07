@@ -1,125 +1,157 @@
-// TCP connection to a single Kafka broker, with request/response framing.
+// High-level RPC helpers on BrokerConnection: one method per API the
+// simple producer and consumer use. Every request negotiates its version
+// against the ranges stored by negotiate_api_versions. Timeouts come from
+// the caller's request_timeout_ms; the fetch helper long-polls up to
+// max_wait_ms, which the default request timeout comfortably exceeds.
 
 ///|
-pub struct Connection {
-  tcp : @socket.Tcp
-  mut correlation_id : Int
-}
-
-///|
-pub async fn Connection::connect(host : String, port : Int) -> Connection {
-  let tcp = @socket.Tcp::connect_to_host(host, port~)
-  { tcp, correlation_id: 0, }
-}
-
-///|
-pub fn Connection::close(self : Connection) -> Unit {
-  self.tcp.close()
-}
-
-///|
-/// Send a request (flexible version, header v2) and return a Decoder
-/// positioned at the response body. ApiVersions is special: its response
-/// header is v0 (no tag buffer) even for flexible versions.
-pub async fn Connection::request(
-  self : Connection,
-  api_key : Int,
-  api_version : Int,
-  body : Bytes,
-) -> Decoder {
-  self.correlation_id += 1
-  let frame = encode_request(
-    api_key,
-    api_version,
-    self.correlation_id,
-    "moonkafka",
-    body,
-  )
-  self.tcp.write(frame)
-  let size_bytes = self.tcp.read_exactly(4)
-  let size = Decoder::new(size_bytes).read_i32() catch {
-    _ => raise DecodeError::Malformed("bad frame size")
-  }
-  let data = self.tcp.read_exactly(size)
-  let d = Decoder::new(data)
-  let correlation_id = d.read_i32()
-  if correlation_id != self.correlation_id {
-    raise ProtocolError::ProtocolError(
-      "correlation id mismatch: sent \{self.correlation_id}, got \{correlation_id}",
-    )
-  }
-  if api_key != API_API_VERSIONS {
-    d.skip_tag_buffer() // response header v1
-  }
-  d
-}
-
-///|
-pub async fn Connection::check_api_versions(self : Connection) -> Unit {
+/// Run the ApiVersions handshake and store the broker's advertised ranges;
+/// later requests pick their version from them (api_version).
+pub async fn BrokerConnection::negotiate_api_versions(
+  self : BrokerConnection,
+  timeout_ms? : Int = 30000,
+) -> Unit {
   let d = self.request(
     API_API_VERSIONS,
     API_VERSIONS_VERSION,
     encode_api_versions_request(),
+    timeout_ms~,
   )
-  decode_api_versions_response(d)
+  let (versions, throttle) = decode_api_versions_response(d)
+  self.versions = Some(versions)
+  self.note_throttle(throttle)
 }
 
 ///|
-pub async fn Connection::fetch_metadata(
-  self : Connection,
-  topic : String,
+pub async fn BrokerConnection::fetch_metadata(
+  self : BrokerConnection,
+  topics : Array[String]?,
+  timeout_ms? : Int = 30000,
 ) -> Metadata {
+  let version = self.api_version(API_METADATA)
   let d = self.request(
     API_METADATA,
-    METADATA_VERSION,
-    encode_metadata_request(topic),
+    version,
+    encode_metadata_request(topics),
+    timeout_ms~,
   )
-  decode_metadata_response(d)
+  let (metadata, throttle) = decode_metadata_response(version, d)
+  self.note_throttle(throttle)
+  metadata
 }
 
 ///|
-pub async fn Connection::list_offsets(
-  self : Connection,
+/// Describe topics via DescribeTopicPartitions v0, one page per call:
+/// returns the page plus the cursor to resume with when the broker
+/// truncated the response at `response_partition_limit`. An empty `topics`
+/// list describes all topics.
+pub async fn BrokerConnection::describe_topic_partitions(
+  self : BrokerConnection,
+  topics : Array[String],
+  response_partition_limit? : Int = 2000,
+  cursor? : TopicPartitionCursor? = None,
+  timeout_ms? : Int = 30000,
+) -> DescribeTopicPartitions {
+  let version = self.api_version(API_DESCRIBE_TOPIC_PARTITIONS)
+  let d = self.request(
+    API_DESCRIBE_TOPIC_PARTITIONS,
+    version,
+    encode_describe_topic_partitions_request(
+      topics,
+      response_partition_limit,
+      cursor~,
+    ),
+    timeout_ms~,
+  )
+  let (page, throttle) = decode_describe_topic_partitions_response(d)
+  self.note_throttle(throttle)
+  page
+}
+
+///|
+pub async fn BrokerConnection::list_offsets(
+  self : BrokerConnection,
   topic : String,
   partitions : Array[PartitionInfo],
   timestamp : Int64,
+  timeout_ms? : Int = 30000,
 ) -> Map[Int, Int64] {
+  let version = self.api_version(API_LIST_OFFSETS)
   let d = self.request(
     API_LIST_OFFSETS,
-    LIST_OFFSETS_VERSION,
-    encode_list_offsets_request(topic, partitions, timestamp),
+    version,
+    encode_list_offsets_request(version, topic, partitions, timestamp),
+    timeout_ms~,
   )
-  decode_list_offsets_response(d)
+  let (offsets, throttle) = decode_list_offsets_response(d)
+  self.note_throttle(throttle)
+  offsets
 }
 
 ///|
-pub async fn Connection::produce(
-  self : Connection,
+/// Produce one batch per partition to a single topic. `topic_id` comes
+/// from metadata and is mandatory once the negotiated version is 13. The
+/// acks validation (1 or -1) lives in ProducerConfig.
+pub async fn BrokerConnection::produce(
+  self : BrokerConnection,
   topic : String,
-  partitions : Array[(Int, Bytes)],
+  topic_id? : Uuid = Uuid::zero(),
+  transactional_id? : String? = None,
+  partitions~ : Array[(Int, Bytes)],
   acks~ : Int,
   timeout_ms~ : Int,
 ) -> Array[ProducePartitionResult] {
+  let version = self.api_version(API_PRODUCE)
   let d = self.request(
     API_PRODUCE,
-    PRODUCE_VERSION,
-    encode_produce_request(topic, partitions, acks, timeout_ms),
+    version,
+    encode_produce_request(
+      version,
+      topic,
+      topic_id,
+      partitions,
+      transactional_id~,
+      acks~,
+      timeout_ms~,
+    ),
+    timeout_ms~,
   )
-  decode_produce_response(d)
+  let (results, throttle) = decode_produce_response(version, d)
+  self.note_throttle(throttle)
+  results
 }
 
 ///|
-pub async fn Connection::fetch(
-  self : Connection,
-  topic : String,
-  partitions : Array[(PartitionInfo, Int64)],
+/// Fetch records from one or more topics with fetch-session fields.
+/// The negotiated version shapes the wire format; the caller drives the
+/// session (FetchSession::prepare / handle_response) and owns recovery
+/// from session eviction.
+pub async fn BrokerConnection::fetch(
+  self : BrokerConnection,
+  topics : Array[FetchTopicReq],
+  session~ : FetchSessionReq,
   max_wait_ms~ : Int,
-  max_bytes~ : Int,
-) -> Array[FetchPartitionResult] {
+  min_bytes? : Int = 1,
+  max_bytes? : Int = 0x7fffffff,
+  isolation_level? : Int = 0,
+  timeout_ms? : Int = 30000,
+) -> FetchResult {
+  let version = self.api_version(API_FETCH)
   let d = self.request(
     API_FETCH,
-    FETCH_VERSION,
-    encode_fetch_request(topic, partitions, max_wait_ms, max_bytes),
+    version,
+    encode_fetch_request(
+      version,
+      topics,
+      session~,
+      max_wait_ms~,
+      min_bytes~,
+      max_bytes~,
+      isolation_level~,
+    ),
+    timeout_ms~,
   )
-  decode_fetch_response(d)
+  let (result, throttle) = decode_fetch_response(version, d)
+  self.note_throttle(throttle)
+  result
 }
