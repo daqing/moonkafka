@@ -31,6 +31,37 @@ fn fake_api_versions_response(
     (12, 4),
     (13, 5),
     (14, 5),
+    (15, 6),
+    (69, 1),
+    (16, 5),
+    (42, 2),
+    (19, 7),
+    (20, 6),
+    (21, 2),
+    (37, 3),
+    (47, 0),
+    (29, 3),
+    (30, 3),
+    (31, 3),
+    (48, 1),
+    (49, 1),
+    (50, 0),
+    (51, 0),
+    (60, 2),
+    (61, 0),
+    (65, 0),
+    (66, 2),
+    (32, 4),
+    (44, 1),
+    (33, 2),
+    (74, 1),
+    (35, 5),
+    (43, 2),
+    (45, 1),
+    (46, 0),
+    (64, 0),
+    (55, 2),
+    (57, 2),
   ]
   let apis = all_apis.filter(fn(pair) { !hide_apis.contains(pair.0) })
   e.write_compact_len(apis.length())
@@ -725,6 +756,1844 @@ fn FakeCoordinator::round_complete(self : FakeCoordinator) -> Bool {
 }
 
 ///|
+/// Parse a CreateTopics v7 request: (names, requested partition counts,
+/// replication factors, timeout, validate-only).
+fn fake_create_topics_request(
+  rest : Bytes,
+) -> (Array[(String, Int, Int)], Bool) raise {
+  let d = @buf.Decoder::new(rest)
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  ignore(d.read_compact_string()) // client id
+  d.skip_tag_buffer()
+  let n = d.read_compact_len()
+  let topics : Array[(String, Int, Int)] = []
+  for _ in 0..<n {
+    let name = d.read_compact_string()
+    let num_partitions = d.read_i32()
+    let replication_factor = d.read_i16()
+    let assignments = d.read_compact_len()
+    for _ in 0..<assignments {
+      ignore(d.read_i32())
+      let brokers = d.read_compact_len()
+      d.skip(brokers * 4)
+      d.skip_tag_buffer()
+    }
+    let configs = d.read_compact_len()
+    for _ in 0..<configs {
+      ignore(d.read_compact_string())
+      ignore(d.read_compact_nullable_string())
+      d.skip_tag_buffer()
+    }
+    d.skip_tag_buffer()
+    topics.push((name, num_partitions, replication_factor))
+  }
+  ignore(d.read_i32()) // timeout
+  let validate_only = d.read_bool()
+  (topics, validate_only)
+}
+
+///|
+/// CreateTopics v7 response body: per-topic success with generated ids.
+fn fake_create_topics_response(
+  results : Array[(String, Bytes, Int, String?)],
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(results.length())
+  for result in results {
+    let (name, id, error_code, message) = result
+    e.write_compact_string(name)
+    e.write_bytes(id)
+    e.write_i16(error_code)
+    e.write_compact_nullable_string(message)
+    e.write_i16(0) // topic config error
+    e.write_i32(-1) // num partitions
+    e.write_i16(-1) // replication factor
+    e.write_compact_len(-1) // configs: null
+    e.write_tag_buffer()
+  }
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse a DeleteTopics v6 request: (names, topic ids).
+fn fake_delete_topics_request(
+  rest : Bytes,
+) -> (Array[String], Array[Bytes]) raise {
+  let d = @buf.Decoder::new(rest)
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  ignore(d.read_compact_string()) // client id
+  d.skip_tag_buffer()
+  let n = d.read_compact_len()
+  let names : Array[String] = []
+  let ids : Array[Bytes] = []
+  for _ in 0..<n {
+    let name = d.read_compact_nullable_string()
+    let id = d.read_bytes(16)
+    d.skip_tag_buffer()
+    match name {
+      Some(name) => names.push(name)
+      None => ids.push(id)
+    }
+  }
+  ignore(d.read_i32()) // timeout
+  (names, ids)
+}
+
+///|
+/// DeleteTopics v6 response body.
+fn fake_delete_topics_response(
+  names : Array[String],
+  ids : Array[Bytes],
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(names.length() + ids.length())
+  for name in names {
+    e.write_compact_nullable_string(Some(name))
+    e.write_bytes(Bytes::make(16, 0))
+    e.write_i16(0)
+    e.write_compact_nullable_string(None)
+    e.write_tag_buffer()
+  }
+  for id in ids {
+    e.write_compact_nullable_string(None)
+    e.write_bytes(id)
+    e.write_i16(0)
+    e.write_compact_nullable_string(None)
+    e.write_tag_buffer()
+  }
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse a DeleteRecords v2 request: ((topic, partition, offset) triples,
+/// timeout).
+fn fake_delete_records_request(
+  rest : Bytes,
+) -> (Array[(String, Array[(Int, Int64)])], Int) raise {
+  let d = @buf.Decoder::new(rest)
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  ignore(d.read_compact_string()) // client id
+  d.skip_tag_buffer()
+  let n = d.read_compact_len()
+  let topics : Array[(String, Array[(Int, Int64)])] = []
+  for _ in 0..<n {
+    let name = d.read_compact_string()
+    let parts = d.read_compact_len()
+    let partitions : Array[(Int, Int64)] = []
+    for _ in 0..<parts {
+      let index = d.read_i32()
+      let offset = d.read_i64()
+      d.skip_tag_buffer()
+      partitions.push((index, offset))
+    }
+    d.skip_tag_buffer()
+    topics.push((name, partitions))
+  }
+  let timeout = d.read_i32()
+  (topics, timeout)
+}
+
+///|
+/// DeleteRecords v2 response body: per-partition low watermarks.
+fn fake_delete_records_response(results : Array[(Int, Int64, Int)]) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(1) // one topic
+  e.write_compact_string("events")
+  e.write_compact_len(results.length())
+  for result in results {
+    let (index, watermark, error_code) = result
+    e.write_i32(index)
+    e.write_i64(watermark)
+    e.write_i16(error_code)
+    e.write_tag_buffer()
+  }
+  e.write_tag_buffer()
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse a CreatePartitions v3 request: (names, counts, timeout).
+fn fake_create_partitions_request(
+  rest : Bytes,
+) -> (Array[(String, Int, Int)], Bool) raise {
+  let d = @buf.Decoder::new(rest)
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  ignore(d.read_compact_string()) // client id
+  d.skip_tag_buffer()
+  let n = d.read_compact_len()
+  let topics : Array[(String, Int, Int)] = []
+  for _ in 0..<n {
+    let name = d.read_compact_string()
+    let count = d.read_i32()
+    let assignments = d.read_compact_len()
+    for _ in 0..<assignments {
+      let brokers = d.read_compact_len()
+      d.skip(brokers * 4)
+      d.skip_tag_buffer()
+    }
+    d.skip_tag_buffer()
+    topics.push((name, count, 0))
+  }
+  ignore(d.read_i32()) // timeout
+  let validate_only = d.read_bool()
+  (topics, validate_only)
+}
+
+///|
+/// CreatePartitions v3 response body.
+fn fake_create_partitions_response(
+  results : Array[(String, Int, String?)],
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(results.length())
+  for result in results {
+    let (name, error_code, message) = result
+    e.write_compact_string(name)
+    e.write_i16(error_code)
+    e.write_compact_nullable_string(message)
+    e.write_tag_buffer()
+  }
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse an OffsetDelete v0 request (non-flexible): (group, (topic,
+/// partition) pairs).
+fn fake_offset_delete_request(
+  rest : Bytes,
+) -> (String, Array[(String, Array[Int])]) raise {
+  let d = @buf.Decoder::new(rest)
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  let client_len = d.read_i16()
+  ignore(d.read_bytes(client_len)) // client id (no tag buffer: v0 header)
+  let group_len = d.read_i16()
+  let group_id = @utf8.decode_lossy(d.read_bytes(group_len)[:])
+  let n = d.read_i32()
+  let topics : Array[(String, Array[Int])] = []
+  for _ in 0..<n {
+    let name_len = d.read_i16()
+    let name = @utf8.decode_lossy(d.read_bytes(name_len)[:])
+    let parts = d.read_i32()
+    let partitions : Array[Int] = []
+    for _ in 0..<parts {
+      partitions.push(d.read_i32())
+    }
+    topics.push((name, partitions))
+  }
+  (group_id, topics)
+}
+
+///|
+/// OffsetDelete v0 response body (non-flexible framing).
+fn fake_offset_delete_response(results : Array[(String, Int, Int)]) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i16(0) // top-level error
+  e.write_i32(0) // throttle
+  e.write_i32(1) // one topic
+  let name = @utf8.encode("events")
+  e.write_i16(name.length())
+  e.write_bytes(name)
+  e.write_i32(results.length())
+  for result in results {
+    let (_, index, error_code) = result
+    e.write_i32(index)
+    e.write_i16(error_code)
+  }
+  e.to_bytes()
+}
+
+///|
+/// Capture arrays and canned knobs for the cluster/config admin ops.
+/// Handlers append what they receive so tests can assert on the wire
+/// bytes they produced.
+struct FakeClusterOps {
+  describe_cluster : Array[Bool] // include-authorized-operations flags
+  describe_configs : Array[(Int, String, Array[String]?)]
+  incremental_alters : Array[(Int, String, Array[(String, Int, String?)])]
+  alter_configs : Array[(Int, String, Array[(String, String?)])]
+  list_config_resources : Array[Array[Int]] // requested type filters
+  log_dirs : Array[Array[(String, Array[Int])]?] // requested topics
+  elect_leaders : Array[(Int, Array[(String, Array[Int])]?)] // (type, topics)
+  alter_reassignments : Array[(String, Int, Array[Int]?)] // (topic, index, replicas)
+  list_reassignments : Array[Array[(String, Array[Int])]?]
+  unregister_broker : Array[Int]
+  quorum_requests : Array[(String, Int)]
+  update_features : Array[(String, Int, Int, Bool)] // (feature, level, type, validate-only)
+  mut update_features_error : Int
+  describe_acls : Array[@moonkafka.AclFilter]
+  create_acls : Array[@moonkafka.AclCreation]
+  delete_acls : Array[@moonkafka.AclFilter]
+  describe_quotas : Array[@moonkafka.ClientQuotaFilter]
+  alter_quotas : Array[@moonkafka.ClientQuotaAlteration]
+  alter_quotas_validate_only : Array[Bool]
+  describe_scram : Array[Array[String]?]
+  alter_scram_deletions : Array[@moonkafka.ScramCredentialDeletion]
+  alter_scram_upsertions : Array[@moonkafka.ScramCredentialUpsertion]
+  describe_groups : Array[(Array[String], Bool)]
+  /// Group ids DescribeGroups answers with GROUP_ID_NOT_FOUND — how the
+  /// coordinator reports a KIP-848 group, which is not a classic group.
+  describe_groups_not_found : Array[String]
+  describe_consumer_groups : Array[(Array[String], Bool)]
+  /// Group ids ConsumerGroupDescribe answers with GROUP_ID_NOT_FOUND.
+  describe_consumer_groups_not_found : Array[String]
+  /// ListGroups requests: (states_filter, types_filter).
+  list_groups : Array[(Array[String], Array[String])]
+  /// DeleteGroups requests: the group names to delete.
+  delete_groups : Array[Array[String]]
+  /// Group ids DeleteGroups answers with GROUP_ID_NOT_FOUND.
+  delete_groups_not_found : Array[String]
+  /// DescribeProducers requests: topics and their partition indexes.
+  describe_producers : Array[Array[(String, Array[Int])]]
+  /// DescribeTransactions requests: the transactional ids.
+  describe_transactions : Array[Array[String]]
+  /// ListTransactions requests: (state_filters, producer_id_filters,
+  /// duration_filter, transactional_id_pattern).
+  list_transactions : Array[(Array[String], Array[Int64], Int64, String?)]
+}
+
+///|
+fn FakeClusterOps::new() -> FakeClusterOps {
+  {
+    describe_cluster: [],
+    describe_configs: [],
+    incremental_alters: [],
+    alter_configs: [],
+    list_config_resources: [],
+    log_dirs: [],
+    elect_leaders: [],
+    alter_reassignments: [],
+    list_reassignments: [],
+    unregister_broker: [],
+    quorum_requests: [],
+    update_features: [],
+    update_features_error: 0,
+    describe_acls: [],
+    create_acls: [],
+    delete_acls: [],
+    describe_quotas: [],
+    alter_quotas: [],
+    alter_quotas_validate_only: [],
+    describe_scram: [],
+    alter_scram_deletions: [],
+    alter_scram_upsertions: [],
+    describe_groups: [],
+    describe_groups_not_found: [],
+    describe_consumer_groups: [],
+    describe_consumer_groups_not_found: [],
+    list_groups: [],
+    delete_groups: [],
+    delete_groups_not_found: [],
+    describe_producers: [],
+    describe_transactions: [],
+    list_transactions: [],
+  }
+}
+
+///|
+/// Flexible request header: skip api key/version/correlation/client id.
+fn fake_skip_flexible_header(d : @buf.Decoder) -> Unit raise {
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  ignore(d.read_compact_string()) // client id
+  d.skip_tag_buffer()
+}
+
+///|
+/// Parse a DescribeCluster v0-v2 request: the include-operations flag
+/// (the endpoint type is fixed at brokers, fenced brokers at v2+).
+fn fake_describe_cluster_request(rest : Bytes) -> Bool raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  d.read_bool()
+}
+
+///|
+/// DescribeCluster v0-v2 response body: one broker (node 0), the fake
+/// cluster id, node 0 as controller.
+fn fake_describe_cluster_response(port : Int, version : Int) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_i16(0) // error
+  e.write_compact_nullable_string(None) // error message
+  if version >= 1 {
+    e.write_i8(1) // endpoint type: brokers
+  }
+  e.write_compact_string("fake-cluster")
+  e.write_i32(0) // controller id
+  e.write_compact_len(1)
+  e.write_i32(0) // broker id
+  e.write_compact_string("127.0.0.1")
+  e.write_i32(port)
+  e.write_compact_nullable_string(None) // rack
+  if version >= 2 {
+    e.write_bool(false) // is_fenced
+  }
+  e.write_tag_buffer()
+  e.write_i32(-2147483648) // cluster authorized operations
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse a DescribeConfigs v4 request: (type, name, keys-or-null) per
+/// resource plus the include flags.
+fn fake_describe_configs_request(
+  rest : Bytes,
+) -> (Array[(Int, String, Array[String]?)], Bool, Bool) raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  let resources : Array[(Int, String, Array[String]?)] = []
+  let n = d.read_compact_len()
+  for _ in 0..<n {
+    let resource_type = d.read_i8()
+    let resource_name = d.read_compact_string()
+    // Null arrays carry the compact-length marker 0 (read back as -1).
+    let keys : Array[String]? = match d.read_compact_len() {
+      -1 => None
+      count => {
+        let out : Array[String] = []
+        for _ in 0..<count {
+          out.push(d.read_compact_string())
+        }
+        Some(out)
+      }
+    }
+    d.skip_tag_buffer()
+    resources.push((resource_type, resource_name, keys))
+  }
+  let include_synonyms = d.read_bool()
+  let include_documentation = d.read_bool()
+  (resources, include_synonyms, include_documentation)
+}
+
+///|
+/// DescribeConfigs v4 response body: per resource, one config entry per
+/// requested key (or two canned entries for the null key filter).
+fn fake_describe_configs_response(
+  resources : Array[(Int, String, Array[String]?)],
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(resources.length())
+  for resource in resources {
+    let (resource_type, resource_name, keys) = resource
+    e.write_i16(0) // error
+    e.write_compact_nullable_string(None)
+    e.write_i8(resource_type)
+    e.write_compact_string(resource_name)
+    let names : Array[String] = match keys {
+      Some(keys) => keys
+      None => ["retention.ms", "cleanup.policy"]
+    }
+    e.write_compact_len(names.length())
+    for name in names {
+      e.write_compact_string(name)
+      e.write_compact_nullable_string(Some("604800000"))
+      e.write_bool(false) // read only
+      e.write_i8(2) // config source
+      e.write_bool(false) // sensitive
+      e.write_compact_len(0) // synonyms
+      e.write_i8(2) // config type
+      e.write_compact_nullable_string(None) // documentation
+      e.write_tag_buffer()
+    }
+    e.write_tag_buffer()
+  }
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse an IncrementalAlterConfigs v1 request: (type, name, (key, op,
+/// value)) per resource plus the validate-only flag.
+fn fake_incremental_alter_configs_request(
+  rest : Bytes,
+) -> (Array[(Int, String, Array[(String, Int, String?)])], Bool) raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  let resources : Array[(Int, String, Array[(String, Int, String?)])] = []
+  let n = d.read_compact_len()
+  for _ in 0..<n {
+    let resource_type = d.read_i8()
+    let resource_name = d.read_compact_string()
+    let configs : Array[(String, Int, String?)] = []
+    let count = d.read_compact_len()
+    for _ in 0..<count {
+      let name = d.read_compact_string()
+      let operation = d.read_i8()
+      let value = d.read_compact_nullable_string()
+      d.skip_tag_buffer()
+      configs.push((name, operation, value))
+    }
+    d.skip_tag_buffer()
+    resources.push((resource_type, resource_name, configs))
+  }
+  let validate_only = d.read_bool()
+  (resources, validate_only)
+}
+
+///|
+/// Parse an AlterConfigs v2 request: (type, name, (key, value)) per
+/// resource plus the validate-only flag.
+fn fake_alter_configs_request(
+  rest : Bytes,
+) -> (Array[(Int, String, Array[(String, String?)])], Bool) raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  let resources : Array[(Int, String, Array[(String, String?)])] = []
+  let n = d.read_compact_len()
+  for _ in 0..<n {
+    let resource_type = d.read_i8()
+    let resource_name = d.read_compact_string()
+    let configs : Array[(String, String?)] = []
+    let count = d.read_compact_len()
+    for _ in 0..<count {
+      let name = d.read_compact_string()
+      let value = d.read_compact_nullable_string()
+      d.skip_tag_buffer()
+      configs.push((name, value))
+    }
+    d.skip_tag_buffer()
+    resources.push((resource_type, resource_name, configs))
+  }
+  let validate_only = d.read_bool()
+  (resources, validate_only)
+}
+
+///|
+/// AlterConfigs/IncrementalAlterConfigs response body: per-resource
+/// success echoing (type, name).
+fn fake_alter_configs_response(resources : Array[(Int, String)]) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(resources.length())
+  for resource in resources {
+    let (resource_type, resource_name) = resource
+    e.write_i16(0) // error
+    e.write_compact_nullable_string(None)
+    e.write_i8(resource_type)
+    e.write_compact_string(resource_name)
+    e.write_tag_buffer()
+  }
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse a ListConfigResources v0/v1 request: the requested type filter
+/// (empty at v0, which carries no filter field).
+fn fake_list_config_resources_request(rest : Bytes) -> Array[Int] raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  let version = rest[3].to_int()
+  let types : Array[Int] = []
+  if version >= 1 {
+    let n = d.read_compact_len()
+    for _ in 0..<n {
+      types.push(d.read_i8())
+    }
+  }
+  types
+}
+
+///|
+/// ListConfigResources v0/v1 response body: a topic and a broker
+/// resource (types only ride v1+).
+fn fake_list_config_resources_response(version : Int) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_i16(0) // error
+  e.write_compact_len(2)
+  e.write_compact_string("events")
+  if version >= 1 {
+    e.write_i8(2) // topic
+  }
+  e.write_tag_buffer()
+  e.write_compact_string("1")
+  if version >= 1 {
+    e.write_i8(4) // broker
+  }
+  e.write_tag_buffer()
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse a DescribeLogDirs request: the requested topics (None = all).
+fn fake_describe_log_dirs_request(
+  rest : Bytes,
+) -> Array[(String, Array[Int])]? raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  // Null arrays carry the compact-length marker 0 (read back as -1).
+  let topics : Array[(String, Array[Int])]? = match d.read_compact_len() {
+    -1 => None
+    n => {
+      let out : Array[(String, Array[Int])] = []
+      for _ in 0..<n {
+        let name = d.read_compact_string()
+        let parts = d.read_compact_len()
+        let partitions : Array[Int] = []
+        for _ in 0..<parts {
+          partitions.push(d.read_i32())
+        }
+        d.skip_tag_buffer()
+        out.push((name, partitions))
+      }
+      Some(out)
+    }
+  }
+  topics
+}
+
+///|
+/// DescribeLogDirs v2-v5 response body: one log dir holding the
+/// requested topics (or both fake partitions of "events" when the
+/// request asked for all), sizes echoing the partition index.
+fn fake_describe_log_dirs_response(
+  topics : Array[(String, Array[Int])],
+  version : Int,
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  if version >= 3 {
+    e.write_i16(0) // top-level error
+  }
+  e.write_compact_len(1) // one log dir
+  e.write_i16(0) // error
+  e.write_compact_string("/tmp/kafka-logs")
+  e.write_compact_len(topics.length())
+  for entry in topics {
+    let (name, partitions) = entry
+    e.write_compact_string(name)
+    e.write_compact_len(partitions.length())
+    for partition in partitions {
+      e.write_i32(partition)
+      e.write_i64(100L + partition.to_int64()) // size
+      e.write_i64(0L) // lag
+      e.write_bool(false) // future
+      e.write_tag_buffer()
+    }
+    e.write_tag_buffer()
+  }
+  if version >= 4 {
+    e.write_i64(1000000L) // total bytes
+    e.write_i64(500000L) // usable bytes
+  }
+  if version >= 5 {
+    e.write_bool(false) // is_cordoned
+  }
+  e.write_tag_buffer()
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse an ElectLeaders v2 request: (election type, topics-or-null,
+/// timeout).
+fn fake_elect_leaders_request(
+  rest : Bytes,
+) -> (Int, Array[(String, Array[Int])]?) raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  let election_type = d.read_i8()
+  // Null arrays carry the compact-length marker 0 (read back as -1).
+  let topics : Array[(String, Array[Int])]? = match d.read_compact_len() {
+    -1 => None
+    n => {
+      let out : Array[(String, Array[Int])] = []
+      for _ in 0..<n {
+        let name = d.read_compact_string()
+        let parts = d.read_compact_len()
+        let partitions : Array[Int] = []
+        for _ in 0..<parts {
+          partitions.push(d.read_i32())
+        }
+        d.skip_tag_buffer()
+        out.push((name, partitions))
+      }
+      Some(out)
+    }
+  }
+  ignore(d.read_i32()) // timeout
+  (election_type, topics)
+}
+
+///|
+/// ElectLeaders v2 response body: per-partition success for the
+/// requested (or canned all) partitions.
+fn fake_elect_leaders_response(topics : Array[(String, Array[Int])]) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_i16(0) // top-level error
+  e.write_compact_len(topics.length())
+  for entry in topics {
+    let (name, partitions) = entry
+    e.write_compact_string(name)
+    e.write_compact_len(partitions.length())
+    for partition in partitions {
+      e.write_i32(partition)
+      e.write_i16(0) // error
+      e.write_compact_nullable_string(None)
+      e.write_tag_buffer()
+    }
+    e.write_tag_buffer()
+  }
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse an AlterPartitionReassignments request: (topic, partition,
+/// replicas-or-null) triples.
+fn fake_alter_reassignments_request(
+  rest : Bytes,
+) -> Array[(String, Int, Array[Int]?)] raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  ignore(d.read_i32()) // timeout
+  if rest[3].to_int() >= 1 {
+    ignore(d.read_bool()) // allow replication factor change (v1+)
+  }
+  let out : Array[(String, Int, Array[Int]?)] = []
+  let n = d.read_compact_len()
+  for _ in 0..<n {
+    let name = d.read_compact_string()
+    let count = d.read_compact_len()
+    for _ in 0..<count {
+      let index = d.read_i32()
+      // Null arrays carry the compact-length marker 0 (read back as -1).
+      let replicas : Array[Int]? = match d.read_compact_len() {
+        -1 => None
+        parts => {
+          let ids : Array[Int] = []
+          for _ in 0..<parts {
+            ids.push(d.read_i32())
+          }
+          Some(ids)
+        }
+      }
+      d.skip_tag_buffer()
+      out.push((name, index, replicas))
+    }
+    d.skip_tag_buffer()
+  }
+  out
+}
+
+///|
+/// AlterPartitionReassignments response body: success per (topic,
+/// partition, message-null).
+fn fake_alter_reassignments_response(
+  reassignments : Array[(String, Int, Array[Int]?)],
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_bool(true) // allow replication factor change echo (v1+)
+  e.write_i16(0) // top-level error
+  e.write_compact_nullable_string(None)
+  let by_topic : Map[String, Array[Int]] = Map([])
+  let order : Array[String] = []
+  for entry in reassignments {
+    let (name, index, _) = entry
+    match by_topic.get(name) {
+      Some(indexes) => indexes.push(index)
+      None => {
+        by_topic[name] = [index]
+        order.push(name)
+      }
+    }
+  }
+  e.write_compact_len(order.length())
+  for name in order {
+    e.write_compact_string(name)
+    let indexes = by_topic[name]
+    e.write_compact_len(indexes.length())
+    for index in indexes {
+      e.write_i32(index)
+      e.write_i16(0) // error
+      e.write_compact_nullable_string(None)
+      e.write_tag_buffer()
+    }
+    e.write_tag_buffer()
+  }
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse a ListPartitionReassignments request: the requested topic
+/// filter (None = all).
+fn fake_list_reassignments_request(
+  rest : Bytes,
+) -> Array[(String, Array[Int])]? raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  ignore(d.read_i32()) // timeout
+  // Null arrays carry the compact-length marker 0 (read back as -1).
+  let topics : Array[(String, Array[Int])]? = match d.read_compact_len() {
+    -1 => None
+    n => {
+      let out : Array[(String, Array[Int])] = []
+      for _ in 0..<n {
+        let name = d.read_compact_string()
+        let parts = d.read_compact_len()
+        let partitions : Array[Int] = []
+        for _ in 0..<parts {
+          partitions.push(d.read_i32())
+        }
+        d.skip_tag_buffer()
+        out.push((name, partitions))
+      }
+      Some(out)
+    }
+  }
+  topics
+}
+
+///|
+/// ListPartitionReassignments response body: one ongoing reassignment
+/// of "events" partition 0 (empty when the request filters others out).
+fn fake_list_reassignments_response(
+  filter : Array[(String, Array[Int])]?,
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_i16(0) // top-level error
+  e.write_compact_nullable_string(None)
+  let wanted = match filter {
+    None => true
+    Some(topics) => topics.get(0) is Some((name, _)) && name == "events"
+  }
+  if wanted {
+    e.write_compact_len(1)
+    e.write_compact_string("events")
+    e.write_compact_len(1)
+    e.write_i32(0) // partition
+    e.write_compact_len(2)
+    e.write_i32(1)
+    e.write_i32(2)
+    e.write_compact_len(1)
+    e.write_i32(2)
+    e.write_compact_len(1)
+    e.write_i32(1)
+    e.write_tag_buffer()
+    e.write_tag_buffer()
+  } else {
+    e.write_compact_len(0)
+  }
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse an UnregisterBroker request: the broker id.
+fn fake_unregister_broker_request(rest : Bytes) -> Int raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  d.read_i32()
+}
+
+///|
+/// UnregisterBroker response body.
+fn fake_unregister_broker_response() -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_i16(0) // error
+  e.write_compact_nullable_string(None)
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse a DescribeQuorum request: (topic, partition) pairs.
+fn fake_describe_quorum_request(rest : Bytes) -> Array[(String, Int)] raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  let out : Array[(String, Int)] = []
+  let n = d.read_compact_len()
+  for _ in 0..<n {
+    let name = d.read_compact_string()
+    let count = d.read_compact_len()
+    for _ in 0..<count {
+      let index = d.read_i32()
+      d.skip_tag_buffer()
+      out.push((name, index))
+    }
+    d.skip_tag_buffer()
+  }
+  out
+}
+
+///|
+/// DescribeQuorum v2 response body: node 0 leading with one voter
+/// (itself), plus the quorum node/listener map. No throttle field in
+/// this API.
+fn fake_describe_quorum_response(requests : Array[(String, Int)]) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i16(0) // top-level error
+  e.write_compact_nullable_string(None)
+  e.write_compact_len(requests.length())
+  for entry in requests {
+    let (name, index) = entry
+    e.write_compact_string(name)
+    e.write_compact_len(1)
+    e.write_i32(index)
+    e.write_i16(0) // error
+    e.write_compact_nullable_string(None)
+    e.write_i32(0) // leader id
+    e.write_i32(5) // leader epoch
+    e.write_i64(42L) // high watermark
+    e.write_compact_len(1) // voters
+    e.write_i32(0) // replica id
+    e.write_bytes(Bytes::make(16, 0)) // directory id
+    e.write_i64(42L) // log end offset
+    e.write_i64(-1L) // last fetch
+    e.write_i64(-1L) // last caught up
+    e.write_tag_buffer()
+    e.write_compact_len(0) // observers
+    e.write_tag_buffer()
+    e.write_tag_buffer()
+  }
+  e.write_compact_len(1) // nodes
+  e.write_i32(0) // node id
+  e.write_compact_len(1)
+  e.write_compact_string("CONTROLLER")
+  e.write_compact_string("127.0.0.1")
+  e.write_i16(9093) // port (uint16)
+  e.write_tag_buffer()
+  e.write_tag_buffer()
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse an UpdateFeatures v2 request: (feature, level, upgrade type,
+/// validate-only).
+fn fake_update_features_request(
+  rest : Bytes,
+) -> (Array[(String, Int, Int)], Bool) raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  ignore(d.read_i32()) // timeout
+  let updates : Array[(String, Int, Int)] = []
+  let n = d.read_compact_len()
+  for _ in 0..<n {
+    let feature = d.read_compact_string()
+    let level = d.read_i16()
+    let upgrade_type = d.read_i8()
+    d.skip_tag_buffer()
+    updates.push((feature, level, upgrade_type))
+  }
+  let validate_only = d.read_bool()
+  (updates, validate_only)
+}
+
+///|
+/// UpdateFeatures v2 response body: top-level error only (v2 dropped
+/// the per-feature results).
+fn fake_update_features_response(error_code : Int) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_i16(error_code)
+  e.write_compact_nullable_string(None)
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse one AclFilter from the current decoder position.
+fn fake_acl_filter(d : @buf.Decoder) -> @moonkafka.AclFilter raise {
+  let resource_type = d.read_i8()
+  let resource_name = d.read_compact_nullable_string()
+  let pattern_type = d.read_i8()
+  let principal = d.read_compact_nullable_string()
+  let host = d.read_compact_nullable_string()
+  let operation = d.read_i8()
+  let permission_type = d.read_i8()
+  d.skip_tag_buffer()
+  {
+    resource_type,
+    resource_name,
+    pattern_type,
+    principal,
+    host,
+    operation,
+    permission_type,
+  }
+}
+
+///|
+/// Parse a DescribeAcls request: one filter.
+fn fake_describe_acls_request(rest : Bytes) -> @moonkafka.AclFilter raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  fake_acl_filter(d)
+}
+
+///|
+/// Parse a CreateAcls request: the creations.
+fn fake_create_acls_request(
+  rest : Bytes,
+) -> Array[@moonkafka.AclCreation] raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  let out : Array[@moonkafka.AclCreation] = []
+  let n = d.read_compact_len()
+  for _ in 0..<n {
+    let resource_type = d.read_i8()
+    let resource_name = d.read_compact_string()
+    let pattern_type = d.read_i8()
+    let principal = d.read_compact_string()
+    let host = d.read_compact_string()
+    let operation = d.read_i8()
+    let permission_type = d.read_i8()
+    d.skip_tag_buffer()
+    out.push({
+      resource_type,
+      resource_name,
+      pattern_type,
+      principal,
+      host,
+      operation,
+      permission_type,
+    })
+  }
+  out
+}
+
+///|
+/// Parse a DeleteAcls request: the filters.
+fn fake_delete_acls_request(rest : Bytes) -> Array[@moonkafka.AclFilter] raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  let out : Array[@moonkafka.AclFilter] = []
+  let n = d.read_compact_len()
+  for _ in 0..<n {
+    out.push(fake_acl_filter(d))
+  }
+  out
+}
+
+///|
+/// DescribeAcls response body: the "events" topic (literal) carrying
+/// one ALLOW/READ ACL for User:alice.
+fn fake_describe_acls_response() -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_i16(0) // error
+  e.write_compact_nullable_string(None)
+  e.write_compact_len(1) // one resource
+  e.write_i8(2) // topic
+  e.write_compact_string("events")
+  e.write_i8(3) // literal
+  e.write_compact_len(1) // one acl
+  e.write_compact_string("User:alice")
+  e.write_compact_string("*")
+  e.write_i8(3) // read
+  e.write_i8(3) // allow
+  e.write_tag_buffer()
+  e.write_tag_buffer()
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// CreateAcls response body: success per creation.
+fn fake_create_acls_response(count : Int) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(count)
+  for _ in 0..<count {
+    e.write_i16(0) // error
+    e.write_compact_nullable_string(None)
+    e.write_tag_buffer()
+  }
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// DeleteAcls response body: per filter, the canned "events" ACL as the
+/// only match (deleted successfully).
+fn fake_delete_acls_response(count : Int) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(count)
+  for _ in 0..<count {
+    e.write_i16(0) // filter error
+    e.write_compact_nullable_string(None)
+    e.write_compact_len(1) // one matching acl
+    e.write_i16(0) // deletion error
+    e.write_compact_nullable_string(None)
+    e.write_i8(2) // topic
+    e.write_compact_string("events")
+    e.write_i8(3) // literal
+    e.write_compact_string("User:alice")
+    e.write_compact_string("*")
+    e.write_i8(3) // read
+    e.write_i8(3) // allow
+    e.write_tag_buffer()
+    e.write_tag_buffer()
+  }
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Quota/SCRAM request and response shapes: the quota APIs negotiate
+/// v0 (legacy lengths, no tag buffers) or v1 (compact + tag buffers),
+/// so their fake helpers shape by version like the real codecs.
+fn fake_quotas_len(d : @buf.Decoder, version : Int) -> Int raise {
+  if version >= 1 {
+    d.read_compact_len()
+  } else {
+    d.read_i32()
+  }
+}
+
+///|
+fn fake_write_quotas_len(e : @buf.Encoder, n : Int, version : Int) -> Unit {
+  if version >= 1 {
+    e.write_compact_len(n)
+  } else {
+    e.write_i32(n)
+  }
+}
+
+///|
+fn fake_quotas_string(d : @buf.Decoder, version : Int) -> String raise {
+  if version >= 1 {
+    d.read_compact_string()
+  } else {
+    let len = d.read_i16()
+    @utf8.decode_lossy(d.read_bytes(len)[:])
+  }
+}
+
+///|
+fn fake_quotas_nullable_string(
+  d : @buf.Decoder,
+  version : Int,
+) -> String? raise {
+  if version >= 1 {
+    d.read_compact_nullable_string()
+  } else {
+    let len = d.read_i16()
+    if len < 0 {
+      None
+    } else {
+      Some(@utf8.decode_lossy(d.read_bytes(len)[:]))
+    }
+  }
+}
+
+///|
+fn fake_write_quotas_string(
+  e : @buf.Encoder,
+  s : String,
+  version : Int,
+) -> Unit {
+  if version >= 1 {
+    e.write_compact_string(s)
+  } else {
+    let b = @utf8.encode(s)
+    e.write_i16(b.length())
+    e.write_bytes(b)
+  }
+}
+
+///|
+fn fake_write_quotas_nullable_string(
+  e : @buf.Encoder,
+  s : String?,
+  version : Int,
+) -> Unit {
+  if version >= 1 {
+    e.write_compact_nullable_string(s)
+  } else {
+    e.write_nullable_string(s)
+  }
+}
+
+///|
+fn fake_write_quotas_tag(e : @buf.Encoder, version : Int) -> Unit {
+  if version >= 1 {
+    e.write_tag_buffer()
+  }
+}
+
+///|
+/// Skip the request header: v0 has the legacy shape (no tag buffer).
+fn fake_skip_quotas_header(d : @buf.Decoder, version : Int) -> Unit raise {
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  if version >= 1 {
+    ignore(d.read_compact_string()) // client id
+    d.skip_tag_buffer()
+  } else {
+    let client_len = d.read_i16()
+    ignore(d.read_bytes(client_len)) // client id
+  }
+}
+
+///|
+/// Skip a struct's tag buffer: none at v0, one at v1+.
+fn fake_skip_quotas_tag(d : @buf.Decoder, version : Int) -> Unit raise {
+  if version >= 1 {
+    d.skip_tag_buffer()
+  }
+}
+
+///|
+/// Parse a DescribeClientQuotas v0-v1 request: the filter.
+fn fake_describe_client_quotas_request(
+  rest : Bytes,
+  version : Int,
+) -> @moonkafka.ClientQuotaFilter raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_quotas_header(d, version)
+  let n = fake_quotas_len(d, version)
+  let components : Array[@moonkafka.ClientQuotaFilterComponent] = []
+  for _ in 0..<n {
+    let entity_type = fake_quotas_string(d, version)
+    let match_type = d.read_i8()
+    let matches = fake_quotas_nullable_string(d, version)
+    fake_skip_quotas_tag(d, version)
+    components.push({ entity_type, match_type, matches, })
+  }
+  let strict = d.read_bool()
+  { components, strict, }
+}
+
+///|
+/// DescribeClientQuotas response body: one entry for the user "alice"
+/// with the two rate quotas set.
+fn fake_describe_client_quotas_response(version : Int) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_i16(0) // error
+  fake_write_quotas_nullable_string(e, None, version)
+  fake_write_quotas_len(e, 1, version) // one entry
+  fake_write_quotas_len(e, 1, version) // one entity
+  fake_write_quotas_string(e, "user", version)
+  fake_write_quotas_nullable_string(e, Some("alice"), version)
+  fake_write_quotas_tag(e, version)
+  fake_write_quotas_len(e, 2, version) // two values
+  fake_write_quotas_string(e, "producer_byte_rate", version)
+  e.write_f64(1024.0)
+  fake_write_quotas_tag(e, version)
+  fake_write_quotas_string(e, "consumer_byte_rate", version)
+  e.write_f64(2048.0)
+  fake_write_quotas_tag(e, version)
+  fake_write_quotas_tag(e, version)
+  fake_write_quotas_tag(e, version)
+  e.to_bytes()
+}
+
+///|
+/// Parse an AlterClientQuotas v0-v1 request: the alterations and the
+/// validate-only flag.
+fn fake_alter_client_quotas_request(
+  rest : Bytes,
+  version : Int,
+) -> (Array[@moonkafka.ClientQuotaAlteration], Bool) raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_quotas_header(d, version)
+  let n = fake_quotas_len(d, version)
+  let out : Array[@moonkafka.ClientQuotaAlteration] = []
+  for _ in 0..<n {
+    let entity_len = fake_quotas_len(d, version)
+    let entity : Array[@moonkafka.QuotaEntity] = []
+    for _ in 0..<entity_len {
+      let entity_type = fake_quotas_string(d, version)
+      let entity_name = fake_quotas_nullable_string(d, version)
+      fake_skip_quotas_tag(d, version)
+      entity.push({ entity_type, entity_name, })
+    }
+    let ops_len = fake_quotas_len(d, version)
+    let ops : Array[@moonkafka.ClientQuotaOp] = []
+    for _ in 0..<ops_len {
+      let key = fake_quotas_string(d, version)
+      let value = d.read_f64()
+      let remove = d.read_bool()
+      fake_skip_quotas_tag(d, version)
+      ops.push({ key, value, remove, })
+    }
+    fake_skip_quotas_tag(d, version)
+    out.push({ entity, ops, })
+  }
+  let validate_only = d.read_bool()
+  (out, validate_only)
+}
+
+///|
+/// AlterClientQuotas response body: success per alteration.
+fn fake_alter_client_quotas_response(
+  entries : Array[@moonkafka.ClientQuotaAlteration],
+  version : Int,
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  fake_write_quotas_len(e, entries.length(), version)
+  for entry in entries {
+    e.write_i16(0) // error
+    fake_write_quotas_nullable_string(e, None, version)
+    fake_write_quotas_len(e, entry.entity.length(), version)
+    for part in entry.entity {
+      fake_write_quotas_string(e, part.entity_type, version)
+      fake_write_quotas_nullable_string(e, part.entity_name, version)
+      fake_write_quotas_tag(e, version)
+    }
+    fake_write_quotas_tag(e, version)
+  }
+  fake_write_quotas_tag(e, version)
+  e.to_bytes()
+}
+
+///|
+/// Parse a DescribeUserScramCredentials v0 request: the user names, or
+/// None for "all users" (a null array).
+fn fake_describe_user_scram_request(rest : Bytes) -> Array[String]? raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  let n = d.read_compact_len()
+  if n < 0 {
+    None
+  } else {
+    let users : Array[String] = []
+    for _ in 0..<n {
+      users.push(d.read_compact_string())
+      d.skip_tag_buffer()
+    }
+    Some(users)
+  }
+}
+
+///|
+/// DescribeUserScramCredentials response body: "alice" with one
+/// SCRAM-SHA-512 credential at 8192 iterations.
+fn fake_describe_user_scram_response() -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_i16(0) // message-level error
+  e.write_compact_nullable_string(None)
+  e.write_compact_len(1) // one user
+  e.write_compact_string("alice")
+  e.write_i16(0) // user-level error
+  e.write_compact_nullable_string(None)
+  e.write_compact_len(1) // one credential
+  e.write_i8(2) // SCRAM-SHA-512
+  e.write_i32(8192) // iterations
+  e.write_tag_buffer()
+  e.write_tag_buffer()
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse an AlterUserScramCredentials v0 request: the deletions and
+/// upsertions.
+fn fake_alter_user_scram_request(
+  rest : Bytes,
+) -> (
+  Array[@moonkafka.ScramCredentialDeletion],
+  Array[@moonkafka.ScramCredentialUpsertion],
+) raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  let deletions : Array[@moonkafka.ScramCredentialDeletion] = []
+  let dn = d.read_compact_len()
+  for _ in 0..<dn {
+    let name = d.read_compact_string()
+    let mechanism = d.read_i8()
+    d.skip_tag_buffer()
+    deletions.push({ name, mechanism, })
+  }
+  let upsertions : Array[@moonkafka.ScramCredentialUpsertion] = []
+  let un = d.read_compact_len()
+  for _ in 0..<un {
+    let name = d.read_compact_string()
+    let mechanism = d.read_i8()
+    let iterations = d.read_i32()
+    let salt_len = d.read_compact_len()
+    let salt = d.read_bytes(salt_len)
+    let salted_len = d.read_compact_len()
+    let salted_password = d.read_bytes(salted_len)
+    d.skip_tag_buffer()
+    upsertions.push({ name, mechanism, iterations, salt, salted_password, })
+  }
+  (deletions, upsertions)
+}
+
+///|
+/// AlterUserScramCredentials response body: success per deletion and
+/// upsertion, keyed by user name.
+fn fake_alter_user_scram_response(
+  deletions : Array[@moonkafka.ScramCredentialDeletion],
+  upsertions : Array[@moonkafka.ScramCredentialUpsertion],
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(deletions.length() + upsertions.length())
+  for deletion in deletions {
+    e.write_compact_string(deletion.name)
+    e.write_i16(0) // error
+    e.write_compact_nullable_string(None)
+    e.write_tag_buffer()
+  }
+  for upsertion in upsertions {
+    e.write_compact_string(upsertion.name)
+    e.write_i16(0) // error
+    e.write_compact_nullable_string(None)
+    e.write_tag_buffer()
+  }
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse a DescribeGroups v6 or ConsumerGroupDescribe v1 request: both
+/// carry a compact array of group ids plus the include-authorized-
+/// operations flag (their schemas are field-for-field the same).
+fn fake_group_describe_request(rest : Bytes) -> (Array[String], Bool) raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  let groups : Array[String] = []
+  let n = d.read_compact_len()
+  for _ in 0..<n {
+    groups.push(d.read_compact_string())
+  }
+  (groups, d.read_bool())
+}
+
+///|
+/// Parse a ListGroups v5 request: the states filter array then the types
+/// filter array (both compact), empty meaning "all".
+fn fake_list_groups_request(
+  rest : Bytes,
+) -> (Array[String], Array[String]) raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  let states : Array[String] = []
+  let n = d.read_compact_len()
+  for _ in 0..<n {
+    states.push(d.read_compact_string())
+  }
+  let types : Array[String] = []
+  let m = d.read_compact_len()
+  for _ in 0..<m {
+    types.push(d.read_compact_string())
+  }
+  (states, types)
+}
+
+///|
+/// ListGroups v5 response body: the broker's canned group catalog —
+/// one classic consumer group, one KIP-848 consumer group, and one
+/// share group — filtered by the requested state and type filters, so
+/// the filters are exercised end to end rather than just echoed.
+fn fake_list_groups_response(
+  states_filter : Array[String],
+  types_filter : Array[String],
+) -> Bytes {
+  let catalog = [
+    ("classic-group", "consumer", "Stable", "classic"),
+    ("k848-group", "consumer", "Stable", "consumer"),
+    ("share-group", "share", "Empty", "share"),
+  ]
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_i16(0) // error code
+  let listed : Array[(String, String, String, String)] = []
+  for entry in catalog {
+    let (_, _, state, type_) = entry
+    if (states_filter.length() == 0 || states_filter.contains(state)) &&
+      (types_filter.length() == 0 || types_filter.contains(type_)) {
+      listed.push(entry)
+    }
+  }
+  e.write_compact_len(listed.length())
+  for entry in listed {
+    let (id, protocol, state, type_) = entry
+    e.write_compact_string(id)
+    e.write_compact_string(protocol)
+    e.write_compact_string(state)
+    e.write_compact_string(type_)
+    e.write_tag_buffer()
+  }
+  e.write_tag_buffer() // top level
+  e.to_bytes()
+}
+
+///|
+/// Parse a DeleteGroups v2 request: the compact array of group names.
+fn fake_delete_groups_request(rest : Bytes) -> Array[String] raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  let groups : Array[String] = []
+  let n = d.read_compact_len()
+  for _ in 0..<n {
+    groups.push(d.read_compact_string())
+  }
+  groups
+}
+
+///|
+/// DeleteGroups v2 response body: one result per requested group, in
+/// request order. Groups in `not_found` come back GROUP_ID_NOT_FOUND;
+/// the rest succeed with error 0.
+fn fake_delete_groups_response(
+  groups : Array[String],
+  not_found : Array[String],
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(groups.length())
+  for group in groups {
+    e.write_compact_string(group)
+    e.write_i16(if not_found.contains(group) { 69 } else { 0 })
+    e.write_tag_buffer()
+  }
+  e.write_tag_buffer() // top level
+  e.to_bytes()
+}
+
+///|
+/// Parse a DescribeProducers v0 request: topics and their partition
+/// indexes.
+fn fake_describe_producers_request(
+  rest : Bytes,
+) -> Array[(String, Array[Int])] raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  let out : Array[(String, Array[Int])] = []
+  let n = d.read_compact_len()
+  for _ in 0..<n {
+    let name = d.read_compact_string()
+    let partitions : Array[Int] = []
+    let pcount = d.read_compact_len()
+    for _ in 0..<pcount {
+      partitions.push(d.read_i32())
+    }
+    d.skip_tag_buffer() // topic
+    out.push((name, partitions))
+  }
+  out
+}
+
+///|
+/// DescribeProducers v0 response body: echoes the requested topics and
+/// partitions. Partition 0 carries one active producer; the rest are idle.
+fn fake_describe_producers_response(
+  topics : Array[(String, Array[Int])],
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(topics.length())
+  for topic in topics {
+    let (name, partitions) = topic
+    e.write_compact_string(name)
+    e.write_compact_len(partitions.length())
+    for partition in partitions {
+      e.write_i32(partition)
+      e.write_i16(0) // error code
+      e.write_compact_nullable_string(None) // error message
+      if partition == 0 {
+        e.write_compact_len(1) // one active producer
+        e.write_i64(12345L)
+        e.write_i32(1) // producer epoch
+        e.write_i32(42) // last sequence
+        e.write_i64(1234567890L) // last timestamp
+        e.write_i32(0) // coordinator epoch
+        e.write_i64(100L) // current txn start offset
+        e.write_tag_buffer()
+      } else {
+        e.write_compact_len(0) // idle
+      }
+      e.write_tag_buffer() // partition
+    }
+    e.write_tag_buffer() // topic
+  }
+  e.write_tag_buffer() // top level
+  e.to_bytes()
+}
+
+///|
+/// Parse a DescribeTransactions v0 request: the transactional ids.
+fn fake_describe_transactions_request(rest : Bytes) -> Array[String] raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  let out : Array[String] = []
+  let n = d.read_compact_len()
+  for _ in 0..<n {
+    out.push(d.read_compact_string())
+  }
+  out
+}
+
+///|
+/// DescribeTransactions v0 response body: echoes the requested ids with a
+/// canned Ongoing transaction spanning two partitions.
+fn fake_describe_transactions_response(ids : Array[String]) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(ids.length())
+  for id in ids {
+    e.write_i16(0) // error code
+    e.write_compact_string(id)
+    e.write_compact_string("Ongoing")
+    e.write_i32(30000) // transaction timeout
+    e.write_i64(1234567890L) // start time
+    e.write_i64(12345L) // producer id
+    e.write_i16(1) // producer epoch
+    e.write_compact_len(1) // one topic
+    e.write_compact_string("events")
+    e.write_compact_len(2) // two partitions
+    e.write_i32(0)
+    e.write_i32(1)
+    e.write_tag_buffer() // TopicData
+    e.write_tag_buffer() // TransactionState
+  }
+  e.write_tag_buffer() // top level
+  e.to_bytes()
+}
+
+///|
+/// Parse a ListTransactions v2 request: state filters, producer id
+/// filters, duration filter, and the nullable transactional-id pattern.
+fn fake_list_transactions_request(
+  rest : Bytes,
+) -> (Array[String], Array[Int64], Int64, String?) raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  let states : Array[String] = []
+  let scount = d.read_compact_len()
+  for _ in 0..<scount {
+    states.push(d.read_compact_string())
+  }
+  let producers : Array[Int64] = []
+  let pcount = d.read_compact_len()
+  for _ in 0..<pcount {
+    producers.push(d.read_i64())
+  }
+  let duration = d.read_i64()
+  let pattern = d.read_compact_nullable_string()
+  (states, producers, duration, pattern)
+}
+
+///|
+/// ListTransactions v2 response body: a top-level error, the unknown
+/// state filters, and the transactions this broker coordinates.
+fn fake_list_transactions_response(
+  error_code : Int,
+  unknown : Array[String],
+  transactions : Array[(String, Int64, String)],
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_i16(error_code)
+  e.write_compact_len(unknown.length())
+  for state in unknown {
+    e.write_compact_string(state)
+  }
+  e.write_compact_len(transactions.length())
+  for txn in transactions {
+    let (id, producer_id, state) = txn
+    e.write_compact_string(id)
+    e.write_i64(producer_id)
+    e.write_compact_string(state)
+    e.write_tag_buffer() // TransactionState
+  }
+  e.write_tag_buffer() // top level
+  e.to_bytes()
+}
+
+///|
+/// The AuthorizedOperations bitfield: a real one when the request asked
+/// for it, the MIN_VALUE sentinel when it did not.
+fn fake_authorized_operations(requested : Bool) -> Int {
+  if requested {
+    4094
+  } else {
+    -2147483648
+  }
+}
+
+///|
+/// DescribeGroups v6 response body: one description per requested group,
+/// in request order. Groups in `not_found` come back Dead with
+/// GROUP_ID_NOT_FOUND — the coordinator's answer for a KIP-848 group,
+/// which is not a classic group. The rest come back Stable with one
+/// static member carrying real ConsumerProtocol metadata, so the decoded
+/// member's subscription and assignment round-trip.
+fn fake_describe_groups_response(
+  groups : Array[String],
+  include_authorized : Bool,
+  not_found : Array[String],
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(groups.length())
+  for group in groups {
+    if not_found.contains(group) {
+      e.write_i16(69) // GROUP_ID_NOT_FOUND
+      e.write_compact_nullable_string(
+        Some("Group \{group} is not a classic group."),
+      )
+      e.write_compact_string(group)
+      e.write_compact_string("Dead")
+      e.write_compact_string("") // protocol type
+      e.write_compact_string("") // protocol data
+      e.write_compact_len(0) // members: always empty when Dead
+      e.write_i32(fake_authorized_operations(false))
+      e.write_tag_buffer() // group
+      continue
+    }
+    e.write_i16(0) // error
+    e.write_compact_nullable_string(None)
+    e.write_compact_string(group)
+    e.write_compact_string("Stable")
+    e.write_compact_string("consumer") // protocol type
+    e.write_compact_string("range") // protocol data: the settled assignor
+    e.write_compact_len(1) // members
+    e.write_compact_string("\{group}-member-1")
+    e.write_compact_nullable_string(Some("\{group}-instance-1"))
+    e.write_compact_string("client-1")
+    e.write_compact_string("/127.0.0.1")
+    let metadata = @moonkafka.encode_consumer_protocol_subscription([
+      "\{group}-topic",
+    ])
+    e.write_compact_len(metadata.length())
+    e.write_bytes(metadata)
+    let assignment = @moonkafka.encode_consumer_protocol_assignment([
+      ("\{group}-topic", [0, 1]),
+    ])
+    e.write_compact_len(assignment.length())
+    e.write_bytes(assignment)
+    e.write_tag_buffer() // member
+    e.write_i32(fake_authorized_operations(include_authorized))
+    e.write_tag_buffer() // group
+  }
+  e.write_tag_buffer() // top level
+  e.to_bytes()
+}
+
+///|
+/// Write one ConsumerGroupDescribe Assignment: a wrapper struct around a
+/// TopicPartitions array, so the wrapper and each element each carry a
+/// tag buffer.
+fn fake_write_group_assignment(
+  e : @buf.Encoder,
+  assignment : Array[(Bytes, String, Array[Int])],
+) -> Unit {
+  e.write_compact_len(assignment.length())
+  for entry in assignment {
+    let (topic_id, topic_name, partitions) = entry
+    e.write_bytes(topic_id)
+    e.write_compact_string(topic_name)
+    e.write_compact_len(partitions.length())
+    for partition in partitions {
+      e.write_i32(partition)
+    }
+    e.write_tag_buffer() // topic partitions
+  }
+  e.write_tag_buffer() // assignment wrapper
+}
+
+///|
+/// ConsumerGroupDescribe v1 response body: one description per requested
+/// group, in request order. Groups in `not_found` come back with
+/// GROUP_ID_NOT_FOUND; the rest come back Stable at group epoch 7 with two
+/// members — a new-protocol member whose current assignment still lags
+/// its target, and a migrated classic member subscribing by regex.
+fn fake_consumer_group_describe_response(
+  groups : Array[String],
+  include_authorized : Bool,
+  not_found : Array[String],
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  let topic_id = Bytes::make(16, b'\x2a')
+  e.write_i32(0) // throttle
+  e.write_compact_len(groups.length())
+  for group in groups {
+    if not_found.contains(group) {
+      e.write_i16(69) // GROUP_ID_NOT_FOUND
+      e.write_compact_nullable_string(Some("Group \{group} not found."))
+      e.write_compact_string(group)
+      e.write_compact_string("") // group state
+      e.write_i32(-1) // group epoch
+      e.write_i32(-1) // assignment epoch
+      e.write_compact_string("") // assignor
+      e.write_compact_len(0) // members
+      e.write_i32(fake_authorized_operations(false))
+      e.write_tag_buffer() // group
+      continue
+    }
+    e.write_i16(0) // error
+    e.write_compact_nullable_string(None)
+    e.write_compact_string(group)
+    e.write_compact_string("Stable")
+    e.write_i32(7) // group epoch
+    e.write_i32(6) // assignment epoch
+    e.write_compact_string("range") // assignor
+    e.write_compact_len(2) // members
+    // A new-protocol member at epoch 6: its assignment is what it is
+    // fetching now, its target what the broker computed at epoch 7.
+    e.write_compact_string("\{group}-member-1")
+    e.write_compact_nullable_string(None) // instance id
+    e.write_compact_nullable_string(Some("rack-a"))
+    e.write_i32(6) // member epoch
+    e.write_compact_string("client-1")
+    e.write_compact_string("/127.0.0.1")
+    e.write_compact_len(1) // subscribed topic names
+    e.write_compact_string("\{group}-topic")
+    e.write_compact_nullable_string(None) // subscribed topic regex
+    fake_write_group_assignment(e, [(topic_id, "\{group}-topic", [0])])
+    fake_write_group_assignment(e, [(topic_id, "\{group}-topic", [0, 1])])
+    e.write_i8(1) // member type: consumer
+    e.write_tag_buffer() // member
+    // A classic member migrated into the group, subscribing by regex.
+    e.write_compact_string("\{group}-member-2")
+    e.write_compact_nullable_string(Some("\{group}-instance-2"))
+    e.write_compact_nullable_string(None) // rack id
+    e.write_i32(7) // member epoch
+    e.write_compact_string("client-2")
+    e.write_compact_string("/10.0.0.2")
+    e.write_compact_len(0) // subscribed topic names
+    e.write_compact_nullable_string(Some("\{group}-.*"))
+    fake_write_group_assignment(e, [(topic_id, "\{group}-topic", [1])])
+    fake_write_group_assignment(e, [(topic_id, "\{group}-topic", [1])])
+    e.write_i8(0) // member type: classic
+    e.write_tag_buffer() // member
+    e.write_i32(fake_authorized_operations(include_authorized))
+    e.write_tag_buffer() // group
+  }
+  e.write_tag_buffer() // top level
+  e.to_bytes()
+}
+
+///|
 /// Parse a ConsumerGroupHeartbeat v1 request: (group, member id, epoch,
 /// instance id, subscribed regex).
 fn fake_consumer_group_heartbeat_request(
@@ -1002,11 +2871,12 @@ fn fake_describe_topic_partitions_response(
   topic : String,
   partitions : Array[Int],
   next_cursor : TopicPartitionCursor?,
+  error_code? : Int = 0,
 ) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(0) // throttle
   e.write_compact_len(1) // one topic
-  e.write_i16(0) // no error
+  e.write_i16(error_code)
   e.write_compact_string(topic)
   e.write_bytes(Bytes::make(16, b'\x07')) // topic id
   e.write_bool(false) // is_internal
@@ -1370,8 +3240,17 @@ async fn fake_serve_conn(
   coordinator? : FakeCoordinator? = None,
   metadata_partitions? : Int = 1,
   hide_apis? : Array[Int] = [],
+  dtp_requests? : Array[Int] = [],
+  dtp_error_rounds? : Int = 0,
+  create_topics? : Array[(String, Bytes)] = [],
+  delete_topics? : Array[(String?, Bytes)] = [],
+  create_partitions? : Array[(String, Int)] = [],
+  delete_records? : Array[(String, Int, Int64)] = [],
+  offset_deletes? : Array[(String, String, Int)] = [],
+  cluster_ops? : FakeClusterOps = FakeClusterOps::new(),
 ) -> Unit {
   // per-connection SASL state
+  let mut dtp_frames = 0
   let mut sasl_mechanism : String? = None
   let mut scram_client_first_bare : String? = None
   let mut scram_server_first : String? = None
@@ -1509,6 +3388,65 @@ async fn fake_serve_conn(
           )
         }
       }
+      19 => {
+        let (topics, _) = fake_create_topics_request(rest)
+        let results : Array[(String, Bytes, Int, String?)] = []
+        let mut next_id = 1
+        for entry in topics {
+          let (name, _, _) = entry
+          let id = Bytes::make(16, next_id.to_byte())
+          next_id += 1
+          create_topics.push((name, id))
+          results.push((name, id, 0, None))
+        }
+        fake_create_topics_response(results)
+      }
+      20 => {
+        let (names, ids) = fake_delete_topics_request(rest)
+        for name in names {
+          delete_topics.push((Some(name), Bytes::make(16, 0)))
+        }
+        for id in ids {
+          delete_topics.push((None, id))
+        }
+        fake_delete_topics_response(names, ids)
+      }
+      21 => {
+        let (topics, _) = fake_delete_records_request(rest)
+        let results : Array[(Int, Int64, Int)] = []
+        for entry in topics {
+          let (name, partitions) = entry
+          for part in partitions {
+            let (index, offset) = part
+            delete_records.push((name, index, offset))
+            results.push((index, offset, 0))
+          }
+        }
+        fake_delete_records_response(results)
+      }
+      37 => {
+        let (topics, _) = fake_create_partitions_request(rest)
+        let results : Array[(String, Int, String?)] = []
+        for entry in topics {
+          let (name, count, _) = entry
+          create_partitions.push((name, count))
+          results.push((name, 0, None))
+        }
+        fake_create_partitions_response(results)
+      }
+      47 => {
+        let (group, topics) = fake_offset_delete_request(rest)
+        let results : Array[(String, Int, Int)] = []
+        for entry in topics {
+          let (name, partitions) = entry
+          for part in partitions {
+            let index = part
+            offset_deletes.push((group, name, index))
+            results.push((name, index, 0))
+          }
+        }
+        fake_offset_delete_response(results)
+      }
       68 => {
         let (group, member, epoch, instance, regex) = fake_consumer_group_heartbeat_request(
           rest,
@@ -1600,7 +3538,10 @@ async fn fake_serve_conn(
         let (group, partitions) = fake_offset_fetch_request(rest)
         fake_offset_fetch_response(group, partitions, committed_store)
       }
-      75 =>
+      75 => {
+        dtp_requests.push(1)
+        dtp_frames += 1
+        let error = if dtp_frames <= dtp_error_rounds { 5 } else { 0 }
         // Two pages: a fresh request returns partition 0 with a cursor at
         // partition 1; a resumed request returns partition 1 and completes.
         match fake_dtp_request_cursor(rest) {
@@ -1609,9 +3550,17 @@ async fn fake_serve_conn(
               topic,
               [0],
               Some({ topic_name: topic, partition_index: 1, }),
+              error_code=error,
             )
-          Some(_) => fake_describe_topic_partitions_response(topic, [1], None)
+          Some(_) =>
+            fake_describe_topic_partitions_response(
+              topic,
+              [1],
+              None,
+              error_code=error,
+            )
         }
+      }
       36 => {
         let mechanism = sasl_mechanism.unwrap_or("")
         if !sasl_ok {
@@ -1678,11 +3627,208 @@ async fn fake_serve_conn(
           }
         }
       }
+      29 => {
+        cluster_ops.describe_acls.push(fake_describe_acls_request(rest))
+        fake_describe_acls_response()
+      }
+      30 => {
+        let creations = fake_create_acls_request(rest)
+        for creation in creations {
+          cluster_ops.create_acls.push(creation)
+        }
+        fake_create_acls_response(creations.length())
+      }
+      31 => {
+        let filters = fake_delete_acls_request(rest)
+        for filter in filters {
+          cluster_ops.delete_acls.push(filter)
+        }
+        fake_delete_acls_response(filters.length())
+      }
+      48 => {
+        let filter = fake_describe_client_quotas_request(rest, version)
+        cluster_ops.describe_quotas.push(filter)
+        fake_describe_client_quotas_response(version)
+      }
+      49 => {
+        let (entries, validate_only) = fake_alter_client_quotas_request(
+          rest, version,
+        )
+        for entry in entries {
+          cluster_ops.alter_quotas.push(entry)
+          cluster_ops.alter_quotas_validate_only.push(validate_only)
+        }
+        fake_alter_client_quotas_response(entries, version)
+      }
+      50 => {
+        cluster_ops.describe_scram.push(fake_describe_user_scram_request(rest))
+        fake_describe_user_scram_response()
+      }
+      51 => {
+        let (deletions, upsertions) = fake_alter_user_scram_request(rest)
+        for deletion in deletions {
+          cluster_ops.alter_scram_deletions.push(deletion)
+        }
+        for upsertion in upsertions {
+          cluster_ops.alter_scram_upsertions.push(upsertion)
+        }
+        fake_alter_user_scram_response(deletions, upsertions)
+      }
+      15 => {
+        let (groups, include_authorized) = fake_group_describe_request(rest)
+        cluster_ops.describe_groups.push((groups, include_authorized))
+        fake_describe_groups_response(
+          groups,
+          include_authorized,
+          cluster_ops.describe_groups_not_found,
+        )
+      }
+      69 => {
+        let (groups, include_authorized) = fake_group_describe_request(rest)
+        cluster_ops.describe_consumer_groups.push((groups, include_authorized))
+        fake_consumer_group_describe_response(
+          groups,
+          include_authorized,
+          cluster_ops.describe_consumer_groups_not_found,
+        )
+      }
+      16 => {
+        let (states, types) = fake_list_groups_request(rest)
+        cluster_ops.list_groups.push((states, types))
+        fake_list_groups_response(states, types)
+      }
+      42 => {
+        let groups = fake_delete_groups_request(rest)
+        cluster_ops.delete_groups.push(groups)
+        fake_delete_groups_response(groups, cluster_ops.delete_groups_not_found)
+      }
+      60 => {
+        cluster_ops.describe_cluster.push(fake_describe_cluster_request(rest))
+        fake_describe_cluster_response(broker_port, version)
+      }
+      61 => {
+        let topics = fake_describe_producers_request(rest)
+        cluster_ops.describe_producers.push(topics)
+        fake_describe_producers_response(topics)
+      }
+      65 => {
+        let ids = fake_describe_transactions_request(rest)
+        cluster_ops.describe_transactions.push(ids)
+        fake_describe_transactions_response(ids)
+      }
+      66 => {
+        let (states, producers, duration, pattern) = fake_list_transactions_request(
+          rest,
+        )
+        cluster_ops.list_transactions.push(
+          (states, producers, duration, pattern),
+        )
+        fake_list_transactions_response(0, [], [("txn-1", 12345L, "Ongoing")])
+      }
+      32 => {
+        let (resources, _, _) = fake_describe_configs_request(rest)
+        for resource in resources {
+          let (resource_type, resource_name, keys) = resource
+          cluster_ops.describe_configs.push(
+            (resource_type, resource_name, keys),
+          )
+        }
+        fake_describe_configs_response(resources)
+      }
+      44 => {
+        let (resources, _) = fake_incremental_alter_configs_request(rest)
+        for resource in resources {
+          let (resource_type, resource_name, configs) = resource
+          cluster_ops.incremental_alters.push(
+            (resource_type, resource_name, configs),
+          )
+        }
+        fake_alter_configs_response(
+          resources.map(fn(r) {
+            let (t, n, _) = r
+            (t, n)
+          }),
+        )
+      }
+      33 => {
+        let (resources, _) = fake_alter_configs_request(rest)
+        for resource in resources {
+          let (resource_type, resource_name, configs) = resource
+          cluster_ops.alter_configs.push(
+            (resource_type, resource_name, configs),
+          )
+        }
+        fake_alter_configs_response(
+          resources.map(fn(r) {
+            let (t, n, _) = r
+            (t, n)
+          }),
+        )
+      }
+      74 => {
+        cluster_ops.list_config_resources.push(
+          fake_list_config_resources_request(rest),
+        )
+        fake_list_config_resources_response(version)
+      }
+      35 => {
+        let topics = fake_describe_log_dirs_request(rest)
+        cluster_ops.log_dirs.push(topics)
+        let effective = match topics {
+          Some(topics) => topics
+          None => [("events", [0, 1])]
+        }
+        fake_describe_log_dirs_response(effective, version)
+      }
+      43 => {
+        let (election_type, topics) = fake_elect_leaders_request(rest)
+        cluster_ops.elect_leaders.push((election_type, topics))
+        let effective = match topics {
+          Some(topics) => topics
+          None => [("events", [0, 1])]
+        }
+        fake_elect_leaders_response(effective)
+      }
+      45 => {
+        let reassignments = fake_alter_reassignments_request(rest)
+        for entry in reassignments {
+          let (name, index, replicas) = entry
+          cluster_ops.alter_reassignments.push((name, index, replicas))
+        }
+        fake_alter_reassignments_response(reassignments)
+      }
+      46 => {
+        let filter = fake_list_reassignments_request(rest)
+        cluster_ops.list_reassignments.push(filter)
+        fake_list_reassignments_response(filter)
+      }
+      64 => {
+        cluster_ops.unregister_broker.push(fake_unregister_broker_request(rest))
+        fake_unregister_broker_response()
+      }
+      55 => {
+        let requests = fake_describe_quorum_request(rest)
+        for entry in requests {
+          let (name, index) = entry
+          cluster_ops.quorum_requests.push((name, index))
+        }
+        fake_describe_quorum_response(requests)
+      }
+      57 => {
+        let (updates, validate_only) = fake_update_features_request(rest)
+        for update in updates {
+          let (feature, level, upgrade_type) = update
+          cluster_ops.update_features.push(
+            (feature, level, upgrade_type, validate_only),
+          )
+        }
+        fake_update_features_response(cluster_ops.update_features_error)
+      }
       _ => continue
     }
     // ApiVersions and SaslHandshake v1 responses use header v0: no tag
     // buffer after the correlation id. The rest are flexible (header v1).
-    let has_tag = key != 18 && key != 17
+    let has_tag = key != 18 && key != 17 && key != 47
     let frame = @buf.Encoder::new()
     frame.write_i32(4 + (if has_tag { 1 } else { 0 }) + body.length())
     frame.write_i32(corr)
@@ -1735,6 +3881,14 @@ async fn fake_broker(
   coordinator? : FakeCoordinator? = None,
   metadata_partitions? : Int = 1,
   hide_apis? : Array[Int] = [],
+  dtp_requests? : Array[Int] = [],
+  dtp_error_rounds? : Int = 0,
+  create_topics? : Array[(String, Bytes)] = [],
+  delete_topics? : Array[(String?, Bytes)] = [],
+  create_partitions? : Array[(String, Int)] = [],
+  delete_records? : Array[(String, Int, Int64)] = [],
+  offset_deletes? : Array[(String, String, Int)] = [],
+  cluster_ops? : FakeClusterOps = FakeClusterOps::new(),
 ) -> Unit {
   for ;; {
     let (tcp, _) = server.accept()
@@ -1791,6 +3945,14 @@ async fn fake_broker(
         coordinator~,
         metadata_partitions~,
         hide_apis~,
+        dtp_requests~,
+        dtp_error_rounds~,
+        create_topics~,
+        delete_topics~,
+        create_partitions~,
+        delete_records~,
+        offset_deletes~,
+        cluster_ops~,
       )
     }
   }
@@ -3680,6 +5842,944 @@ async test "consumer protocol raises without KIP-848 broker support" {
     } catch {
       _ => ()
     }
+    server.close()
+  }
+}
+
+///|
+async test "admin describes topics and retries retriable results" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted)
+    }
+    let admin = @moonkafka.Admin::connect(
+      group=root,
+      host="127.0.0.1",
+      port=server.addr.port(),
+    )
+    defer admin.close()
+    // The two-page fake topic merges into one description.
+    let topics = admin.describe_topic_partitions(["events"])
+    assert_eq(topics.length(), 1)
+    assert_eq(topics[0].name, "events")
+    assert_eq(topics[0].error_code, 0)
+    assert_eq(topics[0].partitions.length(), 2)
+    server.close()
+  }
+}
+
+///|
+async test "admin retries retriable topic errors under the policy" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let dtp_requests : Array[Int] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(
+        server,
+        root,
+        "events",
+        accepted,
+        dtp_requests~,
+        dtp_error_rounds=2,
+      )
+    }
+    let admin = @moonkafka.Admin::connect(
+      group=root,
+      host="127.0.0.1",
+      port=server.addr.port(),
+    )
+    defer admin.close()
+    // The first two responses carry a retriable per-topic error; the
+    // retry policy re-issues until the topic resolves.
+    let topics = admin.describe_topic_partitions(["events"])
+    assert_eq(topics.length(), 1)
+    assert_eq(topics[0].error_code, 0)
+    assert_true(dtp_requests.length() >= 3)
+    server.close()
+  }
+}
+
+///|
+async test "admin topic lifecycle: create, grow, truncate, delete offsets, delete" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let create_topics : Array[(String, Bytes)] = []
+    let delete_topics : Array[(String?, Bytes)] = []
+    let create_partitions : Array[(String, Int)] = []
+    let delete_records : Array[(String, Int, Int64)] = []
+    let offset_deletes : Array[(String, String, Int)] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(
+        server,
+        root,
+        "events",
+        accepted,
+        create_topics~,
+        delete_topics~,
+        create_partitions~,
+        delete_records~,
+        offset_deletes~,
+      )
+    }
+    let admin = @moonkafka.Admin::connect(
+      group=root,
+      host="127.0.0.1",
+      port=server.addr.port(),
+    )
+    defer admin.close()
+    // Create with a config override; the fake assigns a fresh topic id.
+    let created = admin.create_topics([
+      {
+        name: "events2",
+        num_partitions: 3,
+        replication_factor: 1,
+        assignments: [],
+        configs: [("retention.ms", Some("86400000"))],
+      },
+    ])
+    assert_eq(created.length(), 1)
+    assert_eq(created[0].error_code, 0)
+    assert_eq(created[0].name, "events2")
+    assert_true(created[0].topic_id != @moonkafka.Uuid::zero())
+    assert_eq(create_topics.length(), 1)
+    // Grow the topic to 5 partitions.
+    let grown = admin.create_partitions([
+      { name: "events2", count: 5, assignments: None, },
+    ])
+    assert_eq(grown[0].error_code, 0)
+    assert_eq(create_partitions, [("events2", 5)])
+    // Truncate partition 0 up to offset 10: the low watermark echoes it.
+    let truncated = admin.delete_records([("events2", [(0, 10L)])])
+    assert_eq(truncated.length(), 1)
+    assert_eq(truncated[0].partition, 0)
+    assert_eq(truncated[0].low_watermark, 10L)
+    assert_eq(truncated[0].error_code, 0)
+    assert_eq(delete_records, [("events2", 0, 10L)])
+    // Delete the group's committed offsets for one partition.
+    let offsets = admin.offset_delete("gid-x", [("events2", [0, 1])])
+    assert_eq(offsets.error_code, 0)
+    assert_eq(offsets.partitions.length(), 2)
+    assert_eq(offset_deletes, [("gid-x", "events2", 0), ("gid-x", "events2", 1)])
+    // Delete by name, then topic-id-first (name null, id set).
+    let deleted = admin.delete_topics(["events2"], [])
+    assert_eq(deleted.length(), 1)
+    assert_eq(deleted[0].name, Some("events2"))
+    assert_eq(deleted[0].error_code, 0)
+    let deleted_by_id = admin.delete_topics([], [created[0].topic_id])
+    assert_eq(deleted_by_id.length(), 1)
+    assert_true(deleted_by_id[0].name is None)
+    assert_eq(deleted_by_id[0].topic_id, created[0].topic_id)
+    assert_eq(deleted_by_id[0].error_code, 0)
+    assert_eq(delete_topics.length(), 2)
+    server.close()
+  }
+}
+
+///|
+async test "admin describes the cluster and its brokers" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let ops = FakeClusterOps::new()
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, cluster_ops=ops)
+    }
+    let admin = @moonkafka.Admin::connect(
+      group=root,
+      host="127.0.0.1",
+      port=server.addr.port(),
+    )
+    defer admin.close()
+    let described = admin.describe_cluster(
+      include_authorized_operations=true,
+      include_fenced_brokers=true,
+    )
+    assert_eq(described.error_code, 0)
+    assert_eq(described.cluster_id, Some("fake-cluster"))
+    assert_eq(described.controller_id, 0)
+    assert_eq(described.endpoint_type, @moonkafka.ENDPOINT_TYPE_BROKERS)
+    assert_eq(described.brokers.length(), 1)
+    assert_eq(described.brokers[0].node_id, 0)
+    assert_eq(described.brokers[0].host, "127.0.0.1")
+    assert_eq(described.brokers[0].port, server.addr.port())
+    assert_true(described.brokers[0].rack is None)
+    assert_true(!described.brokers[0].is_fenced)
+    // The fake serves the requested-operations bitfield verbatim.
+    assert_eq(described.cluster_authorized_operations, -2147483648)
+    assert_eq(ops.describe_cluster, [true])
+    server.close()
+  }
+}
+
+///|
+async test "admin describes and alters configs" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let ops = FakeClusterOps::new()
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, cluster_ops=ops)
+    }
+    let admin = @moonkafka.Admin::connect(
+      group=root,
+      host="127.0.0.1",
+      port=server.addr.port(),
+    )
+    defer admin.close()
+    // Filtered describe of one topic config key.
+    let filtered = admin.describe_configs([
+      {
+        resource_type: @moonkafka.CONFIG_RESOURCE_TOPIC,
+        resource_name: "events",
+        config_keys: Some(["retention.ms"]),
+      },
+    ])
+    assert_eq(filtered.length(), 1)
+    assert_eq(filtered[0].error_code, 0)
+    assert_eq(filtered[0].resource_name, "events")
+    assert_eq(filtered[0].configs.length(), 1)
+    assert_eq(filtered[0].configs[0].name, "retention.ms")
+    assert_eq(filtered[0].configs[0].value, Some("604800000"))
+    assert_true(!filtered[0].configs[0].read_only)
+    assert_true(!filtered[0].configs[0].is_sensitive)
+    // A null key filter asks for every key; the fake serves two.
+    let all = admin.describe_configs([
+      {
+        resource_type: @moonkafka.CONFIG_RESOURCE_TOPIC,
+        resource_name: "events",
+        config_keys: None,
+      },
+    ])
+    assert_eq(all[0].configs.length(), 2)
+    assert_eq(ops.describe_configs.length(), 2)
+    assert_true(ops.describe_configs[1].2 is None)
+    // Incremental set + delete ride AlterableConfig ops.
+    let altered = admin.incremental_alter_configs([
+      {
+        resource_type: @moonkafka.CONFIG_RESOURCE_TOPIC,
+        resource_name: "events",
+        configs: [
+          {
+            name: "retention.ms",
+            operation: @moonkafka.CONFIG_OP_SET,
+            value: Some("86400000"),
+          },
+          {
+            name: "cleanup.policy",
+            operation: @moonkafka.CONFIG_OP_DELETE,
+            value: None,
+          },
+        ],
+      },
+    ])
+    assert_eq(altered.length(), 1)
+    assert_eq(altered[0].error_code, 0)
+    assert_eq(altered[0].resource_type, @moonkafka.CONFIG_RESOURCE_TOPIC)
+    assert_eq(ops.incremental_alters.length(), 1)
+    assert_eq(ops.incremental_alters[0].2.length(), 2)
+    let (key, op, value) = ops.incremental_alters[0].2[0]
+    assert_eq(key, "retention.ms")
+    assert_eq(op, @moonkafka.CONFIG_OP_SET)
+    assert_eq(value, Some("86400000"))
+    // Legacy full-replace alter.
+    let legacy = admin.alter_configs([
+      {
+        resource_type: @moonkafka.CONFIG_RESOURCE_BROKER,
+        resource_name: "1",
+        configs: [{ name: "log.retention.hours", value: Some("48"), }],
+      },
+    ])
+    assert_eq(legacy[0].error_code, 0)
+    assert_eq(ops.alter_configs, [
+      (
+        @moonkafka.CONFIG_RESOURCE_BROKER,
+        "1",
+        [("log.retention.hours", Some("48"))],
+      ),
+    ])
+    // Config resource listings, unfiltered and broker-only.
+    let listed = admin.list_config_resources()
+    assert_eq(listed.error_code, 0)
+    assert_eq(listed.resources.length(), 2)
+    assert_eq(listed.resources[0].resource_name, "events")
+    assert_eq(
+      listed.resources[0].resource_type,
+      @moonkafka.CONFIG_RESOURCE_TOPIC,
+    )
+    let brokers_only = admin.list_config_resources(resource_types=[
+      @moonkafka.CONFIG_RESOURCE_BROKER,
+    ])
+    assert_eq(brokers_only.error_code, 0)
+    assert_eq(ops.list_config_resources, [
+      [],
+      [@moonkafka.CONFIG_RESOURCE_BROKER],
+    ])
+    server.close()
+  }
+}
+
+///|
+async test "admin describes log dirs, elects leaders, and reassigns" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let ops = FakeClusterOps::new()
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, cluster_ops=ops)
+    }
+    let admin = @moonkafka.Admin::connect(
+      group=root,
+      host="127.0.0.1",
+      port=server.addr.port(),
+    )
+    defer admin.close()
+    // All topics: the fake serves both partitions with sizes.
+    let dirs = admin.describe_log_dirs()
+    assert_eq(dirs.error_code, 0)
+    assert_eq(dirs.results.length(), 1)
+    assert_eq(dirs.results[0].log_dir, "/tmp/kafka-logs")
+    assert_eq(dirs.results[0].topics.length(), 1)
+    assert_eq(dirs.results[0].topics[0].partitions.length(), 2)
+    assert_eq(dirs.results[0].topics[0].partitions[1].partition_size, 101L)
+    assert_eq(dirs.results[0].total_bytes, 1000000L)
+    assert_eq(dirs.results[0].usable_bytes, 500000L)
+    assert_true(!dirs.results[0].is_cordoned)
+    // Filtered describe carries the requested partitions on the wire.
+    let filtered = admin.describe_log_dirs(topics=Some([("events", [0])]))
+    assert_eq(filtered.results[0].topics[0].partitions.length(), 1)
+    assert_eq(ops.log_dirs.length(), 2)
+    assert_true(ops.log_dirs[0] is None)
+    // Preferred leader election for explicit partitions.
+    let elected = admin.elect_leaders(
+      @moonkafka.ELECTION_PREFERRED,
+      topic_partitions=Some([("events", [0, 1])]),
+    )
+    assert_eq(elected.error_code, 0)
+    assert_eq(elected.results.length(), 1)
+    assert_eq(elected.results[0].partitions.length(), 2)
+    assert_eq(elected.results[0].partitions[1].error_code, 0)
+    // Unclean election with a null topic list elects everywhere.
+    let unclean = admin.elect_leaders(@moonkafka.ELECTION_UNCLEAN)
+    assert_eq(unclean.error_code, 0)
+    assert_eq(ops.elect_leaders, [
+      (@moonkafka.ELECTION_PREFERRED, Some([("events", [0, 1])])),
+      (@moonkafka.ELECTION_UNCLEAN, None),
+    ])
+    // Move partition 0 to replicas [1, 2] and cancel partition 1.
+    let reassigned = admin.alter_partition_reassignments([
+      {
+        name: "events",
+        partitions: [
+          { partition_index: 0, replicas: Some([1, 2]), },
+          { partition_index: 1, replicas: None, },
+        ],
+      },
+    ])
+    assert_eq(reassigned.error_code, 0)
+    assert_eq(reassigned.responses.length(), 1)
+    assert_eq(reassigned.responses[0].1.length(), 2)
+    assert_eq(ops.alter_reassignments, [
+      ("events", 0, Some([1, 2])),
+      ("events", 1, None),
+    ])
+    // Ongoing reassignments: unfiltered shows the fake's in-flight one.
+    let ongoing = admin.list_partition_reassignments()
+    assert_eq(ongoing.error_code, 0)
+    assert_eq(ongoing.topics.length(), 1)
+    let (_, ongoing_partitions) = ongoing.topics[0]
+    assert_eq(ongoing_partitions[0].partition_index, 0)
+    assert_eq(ongoing_partitions[0].replicas, [1, 2])
+    assert_eq(ongoing_partitions[0].adding_replicas, [2])
+    assert_eq(ongoing_partitions[0].removing_replicas, [1])
+    // A filter that misses the fake's topic yields no results.
+    let none = admin.list_partition_reassignments(topics=Some([("other", [0])]))
+    assert_eq(none.topics.length(), 0)
+    assert_eq(ops.list_reassignments.length(), 2)
+    server.close()
+  }
+}
+
+///|
+async test "admin reads the quorum, updates features, unregisters brokers" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let ops = FakeClusterOps::new()
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, cluster_ops=ops)
+    }
+    let admin = @moonkafka.Admin::connect(
+      group=root,
+      host="127.0.0.1",
+      port=server.addr.port(),
+    )
+    defer admin.close()
+    let quorum = admin.describe_quorum()
+    assert_eq(quorum.error_code, 0)
+    assert_eq(quorum.topics.length(), 1)
+    assert_eq(quorum.topics[0].topic_name, "__cluster_metadata")
+    let partition = quorum.topics[0].partitions[0]
+    assert_eq(partition.partition_index, 0)
+    assert_eq(partition.leader_id, 0)
+    assert_eq(partition.leader_epoch, 5)
+    assert_eq(partition.high_watermark, 42L)
+    assert_eq(partition.current_voters.length(), 1)
+    assert_eq(partition.current_voters[0].replica_id, 0)
+    assert_eq(partition.current_voters[0].log_end_offset, 42L)
+    assert_eq(partition.current_voters[0].last_fetch_timestamp, -1L)
+    assert_eq(quorum.nodes.length(), 1)
+    assert_eq(quorum.nodes[0].listeners, [("CONTROLLER", "127.0.0.1", 9093)])
+    assert_eq(ops.quorum_requests, [("__cluster_metadata", 0)])
+    // Feature update rides the controller route.
+    let updated = admin.update_features([
+      {
+        feature: "metadata.version",
+        max_version_level: 22,
+        upgrade_type: @moonkafka.FEATURE_UPGRADE,
+      },
+    ])
+    assert_eq(updated.error_code, 0)
+    assert_eq(ops.update_features, [
+      ("metadata.version", 22, @moonkafka.FEATURE_UPGRADE, false),
+    ])
+    // A terminal broker error surfaces as a value.
+    ops.update_features_error = 95
+    let failed = admin.update_features([
+      {
+        feature: "metadata.version",
+        max_version_level: 21,
+        upgrade_type: @moonkafka.FEATURE_SAFE_DOWNGRADE,
+      },
+    ])
+    assert_eq(failed.error_code, 95)
+    ops.update_features_error = 0
+    // Unregistering a fenced broker rides the controller route too.
+    let unregistered = admin.unregister_broker(5)
+    assert_eq(unregistered.error_code, 0)
+    assert_eq(ops.unregister_broker, [5])
+    server.close()
+  }
+}
+
+///|
+async test "admin creates, describes, and deletes ACLs" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let ops = FakeClusterOps::new()
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, cluster_ops=ops)
+    }
+    let admin = @moonkafka.Admin::connect(
+      group=root,
+      host="127.0.0.1",
+      port=server.addr.port(),
+    )
+    defer admin.close()
+    // Grant alice read on the topic from any host, and alice consume on
+    // the group with a prefixed pattern.
+    let created = admin.create_acls([
+      {
+        resource_type: @moonkafka.ACL_RESOURCE_TOPIC,
+        resource_name: "events",
+        pattern_type: @moonkafka.ACL_PATTERN_LITERAL,
+        principal: "User:alice",
+        host: "*",
+        operation: @moonkafka.ACL_OPERATION_READ,
+        permission_type: @moonkafka.ACL_PERMISSION_ALLOW,
+      },
+      {
+        resource_type: @moonkafka.ACL_RESOURCE_GROUP,
+        resource_name: "gid-",
+        pattern_type: @moonkafka.ACL_PATTERN_PREFIXED,
+        principal: "User:alice",
+        host: "*",
+        operation: @moonkafka.ACL_OPERATION_READ,
+        permission_type: @moonkafka.ACL_PERMISSION_ALLOW,
+      },
+    ])
+    assert_eq(created.length(), 2)
+    assert_eq(created[0].error_code, 0)
+    assert_eq(created[1].error_code, 0)
+    assert_eq(ops.create_acls.length(), 2)
+    let first = ops.create_acls[0]
+    assert_eq(first.resource_type, @moonkafka.ACL_RESOURCE_TOPIC)
+    assert_eq(first.resource_name, "events")
+    assert_eq(first.pattern_type, @moonkafka.ACL_PATTERN_LITERAL)
+    assert_eq(first.principal, "User:alice")
+    assert_eq(first.host, "*")
+    assert_eq(first.operation, @moonkafka.ACL_OPERATION_READ)
+    assert_eq(first.permission_type, @moonkafka.ACL_PERMISSION_ALLOW)
+    // Describe the topic's ACLs: any principal/host, any operation.
+    let described = admin.describe_acls({
+      resource_type: @moonkafka.ACL_RESOURCE_TOPIC,
+      resource_name: Some("events"),
+      pattern_type: @moonkafka.ACL_PATTERN_LITERAL,
+      principal: None,
+      host: None,
+      operation: @moonkafka.ACL_OPERATION_ANY,
+      permission_type: @moonkafka.ACL_PERMISSION_ANY,
+    })
+    assert_eq(described.error_code, 0)
+    assert_eq(described.resources.length(), 1)
+    assert_eq(
+      described.resources[0].resource_type,
+      @moonkafka.ACL_RESOURCE_TOPIC,
+    )
+    assert_eq(described.resources[0].resource_name, "events")
+    assert_eq(
+      described.resources[0].pattern_type,
+      @moonkafka.ACL_PATTERN_LITERAL,
+    )
+    assert_eq(described.resources[0].acls.length(), 1)
+    assert_eq(described.resources[0].acls[0].principal, "User:alice")
+    assert_eq(described.resources[0].acls[0].host, "*")
+    assert_eq(
+      described.resources[0].acls[0].operation,
+      @moonkafka.ACL_OPERATION_READ,
+    )
+    assert_eq(
+      described.resources[0].acls[0].permission_type,
+      @moonkafka.ACL_PERMISSION_ALLOW,
+    )
+    let listed_filter = ops.describe_acls[0]
+    assert_eq(listed_filter.resource_type, @moonkafka.ACL_RESOURCE_TOPIC)
+    assert_eq(listed_filter.resource_name, Some("events"))
+    assert_true(listed_filter.principal is None)
+    assert_true(listed_filter.host is None)
+    // Delete alice's bindings: the filter matches the canned ACL.
+    let deleted = admin.delete_acls([
+      {
+        resource_type: @moonkafka.ACL_RESOURCE_ANY,
+        resource_name: None,
+        pattern_type: @moonkafka.ACL_PATTERN_ANY,
+        principal: Some("User:alice"),
+        host: None,
+        operation: @moonkafka.ACL_OPERATION_ANY,
+        permission_type: @moonkafka.ACL_PERMISSION_ANY,
+      },
+    ])
+    assert_eq(deleted.length(), 1)
+    assert_eq(deleted[0].error_code, 0)
+    assert_eq(deleted[0].matching_acls.length(), 1)
+    let removed = deleted[0].matching_acls[0]
+    assert_eq(removed.error_code, 0)
+    assert_eq(removed.binding.resource_name, "events")
+    assert_eq(removed.binding.principal, "User:alice")
+    assert_eq(ops.delete_acls.length(), 1)
+    assert_eq(ops.delete_acls[0].principal, Some("User:alice"))
+    server.close()
+  }
+}
+
+///|
+async test "admin describes and alters client quotas and scram credentials" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let ops = FakeClusterOps::new()
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, cluster_ops=ops)
+    }
+    let admin = @moonkafka.Admin::connect(
+      group=root,
+      host="127.0.0.1",
+      port=server.addr.port(),
+    )
+    defer admin.close()
+    // Describe the quota of user alice (exact match on the user entity).
+    let described = admin.describe_client_quotas({
+      components: [
+        {
+          entity_type: @moonkafka.QUOTA_ENTITY_USER,
+          match_type: @moonkafka.QUOTA_MATCH_EXACT,
+          matches: Some("alice"),
+        },
+      ],
+      strict: true,
+    })
+    assert_eq(described.error_code, 0)
+    assert_eq(described.entries.length(), 1)
+    assert_eq(described.entries[0].entity.length(), 1)
+    assert_eq(
+      described.entries[0].entity[0].entity_type,
+      @moonkafka.QUOTA_ENTITY_USER,
+    )
+    assert_eq(described.entries[0].entity[0].entity_name, Some("alice"))
+    assert_eq(described.entries[0].values.length(), 2)
+    assert_eq(described.entries[0].values[0].key, "producer_byte_rate")
+    assert_eq(described.entries[0].values[0].value, 1024.0)
+    assert_eq(described.entries[0].values[1].key, "consumer_byte_rate")
+    assert_eq(described.entries[0].values[1].value, 2048.0)
+    let filter = ops.describe_quotas[0]
+    assert_eq(filter.components.length(), 1)
+    assert_eq(filter.components[0].entity_type, "user")
+    assert_eq(filter.components[0].match_type, @moonkafka.QUOTA_MATCH_EXACT)
+    assert_eq(filter.components[0].matches, Some("alice"))
+    assert_true(filter.strict)
+    // Throttle alice's produce rate, then remove it.
+    let altered = admin.alter_client_quotas([
+      {
+        entity: [{ entity_type: "user", entity_name: Some("alice"), }],
+        ops: [
+          { key: "producer_byte_rate", value: 4096.0, remove: false, },
+          { key: "request_percentage", value: 0.0, remove: true, },
+        ],
+      },
+    ])
+    assert_eq(altered.length(), 1)
+    assert_eq(altered[0].error_code, 0)
+    assert_eq(altered[0].entity.length(), 1)
+    assert_eq(altered[0].entity[0].entity_name, Some("alice"))
+    let alteration = ops.alter_quotas[0]
+    assert_eq(alteration.ops.length(), 2)
+    assert_eq(alteration.ops[0].key, "producer_byte_rate")
+    assert_eq(alteration.ops[0].value, 4096.0)
+    assert_true(!alteration.ops[0].remove)
+    assert_eq(alteration.ops[1].key, "request_percentage")
+    assert_true(alteration.ops[1].remove)
+    assert_true(!ops.alter_quotas_validate_only[0])
+    // Describe all users' SCRAM credentials.
+    let scram = admin.describe_user_scram(None)
+    assert_eq(scram.error_code, 0)
+    assert_eq(scram.results.length(), 1)
+    assert_eq(scram.results[0].user, "alice")
+    assert_eq(scram.results[0].credential_infos.length(), 1)
+    assert_eq(
+      scram.results[0].credential_infos[0].mechanism,
+      @moonkafka.SCRAM_MECHANISM_SHA_512,
+    )
+    assert_eq(scram.results[0].credential_infos[0].iterations, 8192)
+    assert_true(ops.describe_scram[0] is None)
+    // Delete alice's SHA-256 credential and set one for bob from a
+    // plaintext password.
+    let results = admin.alter_user_scram(
+      [{ name: "alice", mechanism: @moonkafka.SCRAM_MECHANISM_SHA_256, }],
+      [
+        @moonkafka.ScramCredentialUpsertion::from_password(
+          "bob",
+          @moonkafka.SCRAM_MECHANISM_SHA_256,
+          @utf8.encode("s3cret"),
+        ),
+      ],
+    )
+    assert_eq(results.length(), 2)
+    assert_eq(results[0].user, "alice")
+    assert_eq(results[0].error_code, 0)
+    assert_eq(results[1].user, "bob")
+    assert_eq(results[1].error_code, 0)
+    assert_eq(ops.alter_scram_deletions.length(), 1)
+    assert_eq(ops.alter_scram_deletions[0].name, "alice")
+    assert_eq(
+      ops.alter_scram_deletions[0].mechanism,
+      @moonkafka.SCRAM_MECHANISM_SHA_256,
+    )
+    assert_eq(ops.alter_scram_upsertions.length(), 1)
+    let upsertion = ops.alter_scram_upsertions[0]
+    assert_eq(upsertion.name, "bob")
+    assert_eq(upsertion.iterations, 4096)
+    assert_true(upsertion.salt.length() > 0)
+    assert_true(upsertion.salted_password.length() > 0)
+    server.close()
+  }
+}
+
+///|
+async test "admin describes classic groups and KIP-848 consumer groups" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let ops = FakeClusterOps::new()
+    // "k848" runs the new consumer protocol, so DescribeGroups cannot see
+    // it; "gone" is unknown to ConsumerGroupDescribe.
+    ops.describe_groups_not_found.push("k848")
+    ops.describe_consumer_groups_not_found.push("gone")
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, cluster_ops=ops)
+    }
+    let admin = @moonkafka.Admin::connect(
+      group=root,
+      host="127.0.0.1",
+      port=server.addr.port(),
+    )
+    defer admin.close()
+    // One call asks for both a classic group and a new-protocol one.
+    let groups = admin.describe_groups(
+      ["classic", "k848"],
+      include_authorized_operations=true,
+    )
+    assert_eq(groups.length(), 2)
+    let classic = groups[0]
+    assert_eq(classic.error_code, 0)
+    assert_eq(classic.error_message, None)
+    assert_eq(classic.group_id, "classic")
+    assert_eq(classic.group_state, "Stable")
+    assert_eq(classic.protocol_type, "consumer")
+    assert_eq(classic.protocol_data, "range")
+    assert_eq(classic.authorized_operations, Some(4094))
+    assert_eq(classic.members.length(), 1)
+    let member = classic.members[0]
+    assert_eq(member.member_id, "classic-member-1")
+    assert_eq(member.group_instance_id, Some("classic-instance-1"))
+    assert_eq(member.client_id, "client-1")
+    assert_eq(member.client_host, "/127.0.0.1")
+    // The broker's opaque classic payloads decode back through this
+    // driver's own consumer-protocol codecs.
+    assert_eq(member.subscribed_topics(), ["classic-topic"])
+    assert_eq(member.assigned_partitions(), [("classic-topic", [0, 1])])
+    // The new-protocol group is not a classic group: v6 reports
+    // GROUP_ID_NOT_FOUND, state Dead, no members, and a message.
+    let dead = groups[1]
+    assert_true(dead.is_not_found())
+    assert_eq(dead.error_code, @moonkafka.GROUP_ID_NOT_FOUND)
+    assert_eq(dead.group_state, "Dead")
+    assert_eq(dead.members.length(), 0)
+    assert_eq(dead.error_message, Some("Group k848 is not a classic group."))
+    // An errored group carries no authorized operations even when asked.
+    assert_eq(dead.authorized_operations, None)
+    let (requested, wanted_operations) = ops.describe_groups[0]
+    assert_eq(requested, ["classic", "k848"])
+    assert_true(wanted_operations)
+    // ConsumerGroupDescribe is the call that sees the new-protocol group.
+    let described = admin.describe_consumer_groups(["k848", "gone"])
+    assert_eq(described.length(), 2)
+    let live = described[0]
+    assert_eq(live.error_code, 0)
+    assert_eq(live.group_id, "k848")
+    assert_eq(live.group_state, "Stable")
+    assert_eq(live.group_epoch, 7)
+    assert_eq(live.assignment_epoch, 6)
+    assert_eq(live.assignor_name, "range")
+    assert_eq(live.authorized_operations, None)
+    assert_eq(live.members.length(), 2)
+    let consumer = live.members[0]
+    assert_eq(consumer.member_id, "k848-member-1")
+    assert_eq(consumer.instance_id, None)
+    assert_eq(consumer.rack_id, Some("rack-a"))
+    assert_eq(consumer.member_epoch, 6)
+    assert_eq(consumer.client_id, "client-1")
+    assert_eq(consumer.client_host, "/127.0.0.1")
+    assert_eq(consumer.subscribed_topic_names, ["k848-topic"])
+    assert_eq(consumer.subscribed_topic_regex, None)
+    assert_eq(consumer.member_type, @moonkafka.GROUP_MEMBER_TYPE_CONSUMER)
+    // Its member epoch lags the group epoch, so it is still fetching the
+    // old assignment while the target has grown.
+    assert_eq(consumer.assignment.length(), 1)
+    assert_eq(consumer.assignment[0].topic_name, "k848-topic")
+    assert_eq(consumer.assignment[0].partitions, [0])
+    assert_eq(consumer.target_assignment[0].partitions, [0, 1])
+    assert_eq(
+      consumer.assignment[0].topic_id,
+      consumer.target_assignment[0].topic_id,
+    )
+    // A classic member migrated into the group subscribes by regex.
+    let migrated = live.members[1]
+    assert_eq(migrated.member_id, "k848-member-2")
+    assert_eq(migrated.member_type, @moonkafka.GROUP_MEMBER_TYPE_CLASSIC)
+    assert_eq(migrated.instance_id, Some("k848-instance-2"))
+    assert_eq(migrated.rack_id, None)
+    assert_eq(migrated.member_epoch, 7)
+    assert_eq(migrated.subscribed_topic_names.length(), 0)
+    assert_eq(migrated.subscribed_topic_regex, Some("k848-.*"))
+    assert_eq(migrated.assignment[0].partitions, [1])
+    assert_eq(migrated.target_assignment[0].partitions, [1])
+    let missing = described[1]
+    assert_eq(missing.error_code, @moonkafka.GROUP_ID_NOT_FOUND)
+    assert_eq(missing.group_id, "gone")
+    assert_eq(missing.group_state, "")
+    assert_eq(missing.group_epoch, -1)
+    assert_eq(missing.members.length(), 0)
+    let (cg_requested, cg_wanted_operations) = ops.describe_consumer_groups[0]
+    assert_eq(cg_requested, ["k848", "gone"])
+    assert_true(!cg_wanted_operations)
+    server.close()
+  }
+}
+
+///|
+async test "admin lists groups with state and type filters" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let ops = FakeClusterOps::new()
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, cluster_ops=ops)
+    }
+    let admin = @moonkafka.Admin::connect(
+      group=root,
+      host="127.0.0.1",
+      port=server.addr.port(),
+    )
+    defer admin.close()
+    // No filters: the broker's whole catalog — a classic group, a
+    // KIP-848 group, and a share group.
+    let all = admin.list_groups()
+    assert_eq(all.error_code, 0)
+    assert_eq(all.groups.length(), 3)
+    assert_eq(all.groups[0].group_id, "classic-group")
+    assert_eq(all.groups[0].protocol_type, "consumer")
+    assert_eq(all.groups[0].group_state, "Stable")
+    assert_eq(all.groups[0].group_type, "classic")
+    assert_eq(all.groups[1].group_id, "k848-group")
+    assert_eq(all.groups[1].group_type, "consumer")
+    assert_eq(all.groups[2].group_id, "share-group")
+    assert_eq(all.groups[2].group_type, "share")
+    // The first request carried empty filters on the wire.
+    let (states, types) = ops.list_groups[0]
+    assert_eq(states, [])
+    assert_eq(types, [])
+    // A state filter narrows to the two Stable groups (the share group is
+    // Empty), and the filter travels on the wire.
+    let stable = admin.list_groups(states_filter=["Stable"])
+    assert_eq(stable.error_code, 0)
+    assert_eq(stable.groups.length(), 2)
+    assert_eq(stable.groups[0].group_id, "classic-group")
+    assert_eq(stable.groups[1].group_id, "k848-group")
+    let (states2, types2) = ops.list_groups[1]
+    assert_eq(states2, ["Stable"])
+    assert_eq(types2, [])
+    // A type filter picks just the new-protocol consumer group.
+    let consumers = admin.list_groups(types_filter=["consumer"])
+    assert_eq(consumers.groups.length(), 1)
+    assert_eq(consumers.groups[0].group_id, "k848-group")
+    let (_, types3) = ops.list_groups[2]
+    assert_eq(types3, ["consumer"])
+    server.close()
+  }
+}
+
+///|
+async test "admin deletes groups with per-group error codes" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let ops = FakeClusterOps::new()
+    ops.delete_groups_not_found.push("gone")
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, cluster_ops=ops)
+    }
+    let admin = @moonkafka.Admin::connect(
+      group=root,
+      host="127.0.0.1",
+      port=server.addr.port(),
+    )
+    defer admin.close()
+    let results = admin.delete_groups(["empty-group", "gone"])
+    assert_eq(results.length(), 2)
+    assert_eq(results[0].group_id, "empty-group")
+    assert_eq(results[0].error_code, 0)
+    assert_eq(results[1].group_id, "gone")
+    assert_eq(results[1].error_code, @moonkafka.GROUP_ID_NOT_FOUND)
+    // The group names traveled on the wire in request order.
+    assert_eq(ops.delete_groups[0], ["empty-group", "gone"])
+    server.close()
+  }
+}
+
+///|
+async test "admin describes active producers per partition" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let ops = FakeClusterOps::new()
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, cluster_ops=ops)
+    }
+    let admin = @moonkafka.Admin::connect(
+      group=root,
+      host="127.0.0.1",
+      port=server.addr.port(),
+    )
+    defer admin.close()
+    let results = admin.describe_producers([("events", [0, 1])])
+    assert_eq(results.length(), 1)
+    let topic = results[0]
+    assert_eq(topic.name, "events")
+    assert_eq(topic.partitions.length(), 2)
+    // Partition 0 has one active producer; partition 1 is idle.
+    let p0 = topic.partitions[0]
+    assert_eq(p0.partition_index, 0)
+    assert_eq(p0.error_code, 0)
+    assert_eq(p0.error_message, None)
+    assert_eq(p0.active_producers.length(), 1)
+    let producer = p0.active_producers[0]
+    assert_eq(producer.producer_id, 12345L)
+    assert_eq(producer.producer_epoch, 1)
+    assert_eq(producer.last_sequence, 42)
+    assert_eq(producer.current_txn_start_offset, 100L)
+    let p1 = topic.partitions[1]
+    assert_eq(p1.partition_index, 1)
+    assert_eq(p1.active_producers.length(), 0)
+    // The topic and partition indexes traveled on the wire.
+    assert_eq(ops.describe_producers[0], [("events", [0, 1])])
+    server.close()
+  }
+}
+
+///|
+async test "admin describes transactions by id" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let ops = FakeClusterOps::new()
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, cluster_ops=ops)
+    }
+    let admin = @moonkafka.Admin::connect(
+      group=root,
+      host="127.0.0.1",
+      port=server.addr.port(),
+    )
+    defer admin.close()
+    let results = admin.describe_transactions(["tx1"])
+    assert_eq(results.length(), 1)
+    let txn = results[0]
+    assert_eq(txn.error_code, 0)
+    assert_eq(txn.transactional_id, "tx1")
+    assert_eq(txn.transaction_state, "Ongoing")
+    assert_eq(txn.transaction_timeout_ms, 30000)
+    assert_eq(txn.producer_id, 12345L)
+    assert_eq(txn.producer_epoch, 1)
+    assert_eq(txn.topics[0].topic, "events")
+    assert_eq(txn.topics[0].partitions, [0, 1])
+    // The transactional id traveled on the wire.
+    assert_eq(ops.describe_transactions[0], ["tx1"])
+    server.close()
+  }
+}
+
+///|
+async test "admin lists transactions with filters" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let ops = FakeClusterOps::new()
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, cluster_ops=ops)
+    }
+    let admin = @moonkafka.Admin::connect(
+      group=root,
+      host="127.0.0.1",
+      port=server.addr.port(),
+    )
+    defer admin.close()
+    let result = admin.list_transactions(
+      state_filters=["Ongoing"],
+      duration_filter=5000L,
+    )
+    assert_eq(result.error_code, 0)
+    assert_eq(result.transactions.length(), 1)
+    assert_eq(result.transactions[0].transactional_id, "txn-1")
+    assert_eq(result.transactions[0].producer_id, 12345L)
+    assert_eq(result.transactions[0].transaction_state, "Ongoing")
+    // The filters traveled on the wire; the pattern defaults to None.
+    assert_eq(ops.list_transactions[0].0, ["Ongoing"])
+    assert_eq(ops.list_transactions[0].2, 5000L)
+    assert_eq(ops.list_transactions[0].3, None)
     server.close()
   }
 }

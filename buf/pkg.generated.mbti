@@ -21,6 +21,7 @@ pub fn Decoder::read_bytes(Self, Int) -> Bytes raise DecodeError
 pub fn Decoder::read_compact_len(Self) -> Int raise DecodeError
 pub fn Decoder::read_compact_nullable_string(Self) -> String? raise DecodeError
 pub fn Decoder::read_compact_string(Self) -> String raise DecodeError
+pub fn Decoder::read_f64(Self) -> Double raise DecodeError
 pub fn Decoder::read_i16(Self) -> Int raise DecodeError
 pub fn Decoder::read_i32(Self) -> Int raise DecodeError
 pub fn Decoder::read_i64(Self) -> Int64 raise DecodeError
@@ -43,6 +44,7 @@ pub fn Encoder::write_bytes(Self, Bytes) -> Unit
 pub fn Encoder::write_compact_len(Self, Int) -> Unit
 pub fn Encoder::write_compact_nullable_string(Self, String?) -> Unit
 pub fn Encoder::write_compact_string(Self, String) -> Unit
+pub fn Encoder::write_f64(Self, Double) -> Unit
 pub fn Encoder::write_i16(Self, Int) -> Unit
 pub fn Encoder::write_i32(Self, Int) -> Unit
 pub fn Encoder::write_i64(Self, Int64) -> Unit

@@ -217,7 +217,7 @@ P6 = share/telemetry.
 | AddOffsetsToTxn | 4 | v4 | P3 | |
 | EndTxn | 5 | v5 | P3 | |
 | TxnOffsetCommit | 5 | v5 | P3 | |
-| DescribeAcls / CreateAcls / DeleteAcls | 3 | v3 | P5 | |
+| DescribeAcls / CreateAcls / DeleteAcls | 3 | v2-v3 (one wire shape; v3 adds the USER resource type) | P5 (done) | |
 | DescribeConfigs | 4 | v4 | P5 | |
 | AlterConfigs | 2 | v2 | P5 | |
 | DescribeLogDirs | 5 | v5 (adds `is_cordoned`) | P5 | 4.3 broker cordoning adjacent (KIP-1066) |
@@ -231,15 +231,16 @@ P6 = share/telemetry.
 | AlterPartitionReassignments | 1 | v1 (per guide) | P5 | verify ceiling when implementing |
 | ListPartitionReassignments | 0 | v0 | P5 | |
 | OffsetDelete | 0 | v0 | P5 | |
-| DescribeUserScramCredentials / AlterUserScramCredentials | 0 | v0 | P5 | |
+| DescribeClientQuotas / AlterClientQuotas | 1 | v0-v1 (v1 enables flexible versions) | P5 (done) | row was missing from the original table; added when implemented |
+| DescribeUserScramCredentials / AlterUserScramCredentials | 0 | v0 (flexible from the start) | P5 (done) | |
 | DescribeCluster | 2 | v2 | P5 | |
 | DescribeProducers | 0 | v0 | P5 | active producers per partition |
 | UnregisterBroker | 0 | v0 | P5 | |
 | DescribeTransactions | 0 | v0 | P5 | |
 | ListTransactions | 2 | v2 | P5 | |
 | ConsumerGroupHeartbeat | 1 | v1 (adds `subscribed_topic_regex`) | P4 | KIP-848 — primary group protocol |
-| ConsumerGroupDescribe | 1 | v1 | P4 | |
-| ListConfigResources | 0 | v0 | P5 | |
+| ConsumerGroupDescribe | 1 | v1 | P5 (done) | table said P4 but it was never implemented there; it is the only call that describes a KIP-848 group, so it landed with DescribeGroups |
+| ListConfigResources | 1 | v0 + v1 (type filter, KIP-1142) | P5 | table said max 0; the 4.3 schema has v0-v1 |
 | ShareGroupHeartbeat | 1 | v1 | P6 | KIP-932 |
 | GetTelemetrySubscriptions / PushTelemetry | 0 | v0 | P6 | optional (KIP-714) |
 | ShareGroupDescribe | 1 | v1 | P6 | |
@@ -251,7 +252,9 @@ P6 = share/telemetry.
 
 Classic group management (still required for compat): JoinGroup, SyncGroup,
 Heartbeat, LeaveGroup, DescribeGroups, ListGroups — implement at the 4.3 max
-versions (9/5/4/5/6/5 respectively per the guide) (P4).
+versions (9/5/4/5/6/5 respectively per the guide) (P4). All are done;
+DescribeGroups v6 and ListGroups v5 landed with the P5 admin group ops, since
+they are admin calls rather than part of the coordination path.
 
 Error codes: implement the complete table (codes 0 through 133 as of 4.3) in
 `protocol/errors.mbt`, each carrying `name`, `retriable`, and
@@ -742,28 +745,142 @@ rejoins); read_committed skips aborted txns (producer txn test from P3).
 
 ### Phase 5 — Admin client
 
-- [ ] `Admin` struct over the cluster layer (any-broker or
-      controller-routed as per API); per-item result arrays mirroring the
-      protocol's per-topic/per-partition error codes; retriable-error retry
-      policy knob.
-- [ ] Topic ops: CreateTopics v7 (incl. configs + replication assignment),
-      DeleteTopics v6 (by name/id), CreatePartitions v3,
-      DescribeTopicPartitions, DeleteRecords v2, OffsetDelete v0.
-- [ ] Cluster/config: DescribeCluster v2 (brokers, controller id, cluster id,
-      `endpoint_type`), DescribeConfigs v4 + IncrementalAlterConfigs v1 +
-      AlterConfigs v2, ListConfigResources v0, DescribeLogDirs v5
-      (`is_cordoned`), ElectLeaders v2, reassignments
-      (Alter/ListPartitionReassignments), UnregisterBroker v0,
-      DescribeQuorum v2, UpdateFeatures v2.
-- [ ] Groups/consumers: DescribeGroups v6 (incl. 848 members),
-      ListGroups v5 (state/type filters), DeleteGroups v2;
-      consumers-of / DescribeProducers v0, DescribeTransactions v0,
-      ListTransactions v2.
-- [ ] Security: Describe/Create/DeleteAcls v3; quotas
-      Describe/AlterClientQuotas; SCRAM credentials
-      Describe/AlterUserScramCredentials.
-- [ ] Topic-id-first admin ops where the API supports it (fewer metadata
-      round-trips).
+- [x] `Admin` struct over the cluster layer: DONE (commit 8803fb9,
+      root scope `admin.mbt`; folds into the `admin/` split with the
+      ops): `AdminConfig` carries the admin-specific retry knob
+      (`admin_retries`); ops run through `with_retries` — a result the
+      op classifies retriable re-issues with backoff, transport
+      failures raise. Routing helpers for any-broker (control
+      connection, the default — brokers forward to the controller) and
+      controller-routed ops (`controller_conn`, backed by the
+      controller id metadata now keeps and exposes). Per-item results
+      mirror the protocol: DescribeTopicPartitions per-topic error
+      codes travel as values through `TopicMetadata` (the old
+      raise-on-topic-error behavior became the admin value shape), with
+      pages merged per topic behind the cursor walk.
+- [x] Topic ops: DONE (commit 80fc6e8, root scope `admin_topics.mbt`):
+      CreateTopics v7 (config overrides + explicit replica assignments,
+      topic id echoed), DeleteTopics v6 (by name, by topic id, or
+      mixed), CreatePartitions v3 (counts + new-partition placement),
+      DeleteRecords v2 (low watermarks back), OffsetDelete v0 per
+      group/topic/partition — all per-item error codes as values under
+      the retry policy. OffsetDelete v0 is the one non-flexible API in
+      the set and uses header-v0 framing both directions. E2E against
+      the fake broker: full create → grow → truncate → offset-delete →
+      delete-by-name → delete-by-id lifecycle.
+- [x] Cluster/config: DONE (this commit, root scope `admin_cluster.mbt`):
+      DescribeCluster v0-v2 (brokers with rack + fenced flags, controller
+      id, cluster id, `endpoint_type`, authorized-operations bitfield),
+      DescribeConfigs v4 (sources, synonyms, types, docs),
+      IncrementalAlterConfigs v1 (set/delete/append/subtract) +
+      AlterConfigs v2 (legacy full-replace), ListConfigResources v0-v1
+      (v1 adds the resource-type filter, KIP-1142), DescribeLogDirs
+      v2-v5 (`is_cordoned` at v5, KIP-1066; volume total/usable bytes at
+      v4+), ElectLeaders v2 (preferred/unclean, nullable topic list),
+      AlterPartitionReassignments v0-v1 (v1 toggles replication-factor
+      changes) + ListPartitionReassignments v0, UnregisterBroker v0,
+      DescribeQuorum v2 (voters/observers with log-end offsets and
+      fetch/caught-up timestamps, KIP-853 node/listener map; the one
+      admin API without a throttle field), and UpdateFeatures v2
+      (upgrade/safe/unsafe-downgrade types, validate-only; v2 dropped
+      per-feature results). Keys and enum byte values (config resource
+      types, config ops, election types, endpoint types, upgrade types)
+      pinned from the 4.3 schemas and `ConfigResource.java`/
+      `AlterConfigOp.java`/`ElectionType.java`. UnregisterBroker and
+      UpdateFeatures route through the controller connection; the rest
+      take the any-broker control connection. Per-item error codes
+      travel as values under the retry policy. E2E against the fake
+      broker plus codec tests covering the version-dependent shapes the
+      fake does not serve (DescribeCluster v0, DescribeLogDirs v2-v5,
+      reassignments v0, ListConfigResources v0).
+- [x] Groups — describing them: DONE (this commit, root scope
+      `admin_groups.mbt`): DescribeGroups v6 and ConsumerGroupDescribe v1.
+      This bullet's original wording, "DescribeGroups v6 (incl. 848
+      members)", is not what the protocol offers: DescribeGroupsResponse
+      v6 adds no KIP-848 fields (v6 adds only the per-group ErrorMessage,
+      KIP-1043), and the coordinator's `GroupMetadataManager.classicGroup`
+      raises GroupIdNotFoundException for any non-classic group, which v6
+      turns into error code GROUP_ID_NOT_FOUND (69) with group state
+      "Dead" and no members. So DescribeGroups describes classic groups
+      only — `AdminGroupDescription::is_not_found` marks the 848 case —
+      and ConsumerGroupDescribe (key 69, tabled for P4 in §5 but never
+      implemented there) is what returns new-protocol members: member,
+      group, and assignment epochs, topic-name and regex subscriptions,
+      current versus target assignment, rack and instance ids, and the v1
+      MemberType byte (KIP-1099: -1 unknown, 0 classic, +1 consumer, a
+      group mid-migration holding both). Classic member metadata and
+      assignment stay opaque bytes with `subscribed_topics` /
+      `assigned_partitions` helpers over the Phase 4 ConsumerProtocol
+      codecs, which report nothing rather than raising on a foreign
+      protocol (Kafka Connect, say). Both pin to a single version — 4.0
+      brokers already advertise DescribeGroups 0-6 and ConsumerGroupDescribe
+      0-1 — both take the any-broker control connection, and per-group
+      error codes travel as values under the retry policy. E2E against the
+      fake broker (one DescribeGroups call covering a classic group and an
+      848 group, then ConsumerGroupDescribe on that same 848 group) plus
+      codec tests for the byte-identical request bodies, the
+      empty-assignment tag buffers, the unknown member type, foreign
+      member metadata, and both not-found paths.
+- [x] Groups — ListGroups v5 (state/type filters): codecs, `Admin::list_groups`
+      fanning out to every broker in the cached snapshot and merging (each
+      broker answers only from the state it holds itself), per-call error code
+      under the retry policy; fake-broker E2E and codec tests.
+- [x] Groups — DeleteGroups v2: codecs, `Admin::delete_groups` with
+      per-group error codes as values under the retry policy; fake-broker
+      E2E and codec tests.
+- [x] DescribeProducers v0: codecs, `Admin::describe_producers` over the
+      any-broker control connection (the broker forwards to partition
+      leaders), per-partition error codes as values under the retry policy;
+      fake-broker E2E and codec tests.
+- [x] DescribeTransactions v0: codecs, `Admin::describe_transactions` over
+      the any-broker control connection (the broker forwards to the
+      transaction coordinator), per-id error codes as values under the
+      retry policy; fake-broker E2E and codec tests.
+- [x] ListTransactions v2: codecs (v1/v2 request split at the
+      transactional-id pattern field), `Admin::list_transactions` fanning
+      out to every broker and merging, per-call error code under the retry
+      policy; fake-broker E2E and codec tests.
+- [x] Security — ACLs: DONE (this commit, root scope `admin_acls.mbt`):
+      DescribeAcls v2-v3, CreateAcls v2-v3, DeleteAcls v2-v3 (v3 only
+      adds the USER resource type — v2/v3 share one wire shape, so the
+      matrix negotiates either). Enum byte values pinned from
+      `ResourceType.java`, `PatternType.java`, `AclOperation.java`,
+      `AclPermissionType.java` and surfaced as `ACL_RESOURCE_*` /
+      `ACL_PATTERN_*` / `ACL_OPERATION_*` / `ACL_PERMISSION_*`
+      constants. `AclFilter` (None fields match anything) drives
+      describe/delete; `AclCreation`/`AclBinding` carry creations and
+      results; DeleteAcls reports per-filter and per-matching-ACL error
+      codes as values under the retry policy. E2E against the fake
+      broker (create → describe → delete round trip with wire captures)
+      plus codec tests for the shared v2/v3 shape and per-item error
+      paths.
+- [x] Security — quotas and SCRAM: DONE (this commit, root scope
+      `admin_quotas.mbt`): DescribeClientQuotas v0-v1, AlterClientQuotas
+      v0-v1, DescribeUserScramCredentials v0, AlterUserScramCredentials
+      v0. The quota pair straddles the flexible boundary (v1 enables
+      flexible versions), so its codecs shape string/array lengths and
+      tag buffers by version and the connection frames v0 with the
+      legacy header; the SCRAM pair is flexible from v0. `@buf` gained
+      FLOAT64 (`write_f64`/`read_f64`) for quota values. Entity type
+      strings pinned from `ClientQuotaEntity.java`, match types from
+      the DescribeClientQuotas schema ({0 = exact name, 1 = default
+      name, 2 = any specified name}), mechanism bytes and the
+      4096-16384 iteration bounds from `ScramMechanism.java`.
+      `ScramCredentialUpsertion::from_password` derives the salt and
+      the RFC 5802 SaltedPassword over the Phase 1 SCRAM primitives, so
+      callers hand over a plaintext password. Per-item error codes
+      travel as values under the retry policy; all four take the
+      any-broker control connection — `KafkaApis` serves both describes
+      locally and forwards AlterClientQuotas and
+      AlterUserScramCredentials to the controller. E2E against the fake
+      broker (describe → alter quotas, describe → alter SCRAM with wire
+      captures) plus codec tests for the v0/v1 quota request shapes,
+      per-item error paths, and the null "all users" array.
+- [x] Topic-id-first admin ops: DONE (commit 80fc6e8): DeleteTopics v6
+      addresses deletions by topic id alone (null name + id, KIP-516),
+      and DescribeTopicPartitions returns ids for follow-up ops; the
+      remaining admin APIs in range are name-addressed by their v4.3
+      schemas, so there is nothing further to prefer ids on.
 
 **Acceptance:** admin integration tests: create/inspect/alter/delete a topic
 end-to-end; ACL grant → unauthorized client fails with the right error;
