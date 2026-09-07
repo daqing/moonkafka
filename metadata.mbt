@@ -17,11 +17,14 @@ pub struct PartitionInfo {
   index : Int
   leader : Int
   leader_epoch : Int
-}
+} derive(@debug.Debug)
 
 ///|
 pub struct TopicMetadata {
   name : String
+  /// The broker's per-topic error code (0 = present); admin callers
+  /// treat codes as values, the metadata path raises on non-zero.
+  error_code : Int
   topic_id : Uuid
   is_internal : Bool
   partitions : Array[PartitionInfo]
@@ -30,6 +33,8 @@ pub struct TopicMetadata {
 ///|
 pub struct Metadata {
   brokers : Map[Int, BrokerInfo]
+  /// The controller's node id (controller-routed admin ops).
+  controller_id : Int
   topics : Array[TopicMetadata]
 }
 
@@ -91,7 +96,7 @@ pub fn decode_metadata_response(
     brokers[node_id] = { node_id, host, port, }
   }
   let _cluster_id = d.read_compact_nullable_string()
-  let _controller_id = d.read_i32()
+  let controller_id = d.read_i32()
   let topic_count = d.read_compact_len()
   let topics : Array[TopicMetadata] = []
   for _ in 0..<topic_count {
@@ -122,7 +127,7 @@ pub fn decode_metadata_response(
     if error_code != 0 {
       raise BrokerError(error_code, "Metadata failed for topic \{name}")
     }
-    topics.push({ name, topic_id, is_internal, partitions, })
+    topics.push({ name, error_code, topic_id, is_internal, partitions, })
   }
   if version >= 13 {
     let top_level_error = d.read_i16()
@@ -131,7 +136,7 @@ pub fn decode_metadata_response(
     }
   }
   d.skip_tag_buffer()
-  ({ brokers, topics, }, throttle)
+  ({ brokers, controller_id, topics, }, throttle)
 }
 
 ///|
@@ -217,13 +222,9 @@ pub fn decode_describe_topic_partitions_response(
     }
     d.skip(4) // topic_authorized_operations
     d.skip_tag_buffer()
-    if error_code != 0 {
-      raise BrokerError(
-        error_code,
-        "DescribeTopicPartitions failed for topic \{name}",
-      )
-    }
-    topics.push({ name, topic_id, is_internal, partitions, })
+    // Per-topic error codes travel as values: the admin client surfaces
+    // them per topic instead of failing the whole page.
+    topics.push({ name, error_code, topic_id, is_internal, partitions, })
   }
   let next_cursor = if d.read_i8() >= 0 {
     let topic_name = d.read_compact_string()

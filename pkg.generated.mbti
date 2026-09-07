@@ -243,6 +243,32 @@ pub(all) struct AbortedTx {
   first_offset : Int64
 } derive(@debug.Debug)
 
+pub struct Admin {
+  request_timeout_ms : Int
+  admin_retries : Int
+  retry_backoff_ms : Int
+  retry_backoff_max_ms : Int
+  mut closed : Bool
+  // private fields
+}
+pub fn Admin::close(Self) -> Unit
+pub async fn Admin::connect(group~ : @async.TaskGroup[Unit], host~ : String, port~ : Int) -> Self
+pub async fn Admin::connect_with_config(group~ : @async.TaskGroup[Unit], AdminConfig) -> Self
+pub async fn Admin::describe_topic_partitions(Self, Array[String]) -> Array[AdminTopicDescription]
+
+pub struct AdminConfig {
+  common : CommonConfig
+  admin_retries : Int
+} derive(@debug.Debug)
+pub fn AdminConfig::new(Array[String], request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?, tls? : TlsClientOptions?, metadata_max_age_ms? : Int, admin_retries? : Int) -> Self raise
+
+pub struct AdminTopicDescription {
+  name : String
+  error_code : Int
+  topic_id : Uuid
+  partitions : Array[PartitionInfo]
+} derive(@debug.Debug)
+
 pub(all) struct ApiRange {
   key : Int
   name : String
@@ -362,6 +388,7 @@ pub struct ClusterClient {
   mut brokers : Map[Int, BrokerInfo]
   mut topics : Map[String, TopicMetadata]
   mut topic_ids : Map[Uuid, String]
+  mut controller_id : Int
   mut refreshed_ms : Int64
   conns : Map[Int, BrokerConnection]
   // private fields
@@ -370,6 +397,7 @@ pub fn ClusterClient::close(Self) -> Unit
 pub async fn ClusterClient::connect(Array[HostPort], client_id? : String, request_timeout_ms? : Int, metadata_max_age_ms? : Int, max_in_flight? : Int, sasl? : SaslConfig?, use_tls? : Bool, tls? : TlsClientOptions?) -> Self
 pub async fn ClusterClient::connection(Self, Int) -> BrokerConnection
 pub fn ClusterClient::control_conn(Self) -> BrokerConnection
+pub fn ClusterClient::controller(Self) -> Int
 pub async fn ClusterClient::coordinator(Self, Array[String], CoordinatorType) -> Map[String, CoordinatorInfo]
 pub fn ClusterClient::invalidate_metadata(Self) -> Unit
 pub async fn ClusterClient::reconnect(Self) -> Unit
@@ -667,6 +695,7 @@ pub struct LeaveGroupMemberResult {
 
 pub struct Metadata {
   brokers : Map[Int, BrokerInfo]
+  controller_id : Int
   topics : Array[TopicMetadata]
 }
 
@@ -685,7 +714,7 @@ pub struct PartitionInfo {
   index : Int
   leader : Int
   leader_epoch : Int
-}
+} derive(@debug.Debug)
 
 type PartitionState
 
@@ -892,6 +921,7 @@ pub fn TlsClientOptions::new(String, verify_certificates? : Bool, ca_pem_file? :
 
 pub struct TopicMetadata {
   name : String
+  error_code : Int
   topic_id : Uuid
   is_internal : Bool
   partitions : Array[PartitionInfo]
