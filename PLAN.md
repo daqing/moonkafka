@@ -594,45 +594,142 @@ same PID/sequence (mock broker test).
 
 ### Phase 4 — Full consumer
 
-- [ ] **Offset management** (`consumer/offsets.mbt`): committed-offset
-      cache; `commit` (sync + async) at OffsetCommit v9/v10 with
-      `COORDINATOR_LOAD_IN_PROGRESS`/`REBALANCE_IN_PROGRESS` retry semantics;
-      `committed()` fetch (OffsetFetch v8/v9/v10); seek/seek_to_beginning/
-      seek_to_end/seek_by_timestamp (ListOffsets); autocommit background
-      task (interval config, commit-on-close, commit-on-revoke).
-- [ ] **Fetcher**: per-leader pipelined Fetch with sessions (P2); position
-      validation (`OffsetOutOfRange` → auto-reset policy earliest/latest/
-      none); leader-epoch truncation detection via OffsetForLeaderEpoch v4
-      on `UNKNOWN_LEADER_EPOCH`/`FENCED_LEADER_EPOCH`; pause/resume per
-      partition; `max_poll_records`/`max_partition_fetch_bytes` honored;
-      decompression + read_committed filtering wired in.
-- [ ] **KIP-848 member** (`consumer/group_new.mbt`) — the primary path:
-      client-generated member id (uuid); ConsumerGroupHeartbeat v1 loop
-      (`heartbeat_interval_ms` from server); server-driven assignment applied
-      atomically; handle `FENCED_MEMBER_EPOCH`, `UNKNOWN_MEMBER_ID`,
-      `STALE_MEMBER_EPOCH`, `GROUP_MAX_SIZE_REACHED`,
-      `UNSUPPORTED_ASSIGNOR`; `group_instance_id` static membership;
-      regex subscription (`subscribed_topic_regex`, v1) driving metadata
-      expansion; graceful leave (heartbeat with member-epoch -1 semantics per
-      KIP-848); `RebalanceListener` hooks (on_assign/on_revoke incl.
-      incremental assign/revoke sets).
-- [ ] **Classic member** (`consumer/group_classic.mbt`) — compat path:
-      FindCoordinator v4 → JoinGroup v9 → SyncGroup v5 → Heartbeat v4 loop;
-      protocol negotiation (subscription → assignment strategy set);
-      `ConsumerProtocolSubscription`/`Assignment` binary encoding (the
-      embedded protocol structures, hand-coded);
-      assignment strategies: RangeAssignor + RoundRobinAssignor first, then
-      **StickyAssignor** and **CooperativeStickyAssignor** (incremental
-      cooperative rebalancing: revoke-set sync protocol, `IN_PROGRESS`
-      two-round handling); static membership (`group_instance_id`);
-      LeaveGroup on close; rebalance listener integration; `require_stable`
-      offsets (`UNSTABLE_OFFSET_COMMIT` retry).
-- [ ] **Consumer surface**: `subscribe(topics | regex)` vs `assign(...)`
-      split; `poll` with `max_poll_interval_ms` enforcement; position()/
-      committed(); assignment(); group_metadata(); deserializer hooks
-      (default identity `Bytes?`, optional typed helpers for utf8 etc.).
-- [ ] **`group_protocol` config**: `consumer` (KIP-848, default) | `classic`
-      | fallback ordering; document interop caveats.
+- [x] **Offset management**: DONE (commit 3604bf9, root scope
+      `offset_commit.mbt` + `consumer_offsets.mbt`; folds into the
+      `consumer/` split): OffsetCommit v8-v10 and OffsetFetch v8-v10
+      codecs pinned from the 4.3 schemas (v9 carries the KIP-848 member
+      identity, v10 addresses topics by id; error codes travel as values
+      for the manager to classify). The consumer gained a group-aware
+      config (`group_id`, `enable_auto_commit`,
+      `auto_commit_interval_ms`; auto-commit without a group is inert),
+      a committed-offset cache, `commit(offsets?)` — positions or
+      explicit — retrying COORDINATOR_LOAD_IN_PROGRESS /
+      COORDINATOR_NOT_AVAILABLE / NOT_COORDINATOR /
+      REBALANCE_IN_PROGRESS with backoff (the coordinator node caches
+      until NOT_COORDINATOR), `commit_async(on_complete)` spawning into
+      the consumer's task group, and `committed(partitions?)` refreshing
+      the cache from the coordinator. Seeks: `seek` (validated against
+      the assignment), `seek_to_beginning`/`seek_to_end`/`
+      seek_by_timestamp` over ListOffsets. Autocommit is a background
+      loop in the consumer's task group (connect now takes `group~`,
+      structured concurrency like the producer): commits every interval
+      at SENDER_TICK granularity and once more on close, then tears the
+      cluster down before the group joins it. Commit-on-revoke arrives
+      with the rebalance listeners (group membership below). E2E:
+      commit/read-back round-trip through the fake coordinator store,
+      load-retry, async callback, session-aware seek sequencing,
+      autocommit interval + close.
+- [x] **Fetcher**: DONE (commit 5a0f849): `poll` runs one concurrent
+      long-poll fetch per leader through the incremental sessions, capped
+      by `max_poll_records` (the position rewinds to the first
+      unconsumed record so a capped poll re-fetches the rest) and
+      `max_partition_fetch_bytes` (per-partition cap in every request).
+      `pause`/`resume`/`paused` skip partitions while keeping positions.
+      OFFSET_OUT_OF_RANGE follows the `auto_offset_reset` policy
+      (ResetEarliest/ResetLatest/ResetNone raising); UNKNOWN/FENCED_
+      LEADER_EPOCH answers trigger the KIP-320 check — OffsetForLeaderEpoch
+      v4 (pinned from the 4.3 schema, key 23) asks the leader where the
+      known epoch ends and rewinds the position on truncation, else the
+      metadata refresh heals. `enable_read_committed` fetches with
+      READ_COMMITTED isolation and filters the response's
+      aborted-transaction list via `collect_committed`; fetch responses
+      now carry the detailed decoded batches, and positions advance past
+      whole batch ends (last_offset) so control/aborted ranges never
+      re-fetch. The record batch builder gained `set_transactional`.
+      Decompression and per-partition caps were already wired from Phase
+      2. E2E: pause/resume wire behavior, cap+rewind sequencing,
+      read_committed filtering against an aborted batch, epoch-error
+      rewind.
+- [x] **KIP-848 member**: DONE (commit d00bb89, root scope
+      `consumer_group_new.mbt` + `consumer_group_heartbeat.mbt`):
+      ConsumerGroupHeartbeat v0/v1 pinned from the 4.3 schemas (v1
+      carries SubscribedTopicRegex). The member generates its own id
+      (clock-seeded uuid-hex, kept for the consumer's lifetime), joins
+      with epoch 0, and re-issues the heartbeat every server-guided
+      interval (slept in tick-sized steps so close() lands promptly).
+      Server-driven assignments apply atomically: revoke-set diff,
+      assignment swap, assign-set — firing RebalanceListener on_revoke /
+      on_assign around the swap. UNKNOWN_MEMBER_ID, STALE_MEMBER_EPOCH,
+      and FENCED_MEMBER_EPOCH restart the join from epoch 0;
+      GROUP_MAX_SIZE_REACHED and coordinator hiccups (load/unavailable/
+      moved) retry with backoff (NOT_COORDINATOR re-resolves);
+      UNSUPPORTED_ASSIGNOR, UNRELEASED_INSTANCE_ID, and
+      INVALID_REGULAR_EXPRESSION are fatal and surface via
+      `membership_error()`. Static membership sends the configured
+      `group_instance_id` on every heartbeat. Regex subscription rides
+      v1 heartbeats verbatim and expands client-side against the
+      metadata catalog (refreshed periodically) through a
+      glob-style matcher (`*`, `?`/`.` — a documented subset of Java
+      regex; full patterns land with the polish pass). `unsubscribe`
+      leaves gracefully with the epoch -1 heartbeat, firing the revoke
+      on the way out; poll fetches only assigned partitions. E2E:
+      join/reconcile/leave with listener hooks and epoch progression,
+      fenced-epoch restart, static instance id, regex expansion.
+- [x] **Classic member**: DONE (commit 3652d1c, root scope
+      `consumer_group_classic.mbt` + `classic_group.mbt` +
+      `consumer_protocol.mbt` + `assignment.mbt`): JoinGroup v9 →
+      SyncGroup v5 → Heartbeat v4 loop with LeaveGroup v5 on exit, all
+      pinned from the 4.3 schemas. Protocol negotiation: the member
+      offers its configured assignment strategies as named protocol
+      entries; the coordinator settles one and the leader computes the
+      assignment over every member's ConsumerProtocolSubscription (the
+      embedded int16-framed binary protocol, hand-coded) using fresh
+      metadata partition counts, then hands out
+      ConsumerProtocolAssignment bytes. Assignors: RangeAssignor
+      (contiguous per-topic chunks), RoundRobinAssignor (one sorted
+      circle), StickyAssignor (keep prior assignments, fill gaps
+      least-loaded-first, then balance to a minimal spread — same
+      balance/stickiness properties as Java with deterministic
+      id-ordered tie-breaking instead of its random order), and
+      CooperativeStickyAssignor running the KIP-429 two-round protocol:
+      owned partitions ride the subscription userData, the leader's
+      first round sends keep-sets (revocations), the revoking member
+      rejoins, and the second round delivers the additions. Static
+      membership (`group_instance_id`) rides every request; REBALANCE_
+      IN_PROGRESS heartbeats rejoin, UNKNOWN_MEMBER_ID /
+      ILLEGAL_GENERATION restart the join, FENCED_INSTANCE_ID is fatal;
+      LeaveGroup on close/unsubscribe; rebalance listeners fire around
+      each assignment change. E2E against a stateful mini-coordinator
+      in the fake broker: single-member join/sync/leave with generation
+      and protocol assertions, two-member range split with rebalance on
+      join, and the cooperative two-round revoke-then-assign converge
+      (order-agnostic, convergence-based assertions).
+- [x] **Consumer surface**: DONE (commit 598d46d, root scope
+      `consumer_surface.mbt`): `subscribe(topics)` / `subscribe_regex`
+      / `subscribe_classic` versus `assign(partitions)` / `unassign()`
+      are mutually exclusive paths (assign raises while a membership is
+      active; positions start from committed offsets when a group is
+      configured, else the auto-offset-reset sentinel). `poll` enforces
+      `max_poll_interval_ms`: a gap past the window gracefully leaves
+      the group (LeaveGroup / epoch -1 heartbeat) and raises instead of
+      ghosting. `position(partition)`, `committed(partitions?)` (P4.1),
+      `assignment()`, and `group_metadata()` (group id, member id,
+      generation) report state. Deserializers: records carry their
+      `Bytes?` natively (identity) with `key_utf8`/`value_utf8` typed
+      helpers; generic parameterized decoders are deferred to the
+      API-stability pass, where making the consumer generic can be
+      judged against real usage.
+- [x] **`group_protocol` config**: DONE (commit 89075f7):
+      `GroupProtocol` — `ConsumerProtocol` (KIP-848, the default)
+      fails fast when the broker does not advertise
+      ConsumerGroupHeartbeat; `ClassicProtocol` always rides the
+      classic APIs; `PreferConsumer` / `PreferClassic` probe the
+      negotiated ApiVersions ranges (`ClusterClient::supports_api`) and
+      degrade to the other path. `subscribe()` dispatches on the
+      resolved protocol; explicit `subscribe_classic` remains the
+      escape hatch, and regex subscription stays KIP-848-only (the
+      classic protocol has no regex field).
+      **Interop caveats:** (1) the cooperative-sticky owned-partition
+      report uses our own assignment encoding in the subscription
+      userData slot — Java serializes a private format there, so
+      mixed-vendor cooperative groups will not converge on shared
+      partition movements (single-vendor groups are correct; eager
+      range/roundrobin interop is unaffected); (2) regex expansion
+      implements a glob subset (`*`, `?`/`.`), not full Java regex —
+      patterns outside the subset should use explicit topic lists; (3)
+      the classic path reports `UNSTABLE_OFFSET_COMMIT` through commit
+      retries rather than surfacing `require_stable` semantics
+      explicitly.
 
 **Acceptance:** integration suite vs Docker 4.3: N consumers in one group
 over M partitions converge; rebalance on member join/leave/crash with no

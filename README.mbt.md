@@ -51,8 +51,27 @@ Working today:
   (AddOffsetsToTxn + TxnOffsetCommit), EndTxn with epoch adoption,
   coordinator retry/refind, fencing detection, and abort-on-error commit
   policy
-- Simple consumer: incremental fetch sessions with eviction recovery,
-  offset resolution by sentinel or timestamp
+- Simple consumer: concurrent per-leader fetches with incremental
+  sessions and eviction recovery, offset resolution by sentinel or
+  timestamp, the seek family (explicit/timestamp/beginning/end),
+  committed-offset tracking with sync/async commit and autocommit
+  (interval + commit-on-close), max_poll_records /
+  max_partition_fetch_bytes caps, per-partition pause/resume,
+  auto-offset-reset policies, leader-epoch truncation detection, and
+  read_committed filtering of aborted transactions
+- KIP-848 consumer groups (primary path): ConsumerGroupHeartbeat
+  membership with client-generated member ids, server-driven assignment
+  applied atomically around rebalance listener hooks, static membership,
+  regex subscription, graceful leave, and fencing recovery
+- Consumer surface: subscribe/assign split, position/committed/
+  assignment/group_metadata introspection, max_poll_interval_ms
+  enforcement, and utf8 record helpers
+- Classic consumer groups (compat path): JoinGroup/SyncGroup/Heartbeat
+  with range, round-robin, sticky, and cooperative-sticky assignors
+  (two-round incremental rebalancing), static membership, graceful
+  leave, and rebalance listener hooks
+- group_protocol selection: KIP-848 (default), classic, or fallback
+  ordering probed against the broker's advertised APIs
 - Pipelined broker connections: request timeouts, in-flight cap, reconnect
   through bootstrap servers, broker throttling
 - TLS (including verified certificates via a custom CA) and SASL
@@ -60,7 +79,6 @@ Working today:
 
 Planned:
 
-- Consumer groups with the new KIP-848 consumer rebalance protocol
 - Admin client and share groups
 
 ## Requirements
