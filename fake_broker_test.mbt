@@ -39,6 +39,10 @@ fn fake_api_versions_response(
     (29, 3),
     (30, 3),
     (31, 3),
+    (48, 1),
+    (49, 1),
+    (50, 0),
+    (51, 0),
     (60, 2),
     (32, 4),
     (44, 1),
@@ -1030,6 +1034,12 @@ struct FakeClusterOps {
   describe_acls : Array[@moonkafka.AclFilter]
   create_acls : Array[@moonkafka.AclCreation]
   delete_acls : Array[@moonkafka.AclFilter]
+  describe_quotas : Array[@moonkafka.ClientQuotaFilter]
+  alter_quotas : Array[@moonkafka.ClientQuotaAlteration]
+  alter_quotas_validate_only : Array[Bool]
+  describe_scram : Array[Array[String]?]
+  alter_scram_deletions : Array[@moonkafka.ScramCredentialDeletion]
+  alter_scram_upsertions : Array[@moonkafka.ScramCredentialUpsertion]
 }
 
 ///|
@@ -1051,6 +1061,12 @@ fn FakeClusterOps::new() -> FakeClusterOps {
     describe_acls: [],
     create_acls: [],
     delete_acls: [],
+    describe_quotas: [],
+    alter_quotas: [],
+    alter_quotas_validate_only: [],
+    describe_scram: [],
+    alter_scram_deletions: [],
+    alter_scram_upsertions: [],
   }
 }
 
@@ -1800,6 +1816,319 @@ fn fake_delete_acls_response(count : Int) -> Bytes {
     e.write_i8(3) // read
     e.write_i8(3) // allow
     e.write_tag_buffer()
+    e.write_tag_buffer()
+  }
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Quota/SCRAM request and response shapes: the quota APIs negotiate
+/// v0 (legacy lengths, no tag buffers) or v1 (compact + tag buffers),
+/// so their fake helpers shape by version like the real codecs.
+fn fake_quotas_len(d : @buf.Decoder, version : Int) -> Int raise {
+  if version >= 1 {
+    d.read_compact_len()
+  } else {
+    d.read_i32()
+  }
+}
+
+///|
+fn fake_write_quotas_len(e : @buf.Encoder, n : Int, version : Int) -> Unit {
+  if version >= 1 {
+    e.write_compact_len(n)
+  } else {
+    e.write_i32(n)
+  }
+}
+
+///|
+fn fake_quotas_string(d : @buf.Decoder, version : Int) -> String raise {
+  if version >= 1 {
+    d.read_compact_string()
+  } else {
+    let len = d.read_i16()
+    @utf8.decode_lossy(d.read_bytes(len)[:])
+  }
+}
+
+///|
+fn fake_quotas_nullable_string(
+  d : @buf.Decoder,
+  version : Int,
+) -> String? raise {
+  if version >= 1 {
+    d.read_compact_nullable_string()
+  } else {
+    let len = d.read_i16()
+    if len < 0 {
+      None
+    } else {
+      Some(@utf8.decode_lossy(d.read_bytes(len)[:]))
+    }
+  }
+}
+
+///|
+fn fake_write_quotas_string(
+  e : @buf.Encoder,
+  s : String,
+  version : Int,
+) -> Unit {
+  if version >= 1 {
+    e.write_compact_string(s)
+  } else {
+    let b = @utf8.encode(s)
+    e.write_i16(b.length())
+    e.write_bytes(b)
+  }
+}
+
+///|
+fn fake_write_quotas_nullable_string(
+  e : @buf.Encoder,
+  s : String?,
+  version : Int,
+) -> Unit {
+  if version >= 1 {
+    e.write_compact_nullable_string(s)
+  } else {
+    e.write_nullable_string(s)
+  }
+}
+
+///|
+fn fake_write_quotas_tag(e : @buf.Encoder, version : Int) -> Unit {
+  if version >= 1 {
+    e.write_tag_buffer()
+  }
+}
+
+///|
+/// Skip the request header: v0 has the legacy shape (no tag buffer).
+fn fake_skip_quotas_header(d : @buf.Decoder, version : Int) -> Unit raise {
+  ignore(d.read_i16()) // api key
+  ignore(d.read_i16()) // api version
+  ignore(d.read_i32()) // correlation id
+  if version >= 1 {
+    ignore(d.read_compact_string()) // client id
+    d.skip_tag_buffer()
+  } else {
+    let client_len = d.read_i16()
+    ignore(d.read_bytes(client_len)) // client id
+  }
+}
+
+///|
+/// Skip a struct's tag buffer: none at v0, one at v1+.
+fn fake_skip_quotas_tag(d : @buf.Decoder, version : Int) -> Unit raise {
+  if version >= 1 {
+    d.skip_tag_buffer()
+  }
+}
+
+///|
+/// Parse a DescribeClientQuotas v0-v1 request: the filter.
+fn fake_describe_client_quotas_request(
+  rest : Bytes,
+  version : Int,
+) -> @moonkafka.ClientQuotaFilter raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_quotas_header(d, version)
+  let n = fake_quotas_len(d, version)
+  let components : Array[@moonkafka.ClientQuotaFilterComponent] = []
+  for _ in 0..<n {
+    let entity_type = fake_quotas_string(d, version)
+    let match_type = d.read_i8()
+    let matches = fake_quotas_nullable_string(d, version)
+    fake_skip_quotas_tag(d, version)
+    components.push({ entity_type, match_type, matches, })
+  }
+  let strict = d.read_bool()
+  { components, strict, }
+}
+
+///|
+/// DescribeClientQuotas response body: one entry for the user "alice"
+/// with the two rate quotas set.
+fn fake_describe_client_quotas_response(version : Int) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_i16(0) // error
+  fake_write_quotas_nullable_string(e, None, version)
+  fake_write_quotas_len(e, 1, version) // one entry
+  fake_write_quotas_len(e, 1, version) // one entity
+  fake_write_quotas_string(e, "user", version)
+  fake_write_quotas_nullable_string(e, Some("alice"), version)
+  fake_write_quotas_tag(e, version)
+  fake_write_quotas_len(e, 2, version) // two values
+  fake_write_quotas_string(e, "producer_byte_rate", version)
+  e.write_f64(1024.0)
+  fake_write_quotas_tag(e, version)
+  fake_write_quotas_string(e, "consumer_byte_rate", version)
+  e.write_f64(2048.0)
+  fake_write_quotas_tag(e, version)
+  fake_write_quotas_tag(e, version)
+  fake_write_quotas_tag(e, version)
+  e.to_bytes()
+}
+
+///|
+/// Parse an AlterClientQuotas v0-v1 request: the alterations and the
+/// validate-only flag.
+fn fake_alter_client_quotas_request(
+  rest : Bytes,
+  version : Int,
+) -> (Array[@moonkafka.ClientQuotaAlteration], Bool) raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_quotas_header(d, version)
+  let n = fake_quotas_len(d, version)
+  let out : Array[@moonkafka.ClientQuotaAlteration] = []
+  for _ in 0..<n {
+    let entity_len = fake_quotas_len(d, version)
+    let entity : Array[@moonkafka.QuotaEntity] = []
+    for _ in 0..<entity_len {
+      let entity_type = fake_quotas_string(d, version)
+      let entity_name = fake_quotas_nullable_string(d, version)
+      fake_skip_quotas_tag(d, version)
+      entity.push({ entity_type, entity_name, })
+    }
+    let ops_len = fake_quotas_len(d, version)
+    let ops : Array[@moonkafka.ClientQuotaOp] = []
+    for _ in 0..<ops_len {
+      let key = fake_quotas_string(d, version)
+      let value = d.read_f64()
+      let remove = d.read_bool()
+      fake_skip_quotas_tag(d, version)
+      ops.push({ key, value, remove, })
+    }
+    fake_skip_quotas_tag(d, version)
+    out.push({ entity, ops, })
+  }
+  let validate_only = d.read_bool()
+  (out, validate_only)
+}
+
+///|
+/// AlterClientQuotas response body: success per alteration.
+fn fake_alter_client_quotas_response(
+  entries : Array[@moonkafka.ClientQuotaAlteration],
+  version : Int,
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  fake_write_quotas_len(e, entries.length(), version)
+  for entry in entries {
+    e.write_i16(0) // error
+    fake_write_quotas_nullable_string(e, None, version)
+    fake_write_quotas_len(e, entry.entity.length(), version)
+    for part in entry.entity {
+      fake_write_quotas_string(e, part.entity_type, version)
+      fake_write_quotas_nullable_string(e, part.entity_name, version)
+      fake_write_quotas_tag(e, version)
+    }
+    fake_write_quotas_tag(e, version)
+  }
+  fake_write_quotas_tag(e, version)
+  e.to_bytes()
+}
+
+///|
+/// Parse a DescribeUserScramCredentials v0 request: the user names, or
+/// None for "all users" (a null array).
+fn fake_describe_user_scram_request(rest : Bytes) -> Array[String]? raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  let n = d.read_compact_len()
+  if n < 0 {
+    None
+  } else {
+    let users : Array[String] = []
+    for _ in 0..<n {
+      users.push(d.read_compact_string())
+      d.skip_tag_buffer()
+    }
+    Some(users)
+  }
+}
+
+///|
+/// DescribeUserScramCredentials response body: "alice" with one
+/// SCRAM-SHA-512 credential at 8192 iterations.
+fn fake_describe_user_scram_response() -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_i16(0) // message-level error
+  e.write_compact_nullable_string(None)
+  e.write_compact_len(1) // one user
+  e.write_compact_string("alice")
+  e.write_i16(0) // user-level error
+  e.write_compact_nullable_string(None)
+  e.write_compact_len(1) // one credential
+  e.write_i8(2) // SCRAM-SHA-512
+  e.write_i32(8192) // iterations
+  e.write_tag_buffer()
+  e.write_tag_buffer()
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse an AlterUserScramCredentials v0 request: the deletions and
+/// upsertions.
+fn fake_alter_user_scram_request(
+  rest : Bytes,
+) -> (
+  Array[@moonkafka.ScramCredentialDeletion],
+  Array[@moonkafka.ScramCredentialUpsertion],
+) raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  let deletions : Array[@moonkafka.ScramCredentialDeletion] = []
+  let dn = d.read_compact_len()
+  for _ in 0..<dn {
+    let name = d.read_compact_string()
+    let mechanism = d.read_i8()
+    d.skip_tag_buffer()
+    deletions.push({ name, mechanism, })
+  }
+  let upsertions : Array[@moonkafka.ScramCredentialUpsertion] = []
+  let un = d.read_compact_len()
+  for _ in 0..<un {
+    let name = d.read_compact_string()
+    let mechanism = d.read_i8()
+    let iterations = d.read_i32()
+    let salt_len = d.read_compact_len()
+    let salt = d.read_bytes(salt_len)
+    let salted_len = d.read_compact_len()
+    let salted_password = d.read_bytes(salted_len)
+    d.skip_tag_buffer()
+    upsertions.push({ name, mechanism, iterations, salt, salted_password, })
+  }
+  (deletions, upsertions)
+}
+
+///|
+/// AlterUserScramCredentials response body: success per deletion and
+/// upsertion, keyed by user name.
+fn fake_alter_user_scram_response(
+  deletions : Array[@moonkafka.ScramCredentialDeletion],
+  upsertions : Array[@moonkafka.ScramCredentialUpsertion],
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(deletions.length() + upsertions.length())
+  for deletion in deletions {
+    e.write_compact_string(deletion.name)
+    e.write_i16(0) // error
+    e.write_compact_nullable_string(None)
+    e.write_tag_buffer()
+  }
+  for upsertion in upsertions {
+    e.write_compact_string(upsertion.name)
+    e.write_i16(0) // error
+    e.write_compact_nullable_string(None)
     e.write_tag_buffer()
   }
   e.write_tag_buffer()
@@ -2857,6 +3186,35 @@ async fn fake_serve_conn(
           cluster_ops.delete_acls.push(filter)
         }
         fake_delete_acls_response(filters.length())
+      }
+      48 => {
+        let filter = fake_describe_client_quotas_request(rest, version)
+        cluster_ops.describe_quotas.push(filter)
+        fake_describe_client_quotas_response(version)
+      }
+      49 => {
+        let (entries, validate_only) = fake_alter_client_quotas_request(
+          rest, version,
+        )
+        for entry in entries {
+          cluster_ops.alter_quotas.push(entry)
+          cluster_ops.alter_quotas_validate_only.push(validate_only)
+        }
+        fake_alter_client_quotas_response(entries, version)
+      }
+      50 => {
+        cluster_ops.describe_scram.push(fake_describe_user_scram_request(rest))
+        fake_describe_user_scram_response()
+      }
+      51 => {
+        let (deletions, upsertions) = fake_alter_user_scram_request(rest)
+        for deletion in deletions {
+          cluster_ops.alter_scram_deletions.push(deletion)
+        }
+        for upsertion in upsertions {
+          cluster_ops.alter_scram_upsertions.push(upsertion)
+        }
+        fake_alter_user_scram_response(deletions, upsertions)
       }
       60 => {
         cluster_ops.describe_cluster.push(fake_describe_cluster_request(rest))
@@ -5509,6 +5867,118 @@ async test "admin creates, describes, and deletes ACLs" {
     assert_eq(removed.binding.principal, "User:alice")
     assert_eq(ops.delete_acls.length(), 1)
     assert_eq(ops.delete_acls[0].principal, Some("User:alice"))
+    server.close()
+  }
+}
+
+///|
+async test "admin describes and alters client quotas and scram credentials" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let ops = FakeClusterOps::new()
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, cluster_ops=ops)
+    }
+    let admin = @moonkafka.Admin::connect(
+      group=root,
+      host="127.0.0.1",
+      port=server.addr.port(),
+    )
+    defer admin.close()
+    // Describe the quota of user alice (exact match on the user entity).
+    let described = admin.describe_client_quotas({
+      components: [
+        {
+          entity_type: @moonkafka.QUOTA_ENTITY_USER,
+          match_type: @moonkafka.QUOTA_MATCH_EXACT,
+          matches: Some("alice"),
+        },
+      ],
+      strict: true,
+    })
+    assert_eq(described.error_code, 0)
+    assert_eq(described.entries.length(), 1)
+    assert_eq(described.entries[0].entity.length(), 1)
+    assert_eq(
+      described.entries[0].entity[0].entity_type,
+      @moonkafka.QUOTA_ENTITY_USER,
+    )
+    assert_eq(described.entries[0].entity[0].entity_name, Some("alice"))
+    assert_eq(described.entries[0].values.length(), 2)
+    assert_eq(described.entries[0].values[0].key, "producer_byte_rate")
+    assert_eq(described.entries[0].values[0].value, 1024.0)
+    assert_eq(described.entries[0].values[1].key, "consumer_byte_rate")
+    assert_eq(described.entries[0].values[1].value, 2048.0)
+    let filter = ops.describe_quotas[0]
+    assert_eq(filter.components.length(), 1)
+    assert_eq(filter.components[0].entity_type, "user")
+    assert_eq(filter.components[0].match_type, @moonkafka.QUOTA_MATCH_EXACT)
+    assert_eq(filter.components[0].matches, Some("alice"))
+    assert_true(filter.strict)
+    // Throttle alice's produce rate, then remove it.
+    let altered = admin.alter_client_quotas([
+      {
+        entity: [{ entity_type: "user", entity_name: Some("alice"), }],
+        ops: [
+          { key: "producer_byte_rate", value: 4096.0, remove: false, },
+          { key: "request_percentage", value: 0.0, remove: true, },
+        ],
+      },
+    ])
+    assert_eq(altered.length(), 1)
+    assert_eq(altered[0].error_code, 0)
+    assert_eq(altered[0].entity.length(), 1)
+    assert_eq(altered[0].entity[0].entity_name, Some("alice"))
+    let alteration = ops.alter_quotas[0]
+    assert_eq(alteration.ops.length(), 2)
+    assert_eq(alteration.ops[0].key, "producer_byte_rate")
+    assert_eq(alteration.ops[0].value, 4096.0)
+    assert_true(!alteration.ops[0].remove)
+    assert_eq(alteration.ops[1].key, "request_percentage")
+    assert_true(alteration.ops[1].remove)
+    assert_true(!ops.alter_quotas_validate_only[0])
+    // Describe all users' SCRAM credentials.
+    let scram = admin.describe_user_scram(None)
+    assert_eq(scram.error_code, 0)
+    assert_eq(scram.results.length(), 1)
+    assert_eq(scram.results[0].user, "alice")
+    assert_eq(scram.results[0].credential_infos.length(), 1)
+    assert_eq(
+      scram.results[0].credential_infos[0].mechanism,
+      @moonkafka.SCRAM_MECHANISM_SHA_512,
+    )
+    assert_eq(scram.results[0].credential_infos[0].iterations, 8192)
+    assert_true(ops.describe_scram[0] is None)
+    // Delete alice's SHA-256 credential and set one for bob from a
+    // plaintext password.
+    let results = admin.alter_user_scram(
+      [{ name: "alice", mechanism: @moonkafka.SCRAM_MECHANISM_SHA_256, }],
+      [
+        @moonkafka.ScramCredentialUpsertion::from_password(
+          "bob",
+          @moonkafka.SCRAM_MECHANISM_SHA_256,
+          @utf8.encode("s3cret"),
+        ),
+      ],
+    )
+    assert_eq(results.length(), 2)
+    assert_eq(results[0].user, "alice")
+    assert_eq(results[0].error_code, 0)
+    assert_eq(results[1].user, "bob")
+    assert_eq(results[1].error_code, 0)
+    assert_eq(ops.alter_scram_deletions.length(), 1)
+    assert_eq(ops.alter_scram_deletions[0].name, "alice")
+    assert_eq(
+      ops.alter_scram_deletions[0].mechanism,
+      @moonkafka.SCRAM_MECHANISM_SHA_256,
+    )
+    assert_eq(ops.alter_scram_upsertions.length(), 1)
+    let upsertion = ops.alter_scram_upsertions[0]
+    assert_eq(upsertion.name, "bob")
+    assert_eq(upsertion.iterations, 4096)
+    assert_true(upsertion.salt.length() > 0)
+    assert_true(upsertion.salted_password.length() > 0)
     server.close()
   }
 }

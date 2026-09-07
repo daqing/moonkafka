@@ -61,6 +61,15 @@ pub fn Encoder::write_i64(self : Encoder, v : Int64) -> Unit {
 }
 
 ///|
+/// FLOAT64: big-endian IEEE 754 double (quota config values).
+pub fn Encoder::write_f64(self : Encoder, v : Double) -> Unit {
+  let bits = v.reinterpret_as_uint64()
+  for shift in [56, 48, 40, 32, 24, 16, 8, 0] {
+    self.buf.push((bits >> shift).to_byte())
+  }
+}
+
+///|
 pub fn Encoder::write_bytes(self : Encoder, b : Bytes) -> Unit {
   for byte in b {
     self.buf.push(byte)
@@ -233,6 +242,19 @@ pub fn Decoder::read_i64(self : Decoder) -> Int64 raise DecodeError {
     self.pos += 1
   }
   v
+}
+
+///|
+/// FLOAT64: big-endian IEEE 754 double.
+pub fn Decoder::read_f64(self : Decoder) -> Double raise DecodeError {
+  self.need(8)
+  let mut bits = 0UL
+  for _ in 0..<8 {
+    bits = (bits << 8) |
+      Int64::from_int(self.data[self.pos].to_int()).reinterpret_as_uint64()
+    self.pos += 1
+  }
+  bits.reinterpret_as_double()
 }
 
 ///|

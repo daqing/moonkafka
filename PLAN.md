@@ -231,7 +231,8 @@ P6 = share/telemetry.
 | AlterPartitionReassignments | 1 | v1 (per guide) | P5 | verify ceiling when implementing |
 | ListPartitionReassignments | 0 | v0 | P5 | |
 | OffsetDelete | 0 | v0 | P5 | |
-| DescribeUserScramCredentials / AlterUserScramCredentials | 0 | v0 | P5 | |
+| DescribeClientQuotas / AlterClientQuotas | 1 | v0-v1 (v1 enables flexible versions) | P5 (done) | row was missing from the original table; added when implemented |
+| DescribeUserScramCredentials / AlterUserScramCredentials | 0 | v0 (flexible from the start) | P5 (done) | |
 | DescribeCluster | 2 | v2 | P5 | |
 | DescribeProducers | 0 | v0 | P5 | active producers per partition |
 | UnregisterBroker | 0 | v0 | P5 | |
@@ -808,8 +809,28 @@ rejoins); read_committed skips aborted txns (producer txn test from P3).
       broker (create → describe → delete round trip with wire captures)
       plus codec tests for the shared v2/v3 shape and per-item error
       paths.
-- [ ] Security — quotas and SCRAM: quotas Describe/AlterClientQuotas;
-      SCRAM credentials Describe/AlterUserScramCredentials.
+- [x] Security — quotas and SCRAM: DONE (this commit, root scope
+      `admin_quotas.mbt`): DescribeClientQuotas v0-v1, AlterClientQuotas
+      v0-v1, DescribeUserScramCredentials v0, AlterUserScramCredentials
+      v0. The quota pair straddles the flexible boundary (v1 enables
+      flexible versions), so its codecs shape string/array lengths and
+      tag buffers by version and the connection frames v0 with the
+      legacy header; the SCRAM pair is flexible from v0. `@buf` gained
+      FLOAT64 (`write_f64`/`read_f64`) for quota values. Entity type
+      strings pinned from `ClientQuotaEntity.java`, match types from
+      the DescribeClientQuotas schema ({0 = exact name, 1 = default
+      name, 2 = any specified name}), mechanism bytes and the
+      4096-16384 iteration bounds from `ScramMechanism.java`.
+      `ScramCredentialUpsertion::from_password` derives the salt and
+      the RFC 5802 SaltedPassword over the Phase 1 SCRAM primitives, so
+      callers hand over a plaintext password. Per-item error codes
+      travel as values under the retry policy; all four take the
+      any-broker control connection — `KafkaApis` serves both describes
+      locally and forwards AlterClientQuotas and
+      AlterUserScramCredentials to the controller. E2E against the fake
+      broker (describe → alter quotas, describe → alter SCRAM with wire
+      captures) plus codec tests for the v0/v1 quota request shapes,
+      per-item error paths, and the null "all users" array.
 - [x] Topic-id-first admin ops: DONE (commit 80fc6e8): DeleteTopics v6
       addresses deletions by topic id alone (null name + id, KIP-516),
       and DescribeTopicPartitions returns ids for follow-up ops; the

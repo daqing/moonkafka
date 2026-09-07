@@ -82,9 +82,13 @@ pub const API_ADD_OFFSETS_TO_TXN : Int = 25
 
 pub const API_ADD_PARTITIONS_TO_TXN : Int = 24
 
+pub const API_ALTER_CLIENT_QUOTAS : Int = 49
+
 pub const API_ALTER_CONFIGS : Int = 33
 
 pub const API_ALTER_PARTITION_REASSIGNMENTS : Int = 45
+
+pub const API_ALTER_USER_SCRAM_CREDENTIALS : Int = 51
 
 pub const API_API_VERSIONS : Int = 18
 
@@ -104,6 +108,8 @@ pub const API_DELETE_TOPICS : Int = 20
 
 pub const API_DESCRIBE_ACLS : Int = 29
 
+pub const API_DESCRIBE_CLIENT_QUOTAS : Int = 48
+
 pub const API_DESCRIBE_CLUSTER : Int = 60
 
 pub const API_DESCRIBE_CONFIGS : Int = 32
@@ -113,6 +119,8 @@ pub const API_DESCRIBE_LOG_DIRS : Int = 35
 pub const API_DESCRIBE_QUORUM : Int = 55
 
 pub const API_DESCRIBE_TOPIC_PARTITIONS : Int = 75
+
+pub const API_DESCRIBE_USER_SCRAM_CREDENTIALS : Int = 50
 
 pub const API_ELECT_LEADERS : Int = 43
 
@@ -218,6 +226,22 @@ pub const OFFSET_LOCAL_LOG_START : Int64 = -4
 
 pub const OFFSET_MAX_TIMESTAMP : Int64 = -3
 
+pub const QUOTA_ENTITY_CLIENT_ID : String = "client-id"
+
+pub const QUOTA_ENTITY_IP : String = "ip"
+
+pub const QUOTA_ENTITY_USER : String = "user"
+
+pub const QUOTA_MATCH_ANY : Int = 2
+
+pub const QUOTA_MATCH_DEFAULT : Int = 1
+
+pub const QUOTA_MATCH_EXACT : Int = 0
+
+pub const SCRAM_MECHANISM_SHA_256 : Int = 1
+
+pub const SCRAM_MECHANISM_SHA_512 : Int = 2
+
 pub fn backoff_ms(Int, Int, Int) -> Int
 
 pub fn collect_committed(Array[DecodedBatch], Array[AbortedTx]) -> Array[Record]
@@ -230,9 +254,13 @@ pub fn decode_add_offsets_to_txn_response(@buf.Decoder) -> (Int, Int) raise
 
 pub fn decode_add_partitions_to_txn_response(@buf.Decoder) -> (Array[TxnPartitionResult], Int) raise
 
+pub fn decode_alter_client_quotas_response(Int, @buf.Decoder) -> (Array[AlterClientQuotasResult], Int) raise
+
 pub fn decode_alter_configs_response(@buf.Decoder) -> (Array[AlterConfigsResult], Int) raise
 
 pub fn decode_alter_partition_reassignments_response(Int, @buf.Decoder) -> (AdminReassignmentResult, Int) raise
+
+pub fn decode_alter_user_scram_response(@buf.Decoder) -> (Array[AlterUserScramResult], Int) raise
 
 pub fn decode_api_versions_response(@buf.Decoder) -> (BrokerVersions, Int) raise
 
@@ -256,6 +284,8 @@ pub fn decode_delete_topics_response(@buf.Decoder) -> (Array[DeleteTopicsResult]
 
 pub fn decode_describe_acls_response(@buf.Decoder) -> (DescribeAclsResult, Int) raise
 
+pub fn decode_describe_client_quotas_response(Int, @buf.Decoder) -> (DescribeClientQuotasResult, Int) raise
+
 pub fn decode_describe_cluster_response(Int, @buf.Decoder) -> (AdminClusterDescription, Int) raise
 
 pub fn decode_describe_configs_response(@buf.Decoder) -> (Array[AdminConfigsResult], Int) raise
@@ -265,6 +295,8 @@ pub fn decode_describe_log_dirs_response(Int, @buf.Decoder) -> (AdminLogDirs, In
 pub fn decode_describe_quorum_response(@buf.Decoder) -> AdminQuorumDescription raise
 
 pub fn decode_describe_topic_partitions_response(@buf.Decoder) -> (DescribeTopicPartitions, Int) raise
+
+pub fn decode_describe_user_scram_response(@buf.Decoder) -> (DescribeUserScramResult, Int) raise
 
 pub fn decode_elect_leaders_response(@buf.Decoder) -> (AdminElectionResult, Int) raise
 
@@ -326,9 +358,13 @@ pub fn encode_add_offsets_to_txn_request(String, Int64, Int, String) -> Bytes
 
 pub fn encode_add_partitions_to_txn_request(String, Int64, Int, Array[(String, Array[Int])]) -> Bytes
 
+pub fn encode_alter_client_quotas_request(Array[ClientQuotaAlteration], Bool, Int) -> Bytes
+
 pub fn encode_alter_configs_request(Array[SettableConfigResource], Bool) -> Bytes
 
 pub fn encode_alter_partition_reassignments_request(Array[ReassignableTopic], Int, Bool, Int) -> Bytes
+
+pub fn encode_alter_user_scram_request(Array[ScramCredentialDeletion], Array[ScramCredentialUpsertion]) -> Bytes
 
 pub fn encode_api_versions_request() -> Bytes
 
@@ -352,6 +388,8 @@ pub fn encode_delete_topics_request(Array[String], Array[Uuid], Int) -> Bytes
 
 pub fn encode_describe_acls_request(AclFilter) -> Bytes
 
+pub fn encode_describe_client_quotas_request(ClientQuotaFilter, Int) -> Bytes
+
 pub fn encode_describe_cluster_request(Bool, Bool, Int) -> Bytes
 
 pub fn encode_describe_configs_request(Array[ConfigResourceKey]) -> Bytes
@@ -361,6 +399,8 @@ pub fn encode_describe_log_dirs_request(Array[(String, Array[Int])]?, Int) -> By
 pub fn encode_describe_quorum_request(Array[(String, Array[Int])]) -> Bytes
 
 pub fn encode_describe_topic_partitions_request(Array[String], Int, cursor? : TopicPartitionCursor?) -> Bytes
+
+pub fn encode_describe_user_scram_request(Array[String]?) -> Bytes
 
 pub fn encode_elect_leaders_request(Int, Array[(String, Array[Int])]?, Int) -> Bytes
 
@@ -508,8 +548,10 @@ pub struct Admin {
   mut closed : Bool
   // private fields
 }
+pub async fn Admin::alter_client_quotas(Self, Array[ClientQuotaAlteration], validate_only? : Bool) -> Array[AlterClientQuotasResult]
 pub async fn Admin::alter_configs(Self, Array[SettableConfigResource], validate_only? : Bool) -> Array[AlterConfigsResult]
 pub async fn Admin::alter_partition_reassignments(Self, Array[ReassignableTopic], allow_replication_factor_change? : Bool) -> AdminReassignmentResult
+pub async fn Admin::alter_user_scram(Self, Array[ScramCredentialDeletion], Array[ScramCredentialUpsertion]) -> Array[AlterUserScramResult]
 pub fn Admin::close(Self) -> Unit
 pub async fn Admin::connect(group~ : @async.TaskGroup[Unit], host~ : String, port~ : Int) -> Self
 pub async fn Admin::connect_with_config(group~ : @async.TaskGroup[Unit], AdminConfig) -> Self
@@ -520,11 +562,13 @@ pub async fn Admin::delete_acls(Self, Array[AclFilter]) -> Array[DeleteAclsFilte
 pub async fn Admin::delete_records(Self, Array[(String, Array[(Int, Int64)])]) -> Array[DeleteRecordsResult]
 pub async fn Admin::delete_topics(Self, Array[String], Array[Uuid]) -> Array[DeleteTopicsResult]
 pub async fn Admin::describe_acls(Self, AclFilter) -> DescribeAclsResult
+pub async fn Admin::describe_client_quotas(Self, ClientQuotaFilter) -> DescribeClientQuotasResult
 pub async fn Admin::describe_cluster(Self, include_authorized_operations? : Bool, include_fenced_brokers? : Bool) -> AdminClusterDescription
 pub async fn Admin::describe_configs(Self, Array[ConfigResourceKey]) -> Array[AdminConfigsResult]
 pub async fn Admin::describe_log_dirs(Self, topics? : Array[(String, Array[Int])]?) -> AdminLogDirs
 pub async fn Admin::describe_quorum(Self, topic? : String, partition? : Int) -> AdminQuorumDescription
 pub async fn Admin::describe_topic_partitions(Self, Array[String]) -> Array[AdminTopicDescription]
+pub async fn Admin::describe_user_scram(Self, Array[String]?) -> DescribeUserScramResult
 pub async fn Admin::elect_leaders(Self, Int, topic_partitions? : Array[(String, Array[Int])]?) -> AdminElectionResult
 pub async fn Admin::incremental_alter_configs(Self, Array[AlterableConfigResource], validate_only? : Bool) -> Array[AlterConfigsResult]
 pub async fn Admin::list_config_resources(Self, resource_types? : Array[Int]) -> ListConfigResourcesResult
@@ -617,11 +661,23 @@ pub struct AdminUpdateFeaturesResult {
   error_message : String?
 } derive(@debug.Debug)
 
+pub struct AlterClientQuotasResult {
+  error_code : Int
+  error_message : String?
+  entity : Array[QuotaEntity]
+} derive(@debug.Debug)
+
 pub struct AlterConfigsResult {
   error_code : Int
   error_message : String?
   resource_type : Int
   resource_name : String
+} derive(@debug.Debug)
+
+pub struct AlterUserScramResult {
+  user : String
+  error_code : Int
+  error_message : String?
 } derive(@debug.Debug)
 
 pub(all) struct AlterableConfig {
@@ -694,8 +750,10 @@ pub struct BrokerConnection {
 }
 pub async fn BrokerConnection::add_offsets_to_txn(Self, String, Int64, Int, String, timeout_ms? : Int) -> Int
 pub async fn BrokerConnection::add_partitions_to_txn(Self, String, Int64, Int, Array[(String, Array[Int])], timeout_ms? : Int) -> Array[TxnPartitionResult]
+pub async fn BrokerConnection::alter_client_quotas(Self, Array[ClientQuotaAlteration], validate_only? : Bool, timeout_ms? : Int) -> Array[AlterClientQuotasResult]
 pub async fn BrokerConnection::alter_configs(Self, Array[SettableConfigResource], timeout_ms? : Int, validate_only? : Bool) -> Array[AlterConfigsResult]
 pub async fn BrokerConnection::alter_partition_reassignments(Self, Array[ReassignableTopic], timeout_ms? : Int, allow_replication_factor_change? : Bool) -> AdminReassignmentResult
+pub async fn BrokerConnection::alter_user_scram(Self, Array[ScramCredentialDeletion], Array[ScramCredentialUpsertion], timeout_ms? : Int) -> Array[AlterUserScramResult]
 pub fn BrokerConnection::api_version(Self, Int, want? : Int?) -> Int raise
 pub async fn BrokerConnection::authenticate(Self, SaslConfig, timeout_ms? : Int) -> Unit
 pub fn BrokerConnection::close(Self) -> Unit
@@ -708,11 +766,13 @@ pub async fn BrokerConnection::delete_acls(Self, Array[AclFilter], timeout_ms? :
 pub async fn BrokerConnection::delete_records(Self, Array[(String, Array[(Int, Int64)])], Int) -> Array[DeleteRecordsResult]
 pub async fn BrokerConnection::delete_topics(Self, Array[String], Array[Uuid], Int) -> Array[DeleteTopicsResult]
 pub async fn BrokerConnection::describe_acls(Self, AclFilter, timeout_ms? : Int) -> DescribeAclsResult
+pub async fn BrokerConnection::describe_client_quotas(Self, ClientQuotaFilter, timeout_ms? : Int) -> DescribeClientQuotasResult
 pub async fn BrokerConnection::describe_cluster(Self, include_authorized_operations? : Bool, include_fenced_brokers? : Bool, timeout_ms? : Int) -> AdminClusterDescription
 pub async fn BrokerConnection::describe_configs(Self, Array[ConfigResourceKey], timeout_ms? : Int) -> Array[AdminConfigsResult]
 pub async fn BrokerConnection::describe_log_dirs(Self, topics? : Array[(String, Array[Int])]?, timeout_ms? : Int) -> AdminLogDirs
 pub async fn BrokerConnection::describe_quorum(Self, Array[(String, Array[Int])], timeout_ms? : Int) -> AdminQuorumDescription
 pub async fn BrokerConnection::describe_topic_partitions(Self, Array[String], response_partition_limit? : Int, cursor? : TopicPartitionCursor?, timeout_ms? : Int) -> DescribeTopicPartitions
+pub async fn BrokerConnection::describe_user_scram(Self, Array[String]?, timeout_ms? : Int) -> DescribeUserScramResult
 pub async fn BrokerConnection::elect_leaders(Self, Int, topic_partitions? : Array[(String, Array[Int])]?, timeout_ms? : Int) -> AdminElectionResult
 pub async fn BrokerConnection::end_txn(Self, String, Int64, Int, Bool, timeout_ms? : Int) -> EndTxnResult
 pub async fn BrokerConnection::fetch(Self, Array[FetchTopicReq], session~ : FetchSessionReq, max_wait_ms~ : Int, min_bytes? : Int, max_bytes? : Int, isolation_level? : Int, timeout_ms? : Int) -> FetchResult
@@ -761,6 +821,38 @@ pub struct BrokerVersions {
 }
 pub fn BrokerVersions::pick(Self, Int, want? : Int?) -> Int raise
 pub fn BrokerVersions::range(Self, Int) -> (Int, Int)?
+
+pub(all) struct ClientQuotaAlteration {
+  entity : Array[QuotaEntity]
+  ops : Array[ClientQuotaOp]
+} derive(@debug.Debug)
+
+pub(all) struct ClientQuotaFilter {
+  components : Array[ClientQuotaFilterComponent]
+  strict : Bool
+} derive(@debug.Debug)
+
+pub(all) struct ClientQuotaFilterComponent {
+  entity_type : String
+  match_type : Int
+  matches : String?
+} derive(@debug.Debug)
+
+pub(all) struct ClientQuotaOp {
+  key : String
+  value : Double
+  remove : Bool
+} derive(@debug.Debug)
+
+pub(all) struct ClientQuotaValue {
+  key : String
+  value : Double
+} derive(@debug.Debug)
+
+pub struct ClientQuotasEntry {
+  entity : Array[QuotaEntity]
+  values : Array[ClientQuotaValue]
+} derive(@debug.Debug)
 
 pub struct ClusterClient {
   bootstrap : BootstrapServers
@@ -1015,16 +1107,35 @@ pub struct DescribeAclsResult {
   resources : Array[DescribedAclResource]
 } derive(@debug.Debug)
 
+pub struct DescribeClientQuotasResult {
+  error_code : Int
+  error_message : String?
+  entries : Array[ClientQuotasEntry]
+} derive(@debug.Debug)
+
 pub struct DescribeTopicPartitions {
   topics : Array[TopicMetadata]
   next_cursor : TopicPartitionCursor?
 }
+
+pub struct DescribeUserScramResult {
+  error_code : Int
+  error_message : String?
+  results : Array[DescribedScramCredentials]
+} derive(@debug.Debug)
 
 pub struct DescribedAclResource {
   resource_type : Int
   resource_name : String
   pattern_type : Int
   acls : Array[AclDescription]
+} derive(@debug.Debug)
+
+pub struct DescribedScramCredentials {
+  user : String
+  error_code : Int
+  error_message : String?
+  credential_infos : Array[ScramCredentialInfo]
 } derive(@debug.Debug)
 
 pub struct ElectLeadersPartitionResult {
@@ -1354,6 +1465,11 @@ pub struct QuorumTopicState {
   partitions : Array[QuorumPartitionState]
 } derive(@debug.Debug)
 
+pub(all) struct QuotaEntity {
+  entity_type : String
+  entity_name : String?
+} derive(@debug.Debug)
+
 pub(all) struct ReassignablePartition {
   partition_index : Int
   replicas : Array[Int]?
@@ -1435,6 +1551,25 @@ pub(all) enum SaslMechanism {
   ScramSha512
   OAuthBearer
 } derive(@debug.Debug)
+
+pub(all) struct ScramCredentialDeletion {
+  name : String
+  mechanism : Int
+} derive(@debug.Debug)
+
+pub struct ScramCredentialInfo {
+  mechanism : Int
+  iterations : Int
+} derive(@debug.Debug)
+
+pub(all) struct ScramCredentialUpsertion {
+  name : String
+  mechanism : Int
+  iterations : Int
+  salt : Bytes
+  salted_password : Bytes
+} derive(@debug.Debug)
+pub fn ScramCredentialUpsertion::from_password(String, Int, Bytes, iterations? : Int) -> Self raise
 
 pub(all) struct ScramServerFirst {
   nonce : String

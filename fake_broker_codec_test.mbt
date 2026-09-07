@@ -265,3 +265,209 @@ test "acl responses carry per-item errors as values" {
   assert_eq(filters[0].error_code, 82)
   assert_eq(filters[0].matching_acls.length(), 0)
 }
+
+///|
+test "fake api versions negotiates the quota and scram admin range" {
+  let body = fake_api_versions_response(0)
+  let d = @buf.Decoder::new(body)
+  let (versions, _) = @moonkafka.decode_api_versions_response(d)
+  assert_eq(versions.pick(@moonkafka.API_DESCRIBE_CLIENT_QUOTAS), 1)
+  assert_eq(versions.pick(@moonkafka.API_ALTER_CLIENT_QUOTAS), 1)
+  assert_eq(versions.pick(@moonkafka.API_DESCRIBE_USER_SCRAM_CREDENTIALS), 0)
+  assert_eq(versions.pick(@moonkafka.API_ALTER_USER_SCRAM_CREDENTIALS), 0)
+}
+
+///|
+test "describe client quotas shapes v0 legacy and v1 flexible requests" {
+  let filter : @moonkafka.ClientQuotaFilter = {
+    components: [
+      {
+        entity_type: @moonkafka.QUOTA_ENTITY_USER,
+        match_type: @moonkafka.QUOTA_MATCH_EXACT,
+        matches: Some("alice"),
+      },
+    ],
+    strict: true,
+  }
+  // v0: i32 array count, int16 strings, no tag buffer. v1: compact
+  // lengths, compact strings, per-component and top-level tag buffers.
+  let v0 = @moonkafka.encode_describe_client_quotas_request(filter, 0)
+  assert_eq(v0, b"\x00\x00\x00\x01\x00\x04user\x00\x00\x05alice\x01")
+  let v1 = @moonkafka.encode_describe_client_quotas_request(filter, 1)
+  assert_eq(v1, b"\x02\x05user\x00\x06alice\x00\x01\x00")
+}
+
+///|
+test "describe client quotas decodes v0 and v1 responses" {
+  // The fake's canned body round trips at both versions.
+  for version in [0, 1] {
+    let body = fake_describe_client_quotas_response(version)
+    let d = @buf.Decoder::new(body)
+    let (result, throttle) = @moonkafka.decode_describe_client_quotas_response(
+      version, d,
+    )
+    assert_eq(throttle, 0)
+    assert_eq(result.error_code, 0)
+    assert_eq(result.entries.length(), 1)
+    assert_eq(result.entries[0].entity[0].entity_type, "user")
+    assert_eq(result.entries[0].entity[0].entity_name, Some("alice"))
+    assert_eq(result.entries[0].values[0].key, "producer_byte_rate")
+    assert_eq(result.entries[0].values[0].value, 1024.0)
+    assert_eq(result.entries[0].values[1].value, 2048.0)
+    assert_eq(d.remaining(), 0)
+  }
+}
+
+///|
+test "alter client quotas decodes per-entry results" {
+  // The second entry failed.
+  let body = @buf.Encoder::new()
+  body.write_i32(7) // throttle
+  body.write_compact_len(2)
+  // Each entry is two nested structs — EntityData inside EntryData — and
+  // at flexible versions every struct carries its own tag buffer.
+  body.write_i16(0)
+  body.write_compact_nullable_string(None)
+  body.write_compact_len(1)
+  body.write_compact_string("user")
+  body.write_compact_nullable_string(Some("alice"))
+  body.write_tag_buffer() // entity
+  body.write_tag_buffer() // entry
+  body.write_i16(100)
+  body.write_compact_nullable_string(Some("denied"))
+  body.write_compact_len(1)
+  body.write_compact_string("user")
+  body.write_compact_nullable_string(Some("bob"))
+  body.write_tag_buffer() // entity
+  body.write_tag_buffer() // entry
+  body.write_tag_buffer() // top level
+  let d = @buf.Decoder::new(body.to_bytes())
+  let (results, throttle) = @moonkafka.decode_alter_client_quotas_response(1, d)
+  assert_eq(throttle, 7)
+  assert_eq(results.length(), 2)
+  assert_eq(results[0].entity[0].entity_name, Some("alice"))
+  assert_eq(results[1].error_code, 100)
+  assert_eq(results[1].error_message, Some("denied"))
+  assert_eq(d.remaining(), 0)
+}
+
+///|
+test "alter client quotas request parses back through the fake broker" {
+  let entries : Array[@moonkafka.ClientQuotaAlteration] = [
+    {
+      entity: [{ entity_type: "user", entity_name: Some("alice"), }],
+      ops: [{ key: "producer_byte_rate", value: 4096.0, remove: false, }],
+    },
+  ]
+  // v0: legacy header framing.
+  let v0 = @moonkafka.encode_request(
+    @moonkafka.API_ALTER_CLIENT_QUOTAS,
+    0,
+    1,
+    "cid",
+    @moonkafka.encode_alter_client_quotas_request(entries, true, 0),
+    flexible=false,
+  )
+  let d0 = @buf.Decoder::new(v0)
+  d0.skip(4) // size
+  let (parsed0, validate0) = fake_alter_client_quotas_request(
+    d0.read_bytes(d0.remaining()),
+    0,
+  )
+  assert_true(validate0)
+  assert_eq(parsed0[0].entity[0].entity_name, Some("alice"))
+  assert_eq(parsed0[0].ops[0].value, 4096.0)
+  // v1: flexible header framing.
+  let v1 = @moonkafka.encode_request(
+    @moonkafka.API_ALTER_CLIENT_QUOTAS,
+    1,
+    1,
+    "cid",
+    @moonkafka.encode_alter_client_quotas_request(entries, false, 1),
+  )
+  let d1 = @buf.Decoder::new(v1)
+  d1.skip(4)
+  let (parsed1, validate1) = fake_alter_client_quotas_request(
+    d1.read_bytes(d1.remaining()),
+    1,
+  )
+  assert_true(!validate1)
+  assert_eq(parsed1[0].ops[0].key, "producer_byte_rate")
+}
+
+///|
+test "user scram credentials decode v0 responses" {
+  // Describe: one user with one credential; a user-level error case.
+  let d = @buf.Decoder::new(fake_describe_user_scram_response())
+  let (described, throttle) = @moonkafka.decode_describe_user_scram_response(d)
+  assert_eq(throttle, 0)
+  assert_eq(described.error_code, 0)
+  assert_eq(described.results[0].user, "alice")
+  assert_eq(described.results[0].credential_infos[0].mechanism, 2)
+  assert_eq(described.results[0].credential_infos[0].iterations, 8192)
+  assert_eq(d.remaining(), 0)
+  // Alter: the second result failed.
+  let alter = @buf.Encoder::new()
+  alter.write_i32(0) // throttle
+  alter.write_compact_len(2)
+  alter.write_compact_string("alice")
+  alter.write_i16(0)
+  alter.write_compact_nullable_string(None)
+  alter.write_tag_buffer()
+  alter.write_compact_string("bob")
+  alter.write_i16(85)
+  alter.write_compact_nullable_string(Some("iteration count too small"))
+  alter.write_tag_buffer()
+  alter.write_tag_buffer()
+  let da = @buf.Decoder::new(alter.to_bytes())
+  let (results, _) = @moonkafka.decode_alter_user_scram_response(da)
+  assert_eq(results[0].user, "alice")
+  assert_eq(results[1].error_code, 85)
+  assert_eq(results[1].error_message, Some("iteration count too small"))
+}
+
+///|
+test "alter user scram request parses back through the fake broker" {
+  let upsertion = @moonkafka.ScramCredentialUpsertion::from_password(
+    "bob",
+    @moonkafka.SCRAM_MECHANISM_SHA_256,
+    @utf8.encode("s3cret"),
+  )
+  let frame = @moonkafka.encode_request(
+    @moonkafka.API_ALTER_USER_SCRAM_CREDENTIALS,
+    0,
+    1,
+    "cid",
+    @moonkafka.encode_alter_user_scram_request(
+      [{ name: "alice", mechanism: @moonkafka.SCRAM_MECHANISM_SHA_512, }],
+      [upsertion],
+    ),
+  )
+  let d = @buf.Decoder::new(frame)
+  d.skip(4) // size
+  let (deletions, upsertions) = fake_alter_user_scram_request(
+    d.read_bytes(d.remaining()),
+  )
+  assert_eq(deletions[0].name, "alice")
+  assert_eq(deletions[0].mechanism, @moonkafka.SCRAM_MECHANISM_SHA_512)
+  assert_eq(upsertions[0].name, "bob")
+  assert_eq(upsertions[0].iterations, 4096)
+  // The stored salted password is Hi(password, salt, iterations).
+  let salted = @moonkafka.scram_salted_password(
+    false,
+    @utf8.encode("s3cret"),
+    upsertions[0].salt,
+    4096,
+  )
+  assert_eq(upsertions[0].salted_password, salted)
+}
+
+///|
+test "scram credential upsertion rejects unknown mechanisms" {
+  let outcome = try? @moonkafka.ScramCredentialUpsertion::from_password(
+    "bob",
+    3,
+    @utf8.encode("s3cret"),
+  )
+  assert_true(outcome is Err(_))
+}
