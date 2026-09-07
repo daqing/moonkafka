@@ -81,14 +81,12 @@ Working today:
   membership, ShareFetch v2 acquisition with delivery-count caps, and
   ShareAcknowledge v2 (accept/release/reject/renew); Describe/Alter/
   DeleteShareGroupOffsets admin ops
+- Telemetry (KIP-714): GetTelemetrySubscriptions/PushTelemetry client
+  driving a pluggable metrics provider (e.g. the driver's own counters)
 - Pipelined broker connections: request timeouts, in-flight cap, reconnect
   through bootstrap servers, broker throttling
 - TLS (including verified certificates via a custom CA) and SASL
   (PLAIN, SCRAM-SHA-256/512, OAUTHBEARER)
-
-Planned:
-
-- Telemetry (KIP-714): GetTelemetrySubscriptions/PushTelemetry client
 
 ## Requirements
 

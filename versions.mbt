@@ -186,6 +186,12 @@ pub const API_ALTER_SHARE_GROUP_OFFSETS : Int = 91
 pub const API_DELETE_SHARE_GROUP_OFFSETS : Int = 92
 
 ///|
+pub const API_GET_TELEMETRY_SUBSCRIPTIONS : Int = 71
+
+///|
+pub const API_PUSH_TELEMETRY : Int = 72
+
+///|
 // The handshake's own version cannot itself be negotiated: it is the
 // newest version every 4.0+ broker accepts.
 const API_VERSIONS_VERSION : Int = 3
@@ -531,6 +537,16 @@ pub fn driver_api_range(api_key : Int) -> ApiRange? {
         min: 0,
         max: 0,
       })
+    // Telemetry (KIP-714): both are v0-only and flexible from v0.
+    API_GET_TELEMETRY_SUBSCRIPTIONS =>
+      Some({
+        key: API_GET_TELEMETRY_SUBSCRIPTIONS,
+        name: "GetTelemetrySubscriptions",
+        min: 0,
+        max: 0,
+      })
+    API_PUSH_TELEMETRY =>
+      Some({ key: API_PUSH_TELEMETRY, name: "PushTelemetry", min: 0, max: 0, })
     _ => None
   }
 }

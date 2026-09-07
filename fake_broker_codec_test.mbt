@@ -1116,3 +1116,60 @@ test "describe alter delete share group offsets negotiate and decode" {
   )
   assert_eq(delete_body.length() > 0, true)
 }
+
+///|
+test "telemetry subscription and push negotiate and round-trip v0" {
+  let versions = @moonkafka.decode_api_versions_response(
+    @buf.Decoder::new(fake_api_versions_response(0)),
+  )
+  assert_eq(versions.0.pick(@moonkafka.API_GET_TELEMETRY_SUBSCRIPTIONS), 0)
+  assert_eq(versions.0.pick(@moonkafka.API_PUSH_TELEMETRY), 0)
+  // GetTelemetrySubscriptions request carries a 16-byte instance id.
+  let req = @moonkafka.encode_get_telemetry_subscriptions_request(Uuid::zero())
+  assert_eq(req.length(), 17) // uuid + tag buffer
+  // Subscription response: throttle, error, instance id, subscription id,
+  // accepted compression, push interval, max bytes, delta flag, metrics.
+  let e = @buf.Encoder::new()
+  e.write_i32(3) // throttle
+  e.write_i16(0) // error
+  e.write_bytes(Uuid::zero().to_bytes())
+  e.write_i32(7) // subscription id
+  e.write_compact_len(1) // accepted compressions
+  e.write_i8(0) // none
+  e.write_i32(30000) // push interval
+  e.write_i32(16384) // max bytes
+  e.write_bool(false) // delta temporality
+  e.write_compact_len(1) // requested metrics
+  e.write_compact_string("kafka_metrics")
+  e.write_tag_buffer()
+  let d = @buf.Decoder::new(e.to_bytes())
+  let (sub, throttle) = @moonkafka.decode_get_telemetry_subscriptions_response(
+    d,
+  )
+  assert_eq(d.remaining(), 0)
+  assert_eq(throttle, 3)
+  assert_eq(sub.subscription_id, 7)
+  assert_eq(sub.accepted_compression_types, [0])
+  assert_eq(sub.push_interval_ms, 30000)
+  assert_eq(sub.telemetry_max_bytes, 16384)
+  assert_eq(sub.requested_metrics, ["kafka_metrics"])
+  // PushTelemetry request body round-trips its fields.
+  let payload = b"records_sent=42\n"
+  let push = @moonkafka.encode_push_telemetry_request(
+    Uuid::zero(),
+    7,
+    false,
+    0,
+    payload,
+  )
+  assert_eq(push.length() > 16, true)
+  // Push response: throttle, error, tag buffer.
+  let r = @buf.Encoder::new()
+  r.write_i32(0)
+  r.write_i16(0)
+  r.write_tag_buffer()
+  let (code, _) = @moonkafka.decode_push_telemetry_response(
+    @buf.Decoder::new(r.to_bytes()),
+  )
+  assert_eq(code, 0)
+}
