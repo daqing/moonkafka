@@ -81,6 +81,42 @@ pub const API_TXN_OFFSET_COMMIT : Int = 28
 pub const API_DESCRIBE_TOPIC_PARTITIONS : Int = 75
 
 ///|
+pub const API_DESCRIBE_CONFIGS : Int = 32
+
+///|
+pub const API_ALTER_CONFIGS : Int = 33
+
+///|
+pub const API_INCREMENTAL_ALTER_CONFIGS : Int = 44
+
+///|
+pub const API_LIST_CONFIG_RESOURCES : Int = 74
+
+///|
+pub const API_DESCRIBE_LOG_DIRS : Int = 35
+
+///|
+pub const API_ELECT_LEADERS : Int = 43
+
+///|
+pub const API_ALTER_PARTITION_REASSIGNMENTS : Int = 45
+
+///|
+pub const API_LIST_PARTITION_REASSIGNMENTS : Int = 46
+
+///|
+pub const API_DESCRIBE_CLUSTER : Int = 60
+
+///|
+pub const API_UNREGISTER_BROKER : Int = 64
+
+///|
+pub const API_DESCRIBE_QUORUM : Int = 55
+
+///|
+pub const API_UPDATE_FEATURES : Int = 57
+
+///|
 pub const API_SASL_HANDSHAKE : Int = 17
 
 ///|
@@ -214,6 +250,83 @@ pub fn driver_api_range(api_key : Int) -> ApiRange? {
         min: 0,
         max: 0,
       })
+    // DescribeConfigs v4 is the first flexible version and every 4.0+
+    // broker accepts it; v1-v3 stay non-flexible and unimplemented.
+    API_DESCRIBE_CONFIGS =>
+      Some({
+        key: API_DESCRIBE_CONFIGS,
+        name: "DescribeConfigs",
+        min: 4,
+        max: 4,
+      })
+    // AlterConfigs v2 is the first flexible version; v0/v1 are
+    // pre-flexible legacy shapes.
+    API_ALTER_CONFIGS =>
+      Some({ key: API_ALTER_CONFIGS, name: "AlterConfigs", min: 2, max: 2, })
+    // IncrementalAlterConfigs v1 is the first flexible version.
+    API_INCREMENTAL_ALTER_CONFIGS =>
+      Some({
+        key: API_INCREMENTAL_ALTER_CONFIGS,
+        name: "IncrementalAlterConfigs",
+        min: 1,
+        max: 1,
+      })
+    // v1 filters by resource type (KIP-1142); v0 only lists client
+    // metrics resources on older brokers.
+    API_LIST_CONFIG_RESOURCES =>
+      Some({
+        key: API_LIST_CONFIG_RESOURCES,
+        name: "ListConfigResources",
+        min: 0,
+        max: 1,
+      })
+    // v2 is the first flexible version; v3+ only add response fields,
+    // decoded per version up to v5 (is_cordoned, KIP-1066).
+    API_DESCRIBE_LOG_DIRS =>
+      Some({
+        key: API_DESCRIBE_LOG_DIRS,
+        name: "DescribeLogDirs",
+        min: 2,
+        max: 5,
+      })
+    API_ELECT_LEADERS =>
+      Some({ key: API_ELECT_LEADERS, name: "ElectLeaders", min: 2, max: 2, })
+    // v1 toggles AllowReplicationFactorChange; both shapes are decoded.
+    API_ALTER_PARTITION_REASSIGNMENTS =>
+      Some({
+        key: API_ALTER_PARTITION_REASSIGNMENTS,
+        name: "AlterPartitionReassignments",
+        min: 0,
+        max: 1,
+      })
+    API_LIST_PARTITION_REASSIGNMENTS =>
+      Some({
+        key: API_LIST_PARTITION_REASSIGNMENTS,
+        name: "ListPartitionReassignments",
+        min: 0,
+        max: 0,
+      })
+    // v1 adds endpoint_type (KIP-919), v2 fenced brokers (KIP-1073).
+    API_DESCRIBE_CLUSTER =>
+      Some({
+        key: API_DESCRIBE_CLUSTER,
+        name: "DescribeCluster",
+        min: 0,
+        max: 2,
+      })
+    API_UNREGISTER_BROKER =>
+      Some({
+        key: API_UNREGISTER_BROKER,
+        name: "UnregisterBroker",
+        min: 0,
+        max: 0,
+      })
+    API_DESCRIBE_QUORUM =>
+      Some({ key: API_DESCRIBE_QUORUM, name: "DescribeQuorum", min: 2, max: 2, })
+    // v2 keeps the request (validate_only + upgrade_type) but drops the
+    // per-feature response results.
+    API_UPDATE_FEATURES =>
+      Some({ key: API_UPDATE_FEATURES, name: "UpdateFeatures", min: 2, max: 2, })
     API_API_VERSIONS =>
       Some({ key: API_API_VERSIONS, name: "ApiVersions", min: 3, max: 3, })
     API_SASL_HANDSHAKE =>

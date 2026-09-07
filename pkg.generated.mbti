@@ -16,6 +16,10 @@ pub const API_ADD_OFFSETS_TO_TXN : Int = 25
 
 pub const API_ADD_PARTITIONS_TO_TXN : Int = 24
 
+pub const API_ALTER_CONFIGS : Int = 33
+
+pub const API_ALTER_PARTITION_REASSIGNMENTS : Int = 45
+
 pub const API_API_VERSIONS : Int = 18
 
 pub const API_CONSUMER_GROUP_HEARTBEAT : Int = 68
@@ -28,7 +32,17 @@ pub const API_DELETE_RECORDS : Int = 21
 
 pub const API_DELETE_TOPICS : Int = 20
 
+pub const API_DESCRIBE_CLUSTER : Int = 60
+
+pub const API_DESCRIBE_CONFIGS : Int = 32
+
+pub const API_DESCRIBE_LOG_DIRS : Int = 35
+
+pub const API_DESCRIBE_QUORUM : Int = 55
+
 pub const API_DESCRIBE_TOPIC_PARTITIONS : Int = 75
+
+pub const API_ELECT_LEADERS : Int = 43
 
 pub const API_END_TXN : Int = 26
 
@@ -38,13 +52,19 @@ pub const API_FIND_COORDINATOR : Int = 10
 
 pub const API_HEARTBEAT : Int = 12
 
+pub const API_INCREMENTAL_ALTER_CONFIGS : Int = 44
+
 pub const API_INIT_PRODUCER_ID : Int = 22
 
 pub const API_JOIN_GROUP : Int = 11
 
 pub const API_LEAVE_GROUP : Int = 13
 
+pub const API_LIST_CONFIG_RESOURCES : Int = 74
+
 pub const API_LIST_OFFSETS : Int = 2
+
+pub const API_LIST_PARTITION_REASSIGNMENTS : Int = 46
 
 pub const API_METADATA : Int = 3
 
@@ -66,9 +86,47 @@ pub const API_SYNC_GROUP : Int = 14
 
 pub const API_TXN_OFFSET_COMMIT : Int = 28
 
+pub const API_UNREGISTER_BROKER : Int = 64
+
+pub const API_UPDATE_FEATURES : Int = 57
+
+pub const CONFIG_OP_APPEND : Int = 2
+
+pub const CONFIG_OP_DELETE : Int = 1
+
+pub const CONFIG_OP_SET : Int = 0
+
+pub const CONFIG_OP_SUBTRACT : Int = 3
+
+pub const CONFIG_RESOURCE_BROKER : Int = 4
+
+pub const CONFIG_RESOURCE_BROKER_LOGGER : Int = 8
+
+pub const CONFIG_RESOURCE_CLIENT_METRICS : Int = 16
+
+pub const CONFIG_RESOURCE_GROUP : Int = 32
+
+pub const CONFIG_RESOURCE_TOPIC : Int = 2
+
+pub const CONFIG_RESOURCE_UNKNOWN : Int = 0
+
 pub const CONSUMER_PROTOCOL_ASSIGNMENT_VERSION : Int = 0
 
 pub const CONSUMER_PROTOCOL_SUBSCRIPTION_VERSION : Int = 0
+
+pub const ELECTION_PREFERRED : Int = 0
+
+pub const ELECTION_UNCLEAN : Int = 1
+
+pub const ENDPOINT_TYPE_BROKERS : Int = 1
+
+pub const ENDPOINT_TYPE_CONTROLLERS : Int = 2
+
+pub const FEATURE_SAFE_DOWNGRADE : Int = 2
+
+pub const FEATURE_UNSAFE_DOWNGRADE : Int = 3
+
+pub const FEATURE_UPGRADE : Int = 1
 
 pub const FETCH_FULL_EPOCH : Int = 0
 
@@ -100,6 +158,10 @@ pub fn decode_add_offsets_to_txn_response(@buf.Decoder) -> (Int, Int) raise
 
 pub fn decode_add_partitions_to_txn_response(@buf.Decoder) -> (Array[TxnPartitionResult], Int) raise
 
+pub fn decode_alter_configs_response(@buf.Decoder) -> (Array[AlterConfigsResult], Int) raise
+
+pub fn decode_alter_partition_reassignments_response(Int, @buf.Decoder) -> (AdminReassignmentResult, Int) raise
+
 pub fn decode_api_versions_response(@buf.Decoder) -> (BrokerVersions, Int) raise
 
 pub fn decode_consumer_group_heartbeat_response(@buf.Decoder) -> (ConsumerGroupHeartbeatResult, Int) raise
@@ -116,7 +178,17 @@ pub fn decode_delete_records_response(@buf.Decoder) -> (Array[DeleteRecordsResul
 
 pub fn decode_delete_topics_response(@buf.Decoder) -> (Array[DeleteTopicsResult], Int) raise
 
+pub fn decode_describe_cluster_response(Int, @buf.Decoder) -> (AdminClusterDescription, Int) raise
+
+pub fn decode_describe_configs_response(@buf.Decoder) -> (Array[AdminConfigsResult], Int) raise
+
+pub fn decode_describe_log_dirs_response(Int, @buf.Decoder) -> (AdminLogDirs, Int) raise
+
+pub fn decode_describe_quorum_response(@buf.Decoder) -> AdminQuorumDescription raise
+
 pub fn decode_describe_topic_partitions_response(@buf.Decoder) -> (DescribeTopicPartitions, Int) raise
+
+pub fn decode_elect_leaders_response(@buf.Decoder) -> (AdminElectionResult, Int) raise
 
 pub fn decode_end_txn_response(@buf.Decoder) -> (EndTxnResult, Int) raise
 
@@ -126,13 +198,19 @@ pub fn decode_find_coordinator_response(@buf.Decoder) -> (Array[CoordinatorInfo]
 
 pub fn decode_heartbeat_response(@buf.Decoder) -> (Int, Int) raise
 
+pub fn decode_incremental_alter_configs_response(@buf.Decoder) -> (Array[AlterConfigsResult], Int) raise
+
 pub fn decode_init_producer_id_response(@buf.Decoder) -> (InitProducerIdResult, Int) raise
 
 pub fn decode_join_group_response(@buf.Decoder) -> (JoinGroupResult, Int) raise
 
 pub fn decode_leave_group_response(@buf.Decoder) -> (Int, Array[LeaveGroupMemberResult], Int) raise
 
+pub fn decode_list_config_resources_response(Int, @buf.Decoder) -> (ListConfigResourcesResult, Int) raise
+
 pub fn decode_list_offsets_response(@buf.Decoder) -> (Map[Int, Int64], Int) raise
+
+pub fn decode_list_partition_reassignments_response(@buf.Decoder) -> (AdminOngoingReassignments, Int) raise
 
 pub fn decode_metadata_response(Int, @buf.Decoder) -> (Metadata, Int) raise
 
@@ -160,11 +238,19 @@ pub fn decode_sync_group_response(@buf.Decoder) -> (SyncGroupResult, Int) raise
 
 pub fn decode_txn_offset_commit_response(@buf.Decoder) -> (Array[TxnPartitionResult], Int) raise
 
+pub fn decode_unregister_broker_response(@buf.Decoder) -> (UnregisterBrokerResult, Int) raise
+
+pub fn decode_update_features_response(@buf.Decoder) -> (AdminUpdateFeaturesResult, Int) raise
+
 pub fn driver_api_range(Int) -> ApiRange?
 
 pub fn encode_add_offsets_to_txn_request(String, Int64, Int, String) -> Bytes
 
 pub fn encode_add_partitions_to_txn_request(String, Int64, Int, Array[(String, Array[Int])]) -> Bytes
+
+pub fn encode_alter_configs_request(Array[SettableConfigResource], Bool) -> Bytes
+
+pub fn encode_alter_partition_reassignments_request(Array[ReassignableTopic], Int, Bool, Int) -> Bytes
 
 pub fn encode_api_versions_request() -> Bytes
 
@@ -182,7 +268,17 @@ pub fn encode_delete_records_request(Array[(String, Array[(Int, Int64)])], Int) 
 
 pub fn encode_delete_topics_request(Array[String], Array[Uuid], Int) -> Bytes
 
+pub fn encode_describe_cluster_request(Bool, Bool, Int) -> Bytes
+
+pub fn encode_describe_configs_request(Array[ConfigResourceKey]) -> Bytes
+
+pub fn encode_describe_log_dirs_request(Array[(String, Array[Int])]?, Int) -> Bytes
+
+pub fn encode_describe_quorum_request(Array[(String, Array[Int])]) -> Bytes
+
 pub fn encode_describe_topic_partitions_request(Array[String], Int, cursor? : TopicPartitionCursor?) -> Bytes
+
+pub fn encode_elect_leaders_request(Int, Array[(String, Array[Int])]?, Int) -> Bytes
 
 pub fn encode_end_txn_request(String, Int64, Int, Bool) -> Bytes
 
@@ -192,13 +288,19 @@ pub fn encode_find_coordinator_request(Array[String], CoordinatorType) -> Bytes
 
 pub fn encode_heartbeat_request(String, Int, String, group_instance_id? : String?) -> Bytes
 
+pub fn encode_incremental_alter_configs_request(Array[AlterableConfigResource], Bool) -> Bytes
+
 pub fn encode_init_producer_id_request(String?, Int, Int64, Int) -> Bytes
 
 pub fn encode_join_group_request(String, Int, Int, String, group_instance_id? : String?, protocols~ : Array[JoinGroupProtocol]) -> Bytes
 
 pub fn encode_leave_group_request(String, String, group_instance_id? : String?) -> Bytes
 
+pub fn encode_list_config_resources_request(Array[Int], Int) -> Bytes
+
 pub fn encode_list_offsets_request(Int, String, Array[PartitionInfo], Int64, timeout_ms? : Int) -> Bytes raise
+
+pub fn encode_list_partition_reassignments_request(Array[(String, Array[Int])]?, Int) -> Bytes
 
 pub fn encode_metadata_request(Array[String]?) -> Bytes
 
@@ -225,6 +327,10 @@ pub fn encode_sasl_handshake_request(String) -> Bytes
 pub fn encode_sync_group_request(String, Int, String, group_instance_id? : String?, protocol_name? : String, assignments~ : Array[SyncGroupAssignment]) -> Bytes
 
 pub fn encode_txn_offset_commit_request(String, String, Int64, Int, Int, String, Array[(String, Array[TxnOffset])]) -> Bytes
+
+pub fn encode_unregister_broker_request(Int) -> Bytes
+
+pub fn encode_update_features_request(Array[FeatureUpdate], Int, Bool) -> Bytes
 
 pub fn error_name(Int) -> String
 
@@ -281,6 +387,8 @@ pub struct Admin {
   mut closed : Bool
   // private fields
 }
+pub async fn Admin::alter_configs(Self, Array[SettableConfigResource], validate_only? : Bool) -> Array[AlterConfigsResult]
+pub async fn Admin::alter_partition_reassignments(Self, Array[ReassignableTopic], allow_replication_factor_change? : Bool) -> AdminReassignmentResult
 pub fn Admin::close(Self) -> Unit
 pub async fn Admin::connect(group~ : @async.TaskGroup[Unit], host~ : String, port~ : Int) -> Self
 pub async fn Admin::connect_with_config(group~ : @async.TaskGroup[Unit], AdminConfig) -> Self
@@ -288,8 +396,36 @@ pub async fn Admin::create_partitions(Self, Array[CreatePartitionsSpec], validat
 pub async fn Admin::create_topics(Self, Array[CreatableTopic], validate_only? : Bool) -> Array[CreateTopicsResult]
 pub async fn Admin::delete_records(Self, Array[(String, Array[(Int, Int64)])]) -> Array[DeleteRecordsResult]
 pub async fn Admin::delete_topics(Self, Array[String], Array[Uuid]) -> Array[DeleteTopicsResult]
+pub async fn Admin::describe_cluster(Self, include_authorized_operations? : Bool, include_fenced_brokers? : Bool) -> AdminClusterDescription
+pub async fn Admin::describe_configs(Self, Array[ConfigResourceKey]) -> Array[AdminConfigsResult]
+pub async fn Admin::describe_log_dirs(Self, topics? : Array[(String, Array[Int])]?) -> AdminLogDirs
+pub async fn Admin::describe_quorum(Self, topic? : String, partition? : Int) -> AdminQuorumDescription
 pub async fn Admin::describe_topic_partitions(Self, Array[String]) -> Array[AdminTopicDescription]
+pub async fn Admin::elect_leaders(Self, Int, topic_partitions? : Array[(String, Array[Int])]?) -> AdminElectionResult
+pub async fn Admin::incremental_alter_configs(Self, Array[AlterableConfigResource], validate_only? : Bool) -> Array[AlterConfigsResult]
+pub async fn Admin::list_config_resources(Self, resource_types? : Array[Int]) -> ListConfigResourcesResult
+pub async fn Admin::list_partition_reassignments(Self, topics? : Array[(String, Array[Int])]?) -> AdminOngoingReassignments
 pub async fn Admin::offset_delete(Self, String, Array[(String, Array[Int])]) -> OffsetDeleteResult
+pub async fn Admin::unregister_broker(Self, Int) -> UnregisterBrokerResult
+pub async fn Admin::update_features(Self, Array[FeatureUpdate], validate_only? : Bool) -> AdminUpdateFeaturesResult
+
+pub(all) struct AdminClusterBroker {
+  node_id : Int
+  host : String
+  port : Int
+  rack : String?
+  is_fenced : Bool
+} derive(@debug.Debug)
+
+pub struct AdminClusterDescription {
+  error_code : Int
+  error_message : String?
+  endpoint_type : Int
+  cluster_id : String?
+  controller_id : Int
+  brokers : Array[AdminClusterBroker]
+  cluster_authorized_operations : Int
+} derive(@debug.Debug)
 
 pub struct AdminConfig {
   common : CommonConfig
@@ -297,11 +433,83 @@ pub struct AdminConfig {
 } derive(@debug.Debug)
 pub fn AdminConfig::new(Array[String], request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?, tls? : TlsClientOptions?, metadata_max_age_ms? : Int, admin_retries? : Int) -> Self raise
 
+pub(all) struct AdminConfigEntry {
+  name : String
+  value : String?
+  read_only : Bool
+  config_source : Int
+  is_sensitive : Bool
+  synonyms : Array[(String, String?, Int)]
+  config_type : Int
+  documentation : String?
+} derive(@debug.Debug)
+
+pub struct AdminConfigsResult {
+  error_code : Int
+  error_message : String?
+  resource_type : Int
+  resource_name : String
+  configs : Array[AdminConfigEntry]
+} derive(@debug.Debug)
+
+pub struct AdminElectionResult {
+  error_code : Int
+  results : Array[ElectLeadersTopicResult]
+} derive(@debug.Debug)
+
+pub struct AdminLogDirs {
+  error_code : Int
+  results : Array[LogDirResult]
+} derive(@debug.Debug)
+
+pub struct AdminOngoingReassignments {
+  error_code : Int
+  error_message : String?
+  topics : Array[(String, Array[OngoingPartitionReassignment])]
+} derive(@debug.Debug)
+
+pub struct AdminQuorumDescription {
+  error_code : Int
+  error_message : String?
+  topics : Array[QuorumTopicState]
+  nodes : Array[QuorumNode]
+} derive(@debug.Debug)
+
+pub struct AdminReassignmentResult {
+  error_code : Int
+  error_message : String?
+  responses : Array[(String, Array[ReassignablePartitionResponse])]
+} derive(@debug.Debug)
+
 pub struct AdminTopicDescription {
   name : String
   error_code : Int
   topic_id : Uuid
   partitions : Array[PartitionInfo]
+} derive(@debug.Debug)
+
+pub struct AdminUpdateFeaturesResult {
+  error_code : Int
+  error_message : String?
+} derive(@debug.Debug)
+
+pub struct AlterConfigsResult {
+  error_code : Int
+  error_message : String?
+  resource_type : Int
+  resource_name : String
+} derive(@debug.Debug)
+
+pub(all) struct AlterableConfig {
+  name : String
+  operation : Int
+  value : String?
+} derive(@debug.Debug)
+
+pub(all) struct AlterableConfigResource {
+  resource_type : Int
+  resource_name : String
+  configs : Array[AlterableConfig]
 } derive(@debug.Debug)
 
 pub(all) struct ApiRange {
@@ -362,6 +570,8 @@ pub struct BrokerConnection {
 }
 pub async fn BrokerConnection::add_offsets_to_txn(Self, String, Int64, Int, String, timeout_ms? : Int) -> Int
 pub async fn BrokerConnection::add_partitions_to_txn(Self, String, Int64, Int, Array[(String, Array[Int])], timeout_ms? : Int) -> Array[TxnPartitionResult]
+pub async fn BrokerConnection::alter_configs(Self, Array[SettableConfigResource], timeout_ms? : Int, validate_only? : Bool) -> Array[AlterConfigsResult]
+pub async fn BrokerConnection::alter_partition_reassignments(Self, Array[ReassignableTopic], timeout_ms? : Int, allow_replication_factor_change? : Bool) -> AdminReassignmentResult
 pub fn BrokerConnection::api_version(Self, Int, want? : Int?) -> Int raise
 pub async fn BrokerConnection::authenticate(Self, SaslConfig, timeout_ms? : Int) -> Unit
 pub fn BrokerConnection::close(Self) -> Unit
@@ -371,16 +581,24 @@ pub async fn BrokerConnection::create_partitions(Self, Array[CreatePartitionsSpe
 pub async fn BrokerConnection::create_topics(Self, Array[CreatableTopic], Int, validate_only? : Bool) -> Array[CreateTopicsResult]
 pub async fn BrokerConnection::delete_records(Self, Array[(String, Array[(Int, Int64)])], Int) -> Array[DeleteRecordsResult]
 pub async fn BrokerConnection::delete_topics(Self, Array[String], Array[Uuid], Int) -> Array[DeleteTopicsResult]
+pub async fn BrokerConnection::describe_cluster(Self, include_authorized_operations? : Bool, include_fenced_brokers? : Bool, timeout_ms? : Int) -> AdminClusterDescription
+pub async fn BrokerConnection::describe_configs(Self, Array[ConfigResourceKey], timeout_ms? : Int) -> Array[AdminConfigsResult]
+pub async fn BrokerConnection::describe_log_dirs(Self, topics? : Array[(String, Array[Int])]?, timeout_ms? : Int) -> AdminLogDirs
+pub async fn BrokerConnection::describe_quorum(Self, Array[(String, Array[Int])], timeout_ms? : Int) -> AdminQuorumDescription
 pub async fn BrokerConnection::describe_topic_partitions(Self, Array[String], response_partition_limit? : Int, cursor? : TopicPartitionCursor?, timeout_ms? : Int) -> DescribeTopicPartitions
+pub async fn BrokerConnection::elect_leaders(Self, Int, topic_partitions? : Array[(String, Array[Int])]?, timeout_ms? : Int) -> AdminElectionResult
 pub async fn BrokerConnection::end_txn(Self, String, Int64, Int, Bool, timeout_ms? : Int) -> EndTxnResult
 pub async fn BrokerConnection::fetch(Self, Array[FetchTopicReq], session~ : FetchSessionReq, max_wait_ms~ : Int, min_bytes? : Int, max_bytes? : Int, isolation_level? : Int, timeout_ms? : Int) -> FetchResult
 pub async fn BrokerConnection::fetch_metadata(Self, Array[String]?, timeout_ms? : Int) -> Metadata
 pub async fn BrokerConnection::find_coordinator(Self, Array[String], CoordinatorType, timeout_ms? : Int) -> Array[CoordinatorInfo]
 pub async fn BrokerConnection::group_heartbeat(Self, String, Int, String, group_instance_id? : String?, timeout_ms? : Int) -> Int
+pub async fn BrokerConnection::incremental_alter_configs(Self, Array[AlterableConfigResource], timeout_ms? : Int, validate_only? : Bool) -> Array[AlterConfigsResult]
 pub async fn BrokerConnection::init_producer_id(Self, transactional_id? : String?, transaction_timeout_ms? : Int, producer_id? : Int64, producer_epoch? : Int, timeout_ms? : Int) -> InitProducerIdResult
 pub async fn BrokerConnection::join_group(Self, String, Int, Int, String, group_instance_id? : String?, protocols~ : Array[JoinGroupProtocol], timeout_ms? : Int) -> JoinGroupResult
 pub async fn BrokerConnection::leave_group(Self, String, String, group_instance_id? : String?, timeout_ms? : Int) -> Int
+pub async fn BrokerConnection::list_config_resources(Self, resource_types? : Array[Int], timeout_ms? : Int) -> ListConfigResourcesResult
 pub async fn BrokerConnection::list_offsets(Self, String, Array[PartitionInfo], Int64, timeout_ms? : Int) -> Map[Int, Int64]
+pub async fn BrokerConnection::list_partition_reassignments(Self, topics? : Array[(String, Array[Int])]?, timeout_ms? : Int) -> AdminOngoingReassignments
 pub async fn BrokerConnection::negotiate_api_versions(Self, timeout_ms? : Int) -> Unit
 pub fn BrokerConnection::note_throttle(Self, Int) -> Unit
 pub async fn BrokerConnection::offset_commit(Self, String, Int, String, group_instance_id? : String?, topics~ : Array[CommitTopic], timeout_ms? : Int) -> Array[OffsetCommitPartitionResult]
@@ -394,6 +612,8 @@ pub async fn BrokerConnection::send_only(Self, Int, Int, Bytes) -> Unit
 pub async fn BrokerConnection::sync_group(Self, String, Int, String, group_instance_id? : String?, protocol_name? : String, assignments~ : Array[SyncGroupAssignment], timeout_ms? : Int) -> SyncGroupResult
 pub fn BrokerConnection::throttle_total_ms(Self) -> Int64
 pub async fn BrokerConnection::txn_offset_commit(Self, String, String, Int64, Int, Array[(String, Array[TxnOffset])], timeout_ms? : Int) -> Array[TxnPartitionResult]
+pub async fn BrokerConnection::unregister_broker(Self, Int, timeout_ms? : Int) -> UnregisterBrokerResult
+pub async fn BrokerConnection::update_features(Self, Array[FeatureUpdate], timeout_ms? : Int, validate_only? : Bool) -> AdminUpdateFeaturesResult
 
 pub struct BrokerInfo {
   node_id : Int
@@ -479,6 +699,17 @@ pub struct CommonConfig {
 pub fn CommonConfig::bootstrap_addresses(Self) -> Array[HostPort] raise ProtocolError
 pub fn CommonConfig::new(Array[String], request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?, tls? : TlsClientOptions?, metadata_max_age_ms? : Int) -> Self raise
 pub fn CommonConfig::validate(Self) -> Unit raise ProtocolError
+
+pub(all) struct ConfigResourceKey {
+  resource_type : Int
+  resource_name : String
+  config_keys : Array[String]?
+} derive(@debug.Debug)
+
+pub(all) struct ConfigResourceListing {
+  resource_name : String
+  resource_type : Int
+} derive(@debug.Debug)
 
 pub struct Consumer {
   topic : String
@@ -639,6 +870,17 @@ pub struct DescribeTopicPartitions {
   next_cursor : TopicPartitionCursor?
 }
 
+pub struct ElectLeadersPartitionResult {
+  partition : Int
+  error_code : Int
+  error_message : String?
+} derive(@debug.Debug)
+
+pub struct ElectLeadersTopicResult {
+  topic : String
+  partitions : Array[ElectLeadersPartitionResult]
+} derive(@debug.Debug)
+
 pub struct EndTxnResult {
   error_code : Int
   producer_id : Int64
@@ -650,6 +892,12 @@ pub struct EpochEndOffset {
   error_code : Int
   leader_epoch : Int
   end_offset : Int64
+} derive(@debug.Debug)
+
+pub(all) struct FeatureUpdate {
+  feature : String
+  max_version_level : Int
+  upgrade_type : Int
 } derive(@debug.Debug)
 
 pub(all) struct FetchOffsetTopic {
@@ -774,6 +1022,32 @@ pub struct LeaveGroupMemberResult {
   error_code : Int
 } derive(@debug.Debug)
 
+pub struct ListConfigResourcesResult {
+  error_code : Int
+  resources : Array[ConfigResourceListing]
+} derive(@debug.Debug)
+
+pub(all) struct LogDirPartition {
+  partition_index : Int
+  partition_size : Int64
+  offset_lag : Int64
+  is_future : Bool
+} derive(@debug.Debug)
+
+pub struct LogDirResult {
+  error_code : Int
+  log_dir : String
+  topics : Array[LogDirTopic]
+  total_bytes : Int64
+  usable_bytes : Int64
+  is_cordoned : Bool
+} derive(@debug.Debug)
+
+pub(all) struct LogDirTopic {
+  name : String
+  partitions : Array[LogDirPartition]
+} derive(@debug.Debug)
+
 pub struct Metadata {
   brokers : Map[Int, BrokerInfo]
   controller_id : Int
@@ -800,6 +1074,13 @@ pub struct OffsetFetchGroupResult {
   group_id : String
   error_code : Int
   partitions : Array[CommittedOffset]
+} derive(@debug.Debug)
+
+pub struct OngoingPartitionReassignment {
+  partition_index : Int
+  replicas : Array[Int]
+  adding_replicas : Array[Int]
+  removing_replicas : Array[Int]
 } derive(@debug.Debug)
 
 pub struct PartitionInfo {
@@ -885,6 +1166,51 @@ pub struct ProducerMetrics {
   batches_sent : Int
   batches_failed : Int
   throttle_time_ms : Int64
+} derive(@debug.Debug)
+
+pub struct QuorumNode {
+  node_id : Int
+  listeners : Array[(String, String, Int)]
+} derive(@debug.Debug)
+
+pub struct QuorumPartitionState {
+  partition_index : Int
+  error_code : Int
+  error_message : String?
+  leader_id : Int
+  leader_epoch : Int
+  high_watermark : Int64
+  current_voters : Array[QuorumReplicaState]
+  observers : Array[QuorumReplicaState]
+} derive(@debug.Debug)
+
+pub(all) struct QuorumReplicaState {
+  replica_id : Int
+  replica_directory_id : Uuid
+  log_end_offset : Int64
+  last_fetch_timestamp : Int64
+  last_caught_up_timestamp : Int64
+} derive(@debug.Debug)
+
+pub struct QuorumTopicState {
+  topic_name : String
+  partitions : Array[QuorumPartitionState]
+} derive(@debug.Debug)
+
+pub(all) struct ReassignablePartition {
+  partition_index : Int
+  replicas : Array[Int]?
+} derive(@debug.Debug)
+
+pub struct ReassignablePartitionResponse {
+  partition_index : Int
+  error_code : Int
+  error_message : String?
+} derive(@debug.Debug)
+
+pub(all) struct ReassignableTopic {
+  name : String
+  partitions : Array[ReassignablePartition]
 } derive(@debug.Debug)
 
 pub struct RebalanceListener {
@@ -988,6 +1314,17 @@ pub(all) enum SendResult {
   Failed(String)
 } derive(@debug.Debug)
 
+pub(all) struct SettableConfig {
+  name : String
+  value : String?
+} derive(@debug.Debug)
+
+pub(all) struct SettableConfigResource {
+  resource_type : Int
+  resource_name : String
+  configs : Array[SettableConfig]
+} derive(@debug.Debug)
+
 pub(all) enum StartFrom {
   Earliest
   Latest
@@ -1033,6 +1370,11 @@ pub struct TxnPartitionResult {
   topic : String
   partition : Int
   error_code : Int
+} derive(@debug.Debug)
+
+pub struct UnregisterBrokerResult {
+  error_code : Int
+  error_message : String?
 } derive(@debug.Debug)
 
 pub struct Uuid {

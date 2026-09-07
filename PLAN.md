@@ -239,7 +239,7 @@ P6 = share/telemetry.
 | ListTransactions | 2 | v2 | P5 | |
 | ConsumerGroupHeartbeat | 1 | v1 (adds `subscribed_topic_regex`) | P4 | KIP-848 — primary group protocol |
 | ConsumerGroupDescribe | 1 | v1 | P4 | |
-| ListConfigResources | 0 | v0 | P5 | |
+| ListConfigResources | 1 | v0 + v1 (type filter, KIP-1142) | P5 | table said max 0; the 4.3 schema has v0-v1 |
 | ShareGroupHeartbeat | 1 | v1 | P6 | KIP-932 |
 | GetTelemetrySubscriptions / PushTelemetry | 0 | v0 | P6 | optional (KIP-714) |
 | ShareGroupDescribe | 1 | v1 | P6 | |
@@ -765,12 +765,31 @@ rejoins); read_committed skips aborted txns (producer txn test from P3).
       the set and uses header-v0 framing both directions. E2E against
       the fake broker: full create → grow → truncate → offset-delete →
       delete-by-name → delete-by-id lifecycle.
-- [ ] Cluster/config: DescribeCluster v2 (brokers, controller id, cluster id,
-      `endpoint_type`), DescribeConfigs v4 + IncrementalAlterConfigs v1 +
-      AlterConfigs v2, ListConfigResources v0, DescribeLogDirs v5
-      (`is_cordoned`), ElectLeaders v2, reassignments
-      (Alter/ListPartitionReassignments), UnregisterBroker v0,
-      DescribeQuorum v2, UpdateFeatures v2.
+- [x] Cluster/config: DONE (this commit, root scope `admin_cluster.mbt`):
+      DescribeCluster v0-v2 (brokers with rack + fenced flags, controller
+      id, cluster id, `endpoint_type`, authorized-operations bitfield),
+      DescribeConfigs v4 (sources, synonyms, types, docs),
+      IncrementalAlterConfigs v1 (set/delete/append/subtract) +
+      AlterConfigs v2 (legacy full-replace), ListConfigResources v0-v1
+      (v1 adds the resource-type filter, KIP-1142), DescribeLogDirs
+      v2-v5 (`is_cordoned` at v5, KIP-1066; volume total/usable bytes at
+      v4+), ElectLeaders v2 (preferred/unclean, nullable topic list),
+      AlterPartitionReassignments v0-v1 (v1 toggles replication-factor
+      changes) + ListPartitionReassignments v0, UnregisterBroker v0,
+      DescribeQuorum v2 (voters/observers with log-end offsets and
+      fetch/caught-up timestamps, KIP-853 node/listener map; the one
+      admin API without a throttle field), and UpdateFeatures v2
+      (upgrade/safe/unsafe-downgrade types, validate-only; v2 dropped
+      per-feature results). Keys and enum byte values (config resource
+      types, config ops, election types, endpoint types, upgrade types)
+      pinned from the 4.3 schemas and `ConfigResource.java`/
+      `AlterConfigOp.java`/`ElectionType.java`. UnregisterBroker and
+      UpdateFeatures route through the controller connection; the rest
+      take the any-broker control connection. Per-item error codes
+      travel as values under the retry policy. E2E against the fake
+      broker plus codec tests covering the version-dependent shapes the
+      fake does not serve (DescribeCluster v0, DescribeLogDirs v2-v5,
+      reassignments v0, ListConfigResources v0).
 - [ ] Groups/consumers: DescribeGroups v6 (incl. 848 members),
       ListGroups v5 (state/type filters), DeleteGroups v2;
       consumers-of / DescribeProducers v0, DescribeTransactions v0,
