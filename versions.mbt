@@ -45,6 +45,12 @@ pub const API_DESCRIBE_GROUPS : Int = 15
 pub const API_CONSUMER_GROUP_DESCRIBE : Int = 69
 
 ///|
+pub const API_LIST_GROUPS : Int = 16
+
+///|
+pub const API_DELETE_GROUPS : Int = 42
+
+///|
 pub const API_CREATE_TOPICS : Int = 19
 
 ///|
@@ -82,6 +88,15 @@ pub const API_END_TXN : Int = 26
 
 ///|
 pub const API_TXN_OFFSET_COMMIT : Int = 28
+
+///|
+pub const API_DESCRIBE_PRODUCERS : Int = 61
+
+///|
+pub const API_DESCRIBE_TRANSACTIONS : Int = 65
+
+///|
+pub const API_LIST_TRANSACTIONS : Int = 66
 
 ///|
 pub const API_DESCRIBE_TOPIC_PARTITIONS : Int = 75
@@ -224,6 +239,16 @@ pub fn driver_api_range(api_key : Int) -> ApiRange? {
         min: 1,
         max: 1,
       })
+    // ListGroups v5 is the 4.3 ceiling and 4.0 brokers already advertise
+    // 0-5, so one shape covers every supported broker. v3 is the first
+    // flexible version, v4 adds the per-group state filter and GroupState
+    // field, v5 the type filter and GroupType (KIP-848 group types).
+    API_LIST_GROUPS =>
+      Some({ key: API_LIST_GROUPS, name: "ListGroups", min: 5, max: 5, })
+    // DeleteGroups v2 is both the first flexible version and the ceiling;
+    // 4.0 brokers advertise 0-2.
+    API_DELETE_GROUPS =>
+      Some({ key: API_DELETE_GROUPS, name: "DeleteGroups", min: 2, max: 2, })
     // Topic admin ops; v7 echoes topic ids, DeleteTopics v6 deletes by
     // id (topic-id-first, KIP-516).
     API_CREATE_TOPICS =>
@@ -285,6 +310,33 @@ pub fn driver_api_range(api_key : Int) -> ApiRange? {
         name: "TxnOffsetCommit",
         min: 4,
         max: 4,
+      })
+    // Transaction introspection (KIP-890 admin side). Both are v0-only and
+    // flexible from v0.
+    API_DESCRIBE_PRODUCERS =>
+      Some({
+        key: API_DESCRIBE_PRODUCERS,
+        name: "DescribeProducers",
+        min: 0,
+        max: 0,
+      })
+    API_DESCRIBE_TRANSACTIONS =>
+      Some({
+        key: API_DESCRIBE_TRANSACTIONS,
+        name: "DescribeTransactions",
+        min: 0,
+        max: 0,
+      })
+    // ListTransactions spans two versions: v2 adds the transactional-id
+    // pattern filter, but 4.0 brokers advertise only 0-1, so the floor is
+    // v1 (the duration filter) to keep every supported broker reachable.
+    // The response is identical across 0-2; only the request grows.
+    API_LIST_TRANSACTIONS =>
+      Some({
+        key: API_LIST_TRANSACTIONS,
+        name: "ListTransactions",
+        min: 1,
+        max: 2,
       })
     API_DESCRIBE_TOPIC_PARTITIONS =>
       Some({

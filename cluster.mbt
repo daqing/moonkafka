@@ -256,6 +256,21 @@ pub fn ClusterClient::topics_snapshot(self : ClusterClient) -> Array[String] {
 }
 
 ///|
+/// Node ids of every broker in the cached metadata snapshot, sorted so a
+/// fan-out visits them in a stable order. For the admin calls a broker
+/// answers only from the state it holds itself — ListGroups and
+/// ListTransactions — which the client must send to all brokers and merge.
+/// Empty before the first refresh_metadata.
+pub fn ClusterClient::broker_ids(self : ClusterClient) -> Array[Int] {
+  let out : Array[Int] = []
+  for node_id, _ in self.brokers {
+    out.push(node_id)
+  }
+  out.sort()
+  out
+}
+
+///|
 /// The cached controller node id (-1 before the first metadata
 /// refresh) for controller-routed admin ops.
 pub fn ClusterClient::controller(self : ClusterClient) -> Int {

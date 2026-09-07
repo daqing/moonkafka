@@ -104,6 +104,8 @@ pub const API_CREATE_TOPICS : Int = 19
 
 pub const API_DELETE_ACLS : Int = 31
 
+pub const API_DELETE_GROUPS : Int = 42
+
 pub const API_DELETE_RECORDS : Int = 21
 
 pub const API_DELETE_TOPICS : Int = 20
@@ -120,9 +122,13 @@ pub const API_DESCRIBE_GROUPS : Int = 15
 
 pub const API_DESCRIBE_LOG_DIRS : Int = 35
 
+pub const API_DESCRIBE_PRODUCERS : Int = 61
+
 pub const API_DESCRIBE_QUORUM : Int = 55
 
 pub const API_DESCRIBE_TOPIC_PARTITIONS : Int = 75
+
+pub const API_DESCRIBE_TRANSACTIONS : Int = 65
 
 pub const API_DESCRIBE_USER_SCRAM_CREDENTIALS : Int = 50
 
@@ -146,9 +152,13 @@ pub const API_LEAVE_GROUP : Int = 13
 
 pub const API_LIST_CONFIG_RESOURCES : Int = 74
 
+pub const API_LIST_GROUPS : Int = 16
+
 pub const API_LIST_OFFSETS : Int = 2
 
 pub const API_LIST_PARTITION_REASSIGNMENTS : Int = 46
+
+pub const API_LIST_TRANSACTIONS : Int = 66
 
 pub const API_METADATA : Int = 3
 
@@ -294,6 +304,8 @@ pub fn decode_create_topics_response(@buf.Decoder) -> (Array[CreateTopicsResult]
 
 pub fn decode_delete_acls_response(@buf.Decoder) -> (Array[DeleteAclsFilterResult], Int) raise
 
+pub fn decode_delete_groups_response(@buf.Decoder) -> (Array[AdminDeletedGroup], Int) raise
+
 pub fn decode_delete_records_response(@buf.Decoder) -> (Array[DeleteRecordsResult], Int) raise
 
 pub fn decode_delete_topics_response(@buf.Decoder) -> (Array[DeleteTopicsResult], Int) raise
@@ -310,9 +322,13 @@ pub fn decode_describe_groups_response(@buf.Decoder) -> (Array[AdminGroupDescrip
 
 pub fn decode_describe_log_dirs_response(Int, @buf.Decoder) -> (AdminLogDirs, Int) raise
 
+pub fn decode_describe_producers_response(@buf.Decoder) -> (Array[AdminDescribeProducersTopic], Int) raise
+
 pub fn decode_describe_quorum_response(@buf.Decoder) -> AdminQuorumDescription raise
 
 pub fn decode_describe_topic_partitions_response(@buf.Decoder) -> (DescribeTopicPartitions, Int) raise
+
+pub fn decode_describe_transactions_response(@buf.Decoder) -> (Array[AdminDescribeTransaction], Int) raise
 
 pub fn decode_describe_user_scram_response(@buf.Decoder) -> (DescribeUserScramResult, Int) raise
 
@@ -336,9 +352,13 @@ pub fn decode_leave_group_response(@buf.Decoder) -> (Int, Array[LeaveGroupMember
 
 pub fn decode_list_config_resources_response(Int, @buf.Decoder) -> (ListConfigResourcesResult, Int) raise
 
+pub fn decode_list_groups_response(@buf.Decoder) -> (AdminListGroupsResult, Int) raise
+
 pub fn decode_list_offsets_response(@buf.Decoder) -> (Map[Int, Int64], Int) raise
 
 pub fn decode_list_partition_reassignments_response(@buf.Decoder) -> (AdminOngoingReassignments, Int) raise
+
+pub fn decode_list_transactions_response(@buf.Decoder) -> (AdminListTransactionsResult, Int) raise
 
 pub fn decode_metadata_response(Int, @buf.Decoder) -> (Metadata, Int) raise
 
@@ -402,6 +422,8 @@ pub fn encode_create_topics_request(Array[CreatableTopic], Int, Bool) -> Bytes
 
 pub fn encode_delete_acls_request(Array[AclFilter]) -> Bytes
 
+pub fn encode_delete_groups_request(Array[String]) -> Bytes
+
 pub fn encode_delete_records_request(Array[(String, Array[(Int, Int64)])], Int) -> Bytes
 
 pub fn encode_delete_topics_request(Array[String], Array[Uuid], Int) -> Bytes
@@ -418,9 +440,13 @@ pub fn encode_describe_groups_request(Array[String], Bool) -> Bytes
 
 pub fn encode_describe_log_dirs_request(Array[(String, Array[Int])]?, Int) -> Bytes
 
+pub fn encode_describe_producers_request(Array[(String, Array[Int])]) -> Bytes
+
 pub fn encode_describe_quorum_request(Array[(String, Array[Int])]) -> Bytes
 
 pub fn encode_describe_topic_partitions_request(Array[String], Int, cursor? : TopicPartitionCursor?) -> Bytes
+
+pub fn encode_describe_transactions_request(Array[String]) -> Bytes
 
 pub fn encode_describe_user_scram_request(Array[String]?) -> Bytes
 
@@ -444,9 +470,13 @@ pub fn encode_leave_group_request(String, String, group_instance_id? : String?) 
 
 pub fn encode_list_config_resources_request(Array[Int], Int) -> Bytes
 
+pub fn encode_list_groups_request(Array[String], Array[String]) -> Bytes
+
 pub fn encode_list_offsets_request(Int, String, Array[PartitionInfo], Int64, timeout_ms? : Int) -> Bytes raise
 
 pub fn encode_list_partition_reassignments_request(Array[(String, Array[Int])]?, Int) -> Bytes
+
+pub fn encode_list_transactions_request(Int, Array[String], Array[Int64], Int64, String?) -> Bytes
 
 pub fn encode_metadata_request(Array[String]?) -> Bytes
 
@@ -581,6 +611,7 @@ pub async fn Admin::create_acls(Self, Array[AclCreation]) -> Array[CreateAclsRes
 pub async fn Admin::create_partitions(Self, Array[CreatePartitionsSpec], validate_only? : Bool) -> Array[CreatePartitionsResult]
 pub async fn Admin::create_topics(Self, Array[CreatableTopic], validate_only? : Bool) -> Array[CreateTopicsResult]
 pub async fn Admin::delete_acls(Self, Array[AclFilter]) -> Array[DeleteAclsFilterResult]
+pub async fn Admin::delete_groups(Self, Array[String]) -> Array[AdminDeletedGroup]
 pub async fn Admin::delete_records(Self, Array[(String, Array[(Int, Int64)])]) -> Array[DeleteRecordsResult]
 pub async fn Admin::delete_topics(Self, Array[String], Array[Uuid]) -> Array[DeleteTopicsResult]
 pub async fn Admin::describe_acls(Self, AclFilter) -> DescribeAclsResult
@@ -590,16 +621,29 @@ pub async fn Admin::describe_configs(Self, Array[ConfigResourceKey]) -> Array[Ad
 pub async fn Admin::describe_consumer_groups(Self, Array[String], include_authorized_operations? : Bool) -> Array[AdminConsumerGroupDescription]
 pub async fn Admin::describe_groups(Self, Array[String], include_authorized_operations? : Bool) -> Array[AdminGroupDescription]
 pub async fn Admin::describe_log_dirs(Self, topics? : Array[(String, Array[Int])]?) -> AdminLogDirs
+pub async fn Admin::describe_producers(Self, Array[(String, Array[Int])]) -> Array[AdminDescribeProducersTopic]
 pub async fn Admin::describe_quorum(Self, topic? : String, partition? : Int) -> AdminQuorumDescription
 pub async fn Admin::describe_topic_partitions(Self, Array[String]) -> Array[AdminTopicDescription]
+pub async fn Admin::describe_transactions(Self, Array[String]) -> Array[AdminDescribeTransaction]
 pub async fn Admin::describe_user_scram(Self, Array[String]?) -> DescribeUserScramResult
 pub async fn Admin::elect_leaders(Self, Int, topic_partitions? : Array[(String, Array[Int])]?) -> AdminElectionResult
 pub async fn Admin::incremental_alter_configs(Self, Array[AlterableConfigResource], validate_only? : Bool) -> Array[AlterConfigsResult]
 pub async fn Admin::list_config_resources(Self, resource_types? : Array[Int]) -> ListConfigResourcesResult
+pub async fn Admin::list_groups(Self, states_filter? : Array[String], types_filter? : Array[String]) -> AdminListGroupsResult
 pub async fn Admin::list_partition_reassignments(Self, topics? : Array[(String, Array[Int])]?) -> AdminOngoingReassignments
+pub async fn Admin::list_transactions(Self, state_filters? : Array[String], producer_id_filters? : Array[Int64], duration_filter? : Int64, transactional_id_pattern? : String?) -> AdminListTransactionsResult
 pub async fn Admin::offset_delete(Self, String, Array[(String, Array[Int])]) -> OffsetDeleteResult
 pub async fn Admin::unregister_broker(Self, Int) -> UnregisterBrokerResult
 pub async fn Admin::update_features(Self, Array[FeatureUpdate], validate_only? : Bool) -> AdminUpdateFeaturesResult
+
+pub struct AdminActiveProducer {
+  producer_id : Int64
+  producer_epoch : Int
+  last_sequence : Int
+  last_timestamp : Int64
+  coordinator_epoch : Int
+  current_txn_start_offset : Int64
+} derive(@debug.Debug)
 
 pub struct AdminAssignedTopicPartitions {
   topic_id : Uuid
@@ -676,6 +720,34 @@ pub struct AdminConsumerGroupMember {
   member_type : Int
 } derive(@debug.Debug)
 
+pub struct AdminDeletedGroup {
+  group_id : String
+  error_code : Int
+} derive(@debug.Debug)
+
+pub struct AdminDescribeProducerPartition {
+  partition_index : Int
+  error_code : Int
+  error_message : String?
+  active_producers : Array[AdminActiveProducer]
+} derive(@debug.Debug)
+
+pub struct AdminDescribeProducersTopic {
+  name : String
+  partitions : Array[AdminDescribeProducerPartition]
+} derive(@debug.Debug)
+
+pub struct AdminDescribeTransaction {
+  error_code : Int
+  transactional_id : String
+  transaction_state : String
+  transaction_timeout_ms : Int
+  transaction_start_time_ms : Int64
+  producer_id : Int64
+  producer_epoch : Int
+  topics : Array[AdminTransactionTopic]
+} derive(@debug.Debug)
+
 pub struct AdminElectionResult {
   error_code : Int
   results : Array[ElectLeadersTopicResult]
@@ -703,6 +775,30 @@ pub struct AdminGroupMember {
 } derive(@debug.Debug)
 pub fn AdminGroupMember::assigned_partitions(Self) -> Array[(String, Array[Int])]
 pub fn AdminGroupMember::subscribed_topics(Self) -> Array[String]
+
+pub struct AdminListGroupsResult {
+  error_code : Int
+  groups : Array[AdminListedGroup]
+} derive(@debug.Debug)
+
+pub struct AdminListTransactionsResult {
+  error_code : Int
+  unknown_state_filters : Array[String]
+  transactions : Array[AdminListedTransaction]
+} derive(@debug.Debug)
+
+pub struct AdminListedGroup {
+  group_id : String
+  protocol_type : String
+  group_state : String
+  group_type : String
+} derive(@debug.Debug)
+
+pub struct AdminListedTransaction {
+  transactional_id : String
+  producer_id : Int64
+  transaction_state : String
+} derive(@debug.Debug)
 
 pub struct AdminLogDirs {
   error_code : Int
@@ -733,6 +829,11 @@ pub struct AdminTopicDescription {
   error_code : Int
   topic_id : Uuid
   partitions : Array[PartitionInfo]
+} derive(@debug.Debug)
+
+pub struct AdminTransactionTopic {
+  topic : String
+  partitions : Array[Int]
 } derive(@debug.Debug)
 
 pub struct AdminUpdateFeaturesResult {
@@ -842,6 +943,7 @@ pub async fn BrokerConnection::create_acls(Self, Array[AclCreation], timeout_ms?
 pub async fn BrokerConnection::create_partitions(Self, Array[CreatePartitionsSpec], Int, validate_only? : Bool) -> Array[CreatePartitionsResult]
 pub async fn BrokerConnection::create_topics(Self, Array[CreatableTopic], Int, validate_only? : Bool) -> Array[CreateTopicsResult]
 pub async fn BrokerConnection::delete_acls(Self, Array[AclFilter], timeout_ms? : Int) -> Array[DeleteAclsFilterResult]
+pub async fn BrokerConnection::delete_groups(Self, Array[String], timeout_ms? : Int) -> Array[AdminDeletedGroup]
 pub async fn BrokerConnection::delete_records(Self, Array[(String, Array[(Int, Int64)])], Int) -> Array[DeleteRecordsResult]
 pub async fn BrokerConnection::delete_topics(Self, Array[String], Array[Uuid], Int) -> Array[DeleteTopicsResult]
 pub async fn BrokerConnection::describe_acls(Self, AclFilter, timeout_ms? : Int) -> DescribeAclsResult
@@ -851,8 +953,10 @@ pub async fn BrokerConnection::describe_configs(Self, Array[ConfigResourceKey], 
 pub async fn BrokerConnection::describe_consumer_groups(Self, Array[String], include_authorized_operations? : Bool, timeout_ms? : Int) -> Array[AdminConsumerGroupDescription]
 pub async fn BrokerConnection::describe_groups(Self, Array[String], include_authorized_operations? : Bool, timeout_ms? : Int) -> Array[AdminGroupDescription]
 pub async fn BrokerConnection::describe_log_dirs(Self, topics? : Array[(String, Array[Int])]?, timeout_ms? : Int) -> AdminLogDirs
+pub async fn BrokerConnection::describe_producers(Self, Array[(String, Array[Int])], timeout_ms? : Int) -> Array[AdminDescribeProducersTopic]
 pub async fn BrokerConnection::describe_quorum(Self, Array[(String, Array[Int])], timeout_ms? : Int) -> AdminQuorumDescription
 pub async fn BrokerConnection::describe_topic_partitions(Self, Array[String], response_partition_limit? : Int, cursor? : TopicPartitionCursor?, timeout_ms? : Int) -> DescribeTopicPartitions
+pub async fn BrokerConnection::describe_transactions(Self, Array[String], timeout_ms? : Int) -> Array[AdminDescribeTransaction]
 pub async fn BrokerConnection::describe_user_scram(Self, Array[String]?, timeout_ms? : Int) -> DescribeUserScramResult
 pub async fn BrokerConnection::elect_leaders(Self, Int, topic_partitions? : Array[(String, Array[Int])]?, timeout_ms? : Int) -> AdminElectionResult
 pub async fn BrokerConnection::end_txn(Self, String, Int64, Int, Bool, timeout_ms? : Int) -> EndTxnResult
@@ -865,8 +969,10 @@ pub async fn BrokerConnection::init_producer_id(Self, transactional_id? : String
 pub async fn BrokerConnection::join_group(Self, String, Int, Int, String, group_instance_id? : String?, protocols~ : Array[JoinGroupProtocol], timeout_ms? : Int) -> JoinGroupResult
 pub async fn BrokerConnection::leave_group(Self, String, String, group_instance_id? : String?, timeout_ms? : Int) -> Int
 pub async fn BrokerConnection::list_config_resources(Self, resource_types? : Array[Int], timeout_ms? : Int) -> ListConfigResourcesResult
+pub async fn BrokerConnection::list_groups(Self, Array[String], Array[String], timeout_ms? : Int) -> AdminListGroupsResult
 pub async fn BrokerConnection::list_offsets(Self, String, Array[PartitionInfo], Int64, timeout_ms? : Int) -> Map[Int, Int64]
 pub async fn BrokerConnection::list_partition_reassignments(Self, topics? : Array[(String, Array[Int])]?, timeout_ms? : Int) -> AdminOngoingReassignments
+pub async fn BrokerConnection::list_transactions(Self, Array[String], Array[Int64], Int64, String?, timeout_ms? : Int) -> AdminListTransactionsResult
 pub async fn BrokerConnection::negotiate_api_versions(Self, timeout_ms? : Int) -> Unit
 pub fn BrokerConnection::note_throttle(Self, Int) -> Unit
 pub async fn BrokerConnection::offset_commit(Self, String, Int, String, group_instance_id? : String?, topics~ : Array[CommitTopic], timeout_ms? : Int) -> Array[OffsetCommitPartitionResult]
@@ -953,6 +1059,7 @@ pub struct ClusterClient {
   conns : Map[Int, BrokerConnection]
   // private fields
 }
+pub fn ClusterClient::broker_ids(Self) -> Array[Int]
 pub fn ClusterClient::close(Self) -> Unit
 pub async fn ClusterClient::connect(Array[HostPort], client_id? : String, request_timeout_ms? : Int, metadata_max_age_ms? : Int, max_in_flight? : Int, sasl? : SaslConfig?, use_tls? : Bool, tls? : TlsClientOptions?) -> Self
 pub async fn ClusterClient::connection(Self, Int) -> BrokerConnection

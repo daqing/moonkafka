@@ -479,6 +479,283 @@ test "fake api versions negotiates the group describe range" {
   let (versions, _) = @moonkafka.decode_api_versions_response(d)
   assert_eq(versions.pick(@moonkafka.API_DESCRIBE_GROUPS), 6)
   assert_eq(versions.pick(@moonkafka.API_CONSUMER_GROUP_DESCRIBE), 1)
+  assert_eq(versions.pick(@moonkafka.API_LIST_GROUPS), 5)
+  assert_eq(versions.pick(@moonkafka.API_DELETE_GROUPS), 2)
+  assert_eq(versions.pick(@moonkafka.API_DESCRIBE_PRODUCERS), 0)
+  assert_eq(versions.pick(@moonkafka.API_DESCRIBE_TRANSACTIONS), 0)
+  assert_eq(versions.pick(@moonkafka.API_LIST_TRANSACTIONS), 2)
+}
+
+///|
+test "describe producers v0 request encodes topics and partitions" {
+  assert_eq(@moonkafka.encode_describe_producers_request([]), b"\x01\x00")
+  assert_eq(
+    @moonkafka.encode_describe_producers_request([("t", [0, 1])]),
+    b"\x02\x02t\x03\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00",
+  )
+}
+
+///|
+test "describe producers request parses back through the fake broker" {
+  let framed = @moonkafka.encode_request(
+    @moonkafka.API_DESCRIBE_PRODUCERS,
+    0,
+    1,
+    "cid",
+    @moonkafka.encode_describe_producers_request([("a", [0]), ("b", [2, 3])]),
+  )
+  let d = @buf.Decoder::new(framed)
+  d.skip(4) // size
+  let topics = fake_describe_producers_request(d.read_bytes(d.remaining()))
+  assert_eq(topics, [("a", [0]), ("b", [2, 3])])
+}
+
+///|
+test "describe producers v0 decodes active producer state" {
+  let d = @buf.Decoder::new(fake_describe_producers_response([("t", [0, 1])]))
+  let (topics, throttle) = @moonkafka.decode_describe_producers_response(d)
+  assert_eq(throttle, 0)
+  assert_eq(d.remaining(), 0)
+  assert_eq(topics.length(), 1)
+  assert_eq(topics[0].name, "t")
+  assert_eq(topics[0].partitions.length(), 2)
+  let p0 = topics[0].partitions[0]
+  assert_eq(p0.partition_index, 0)
+  assert_eq(p0.error_code, 0)
+  assert_eq(p0.error_message, None)
+  assert_eq(p0.active_producers.length(), 1)
+  let producer = p0.active_producers[0]
+  assert_eq(producer.producer_id, 12345L)
+  assert_eq(producer.producer_epoch, 1)
+  assert_eq(producer.last_sequence, 42)
+  assert_eq(producer.last_timestamp, 1234567890L)
+  assert_eq(producer.coordinator_epoch, 0)
+  assert_eq(producer.current_txn_start_offset, 100L)
+  let p1 = topics[0].partitions[1]
+  assert_eq(p1.partition_index, 1)
+  assert_eq(p1.active_producers.length(), 0)
+}
+
+///|
+test "describe transactions v0 request encodes the transactional ids" {
+  assert_eq(@moonkafka.encode_describe_transactions_request([]), b"\x01\x00")
+  assert_eq(
+    @moonkafka.encode_describe_transactions_request(["tx1", "tx2"]),
+    b"\x03\x04tx1\x04tx2\x00",
+  )
+}
+
+///|
+test "describe transactions request parses back through the fake broker" {
+  let framed = @moonkafka.encode_request(
+    @moonkafka.API_DESCRIBE_TRANSACTIONS,
+    0,
+    1,
+    "cid",
+    @moonkafka.encode_describe_transactions_request(["a", "b"]),
+  )
+  let d = @buf.Decoder::new(framed)
+  d.skip(4) // size
+  let ids = fake_describe_transactions_request(d.read_bytes(d.remaining()))
+  assert_eq(ids, ["a", "b"])
+}
+
+///|
+test "describe transactions v0 decodes the transaction state" {
+  let d = @buf.Decoder::new(fake_describe_transactions_response(["tx1"]))
+  let (transactions, throttle) = @moonkafka.decode_describe_transactions_response(
+    d,
+  )
+  assert_eq(throttle, 0)
+  assert_eq(d.remaining(), 0)
+  assert_eq(transactions.length(), 1)
+  let txn = transactions[0]
+  assert_eq(txn.error_code, 0)
+  assert_eq(txn.transactional_id, "tx1")
+  assert_eq(txn.transaction_state, "Ongoing")
+  assert_eq(txn.transaction_timeout_ms, 30000)
+  assert_eq(txn.transaction_start_time_ms, 1234567890L)
+  assert_eq(txn.producer_id, 12345L)
+  assert_eq(txn.producer_epoch, 1)
+  assert_eq(txn.topics.length(), 1)
+  assert_eq(txn.topics[0].topic, "events")
+  assert_eq(txn.topics[0].partitions, [0, 1])
+}
+
+///|
+test "list transactions v2 request encodes the filters" {
+  // v1 has no transactional-id pattern field; v2 appends a null one.
+  assert_eq(
+    @moonkafka.encode_list_transactions_request(1, [], [], -1L, None),
+    b"\x01\x01\xff\xff\xff\xff\xff\xff\xff\xff\x00",
+  )
+  assert_eq(
+    @moonkafka.encode_list_transactions_request(2, [], [], -1L, None),
+    b"\x01\x01\xff\xff\xff\xff\xff\xff\xff\xff\x00\x00",
+  )
+}
+
+///|
+test "list transactions request parses back through the fake broker" {
+  let framed = @moonkafka.encode_request(
+    @moonkafka.API_LIST_TRANSACTIONS,
+    2,
+    1,
+    "cid",
+    @moonkafka.encode_list_transactions_request(
+      2,
+      ["Ongoing"],
+      [12345L],
+      5000L,
+      Some("txn-*"),
+    ),
+  )
+  let d = @buf.Decoder::new(framed)
+  d.skip(4) // size
+  let (states, producers, duration, pattern) = fake_list_transactions_request(
+    d.read_bytes(d.remaining()),
+  )
+  assert_eq(states, ["Ongoing"])
+  assert_eq(producers, [12345L])
+  assert_eq(duration, 5000L)
+  assert_eq(pattern, Some("txn-*"))
+}
+
+///|
+test "list transactions v2 decodes the listing" {
+  let d = @buf.Decoder::new(
+    fake_list_transactions_response(0, ["BadState"], [
+      ("txn-1", 12345L, "Ongoing"),
+    ]),
+  )
+  let (result, throttle) = @moonkafka.decode_list_transactions_response(d)
+  assert_eq(throttle, 0)
+  assert_eq(d.remaining(), 0)
+  assert_eq(result.error_code, 0)
+  assert_eq(result.unknown_state_filters, ["BadState"])
+  assert_eq(result.transactions.length(), 1)
+  let txn = result.transactions[0]
+  assert_eq(txn.transactional_id, "txn-1")
+  assert_eq(txn.producer_id, 12345L)
+  assert_eq(txn.transaction_state, "Ongoing")
+}
+
+///|
+test "delete groups v2 request encodes the group names" {
+  assert_eq(@moonkafka.encode_delete_groups_request([]), b"\x01\x00")
+  assert_eq(
+    @moonkafka.encode_delete_groups_request(["g1", "g2"]),
+    b"\x03\x03g1\x03g2\x00",
+  )
+}
+
+///|
+test "delete groups request parses back through the fake broker" {
+  let framed = @moonkafka.encode_request(
+    @moonkafka.API_DELETE_GROUPS,
+    2,
+    1,
+    "cid",
+    @moonkafka.encode_delete_groups_request(["a", "b"]),
+  )
+  let d = @buf.Decoder::new(framed)
+  d.skip(4) // size
+  let groups = fake_delete_groups_request(d.read_bytes(d.remaining()))
+  assert_eq(groups, ["a", "b"])
+}
+
+///|
+test "delete groups v2 decodes per-group error codes" {
+  let d = @buf.Decoder::new(
+    fake_delete_groups_response(["g1", "gone"], ["gone"]),
+  )
+  let (results, throttle) = @moonkafka.decode_delete_groups_response(d)
+  assert_eq(throttle, 0)
+  assert_eq(d.remaining(), 0)
+  assert_eq(results.length(), 2)
+  assert_eq(results[0].group_id, "g1")
+  assert_eq(results[0].error_code, 0)
+  assert_eq(results[1].group_id, "gone")
+  assert_eq(results[1].error_code, @moonkafka.GROUP_ID_NOT_FOUND)
+}
+
+///|
+test "delete groups v2 decodes NON_EMPTY_GROUP as a value" {
+  // A group that still has members: the broker reports NON_EMPTY_GROUP (68)
+  // per group, and the driver leaves it as a value rather than raising.
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(1)
+  e.write_compact_string("busy")
+  e.write_i16(68)
+  e.write_tag_buffer()
+  e.write_tag_buffer() // top level
+  let d = @buf.Decoder::new(e.to_bytes())
+  let (results, _) = @moonkafka.decode_delete_groups_response(d)
+  assert_eq(d.remaining(), 0)
+  assert_eq(results[0].group_id, "busy")
+  assert_eq(results[0].error_code, 68)
+}
+
+///|
+test "list groups v5 request encodes both filter arrays" {
+  // No filters: two empty compact arrays then the tag buffer.
+  assert_eq(@moonkafka.encode_list_groups_request([], []), b"\x01\x01\x00")
+  // States and types both present.
+  assert_eq(
+    @moonkafka.encode_list_groups_request(["Stable"], ["consumer"]),
+    b"\x02\x07Stable\x02\x09consumer\x00",
+  )
+}
+
+///|
+test "list groups request parses back through the fake broker" {
+  let framed = @moonkafka.encode_request(
+    @moonkafka.API_LIST_GROUPS,
+    5,
+    1,
+    "cid",
+    @moonkafka.encode_list_groups_request(["Stable"], ["classic", "consumer"]),
+  )
+  let d = @buf.Decoder::new(framed)
+  d.skip(4) // size
+  let (states, types) = fake_list_groups_request(d.read_bytes(d.remaining()))
+  assert_eq(states, ["Stable"])
+  assert_eq(types, ["classic", "consumer"])
+}
+
+///|
+test "list groups v5 decodes the group state and type fields" {
+  let d = @buf.Decoder::new(fake_list_groups_response(["Stable"], []))
+  let (result, throttle) = @moonkafka.decode_list_groups_response(d)
+  assert_eq(throttle, 0)
+  assert_eq(d.remaining(), 0)
+  assert_eq(result.error_code, 0)
+  assert_eq(result.groups.length(), 2)
+  let classic = result.groups[0]
+  assert_eq(classic.group_id, "classic-group")
+  assert_eq(classic.protocol_type, "consumer")
+  assert_eq(classic.group_state, "Stable")
+  assert_eq(classic.group_type, "classic")
+  let k848 = result.groups[1]
+  assert_eq(k848.group_id, "k848-group")
+  assert_eq(k848.group_type, "consumer")
+}
+
+///|
+test "list groups v5 decodes an empty listing and a top-level error" {
+  // An empty groups array still carries its per-group tag buffer slot
+  // and the top-level tag buffer.
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_i16(30) // GROUP_AUTHORIZATION_FAILED
+  e.write_compact_len(0) // no groups
+  e.write_tag_buffer() // top level
+  let d = @buf.Decoder::new(e.to_bytes())
+  let (result, _) = @moonkafka.decode_list_groups_response(d)
+  assert_eq(d.remaining(), 0)
+  assert_eq(result.error_code, 30)
+  assert_eq(result.groups.length(), 0)
 }
 
 ///|
