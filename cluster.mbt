@@ -25,6 +25,9 @@ pub struct ClusterClient {
   mut topics : Map[String, TopicMetadata]
   /// topic id → name (KIP-516); the reverse view of topics.
   mut topic_ids : Map[Uuid, String]
+  /// The controller's node id from the last metadata refresh
+  /// (controller-routed admin ops).
+  mut controller_id : Int
   /// Wall-clock ms of the last successful refresh; -1 = never.
   mut refreshed_ms : Int64
   conns : Map[Int, BrokerConnection]
@@ -67,6 +70,7 @@ pub async fn ClusterClient::connect(
     brokers: Map([]),
     topics: Map([]),
     topic_ids: Map([]),
+    controller_id: -1,
     refreshed_ms: -1L,
     conns: Map([]),
   }
@@ -126,6 +130,7 @@ pub async fn ClusterClient::refresh_metadata(
   self.lock.acquire()
   defer self.lock.release()
   self.brokers = metadata.brokers
+  self.controller_id = metadata.controller_id
   let topic_map : Map[String, TopicMetadata] = Map([])
   let ids : Map[Uuid, String] = Map([])
   for t in metadata.topics {
@@ -248,6 +253,28 @@ pub fn ClusterClient::topics_snapshot(self : ClusterClient) -> Array[String] {
     out.push(name)
   }
   out
+}
+
+///|
+/// Node ids of every broker in the cached metadata snapshot, sorted so a
+/// fan-out visits them in a stable order. For the admin calls a broker
+/// answers only from the state it holds itself — ListGroups and
+/// ListTransactions — which the client must send to all brokers and merge.
+/// Empty before the first refresh_metadata.
+pub fn ClusterClient::broker_ids(self : ClusterClient) -> Array[Int] {
+  let out : Array[Int] = []
+  for node_id, _ in self.brokers {
+    out.push(node_id)
+  }
+  out.sort()
+  out
+}
+
+///|
+/// The cached controller node id (-1 before the first metadata
+/// refresh) for controller-routed admin ops.
+pub fn ClusterClient::controller(self : ClusterClient) -> Int {
+  self.controller_id
 }
 
 ///|
