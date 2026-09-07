@@ -21,6 +21,16 @@ pub fn Encoder::new() -> Encoder {
 }
 
 ///|
+/// Preallocate the backing array to hold roughly `n` bytes up front, so
+/// the hot request/record-batch encoding paths avoid repeated array
+/// growth reallocations. Growth stalls when the estimate is exceeded.
+/// `n` < 0 inserts a default growable capacity (16 bytes).
+pub fn Encoder::with_capacity(n : Int) -> Encoder {
+  let capacity = if n < 0 { 16 } else { n }
+  { buf: Array::new(capacity~), }
+}
+
+///|
 pub fn Encoder::to_bytes(self : Encoder) -> Bytes {
   Bytes::from_array(self.buf)
 }
@@ -270,12 +280,26 @@ pub fn Decoder::skip(self : Decoder, n : Int) -> Unit raise DecodeError {
 ///|
 pub fn Decoder::read_bytes(self : Decoder, n : Int) -> Bytes raise DecodeError {
   self.need(n)
-  let out : Array[Byte] = Array::new(capacity=n)
-  for _ in 0..<n {
-    out.push(self.data[self.pos])
-    self.pos += 1
-  }
-  Bytes::from_array(out)
+  let copy = self.data[self.pos:self.pos + n].to_owned()
+  self.pos += n
+  copy
+}
+
+///|
+/// Zero-copy view over the next `n` bytes of the backing buffer — no
+/// copy is made, so callers that only inspect or immediately re-read the
+/// bytes (e.g. blobbing a whole compressed records region before
+/// building the owned `Bytes` a decompressor needs) avoid a defensive
+/// copy. The returned `BytesView` borrows `self.data` and stays valid
+/// while that `Bytes` outlives the decoder.
+pub fn Decoder::read_bytes_view(
+  self : Decoder,
+  n : Int,
+) -> BytesView raise DecodeError {
+  self.need(n)
+  let view = self.data[self.pos:self.pos + n]
+  self.pos += n
+  view
 }
 
 ///|

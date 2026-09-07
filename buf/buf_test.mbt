@@ -107,3 +107,31 @@ test "negative skip is rejected without rewinding the position" {
   assert_true(rejected)
   assert_eq(d.remaining(), 2)
 }
+
+///|
+test "read_bytes_view is a zero-copy slice of the backing buffer" {
+  let backing = b"\x00\x01\x02\x03\x04\x05"
+  let d = @buf.Decoder::new(backing)
+  ignore(d.read_bytes(3))
+  let view = d.read_bytes_view(2) catch { _ => fail("unexpected decode error") }
+  // A view shares the backing bytes rather than copying them.
+  assert_eq(view.length(), 2)
+  assert_eq(view[0], b'\x03')
+  assert_eq(view[1], b'\x04')
+  assert_eq(d.read_bytes(1), b"\x05")
+  assert_eq(d.remaining(), 0)
+}
+
+///|
+test "with_capacity preallocates without changing output bytes" {
+  let e = @buf.Encoder::with_capacity(8)
+  e.write_compact_string("moonkafka")
+  e.write_i32(42)
+  e.write_tag_buffer()
+  // A default encoder must produce the identical bytes.
+  let d = @buf.Encoder::new()
+  d.write_compact_string("moonkafka")
+  d.write_i32(42)
+  d.write_tag_buffer()
+  assert_eq(e.to_bytes(), d.to_bytes())
+}

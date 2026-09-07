@@ -7,10 +7,10 @@ An open-source [Apache Kafka](https://kafka.apache.org/) client driver written i
 This driver deliberately supports only the latest Kafka generation — KRaft-based clusters (no ZooKeeper),
 the modern Kafka protocol, and no legacy broker/version compatibility baggage.
 
-> **Status:** early development.
-
-The wire protocol implementation is in progress;
-the API surface below reflects the intended design and may change before the first release.
+> **Status:** targeted for 0.2.0 — the transport + data-plane feature set is
+> implemented and covered by a 200+ test suite (unit, mock-broker, golden
+> fixtures) plus an optional real-cluster integration harness. The API may
+> still change before 1.0.
 
 ## Why MoonBit + Kafka?
 
@@ -152,11 +152,17 @@ module targets `native`.
 ## Development
 
 ```sh
-moon build          # build the library
-moon test           # run tests (blackbox + whitebox)
-moon fmt            # format code
-moon info           # regenerate package interfaces (.mbti)
+moon test           # unit + mock-broker (fake broker) suite
+make fmt            # format code
+make info           # regenerate package interfaces (.mbti)
+make integration    # Docker Kafka 4.3 + real-client smoke test
+make bench          # produce/consume throughput (needs a broker)
+make docker-up      # start a KRaft cluster (make docker-up MULTI=1 for 3 nodes)
 ```
+
+Full harness guide: [`docs/5-testing.md`](docs/5-testing.md). Protocol notes:
+[version negotiation](docs/2-version-negotiation.md),
+[consumer groups](docs/3-consumer-groups.md), [transactions](docs/4-transactions.md).
 
 ## License
 

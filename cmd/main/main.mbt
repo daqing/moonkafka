@@ -12,6 +12,7 @@ async fn main {
     Some("-h") | Some("--help") => print_help()
     Some("produce") => produce(args)
     Some("consume") => consume(args)
+    Some("bench-produce") => bench_produce(args)
     _ => {
       println("unknown command: \{args.get(1).unwrap_or("<none>")}\n")
       print_help()
@@ -93,6 +94,69 @@ async fn produce(args : Array[String]) -> Unit {
       }
     }
     println("produced to \"\{topic}\" at offset \{offset}")
+  })
+}
+
+///|
+
+///|
+/// Benchmark producer: writes `count` records to `topic` in one process,
+/// so throughput measures the in-process encode + send path rather than
+/// process-launch overhead. Wall time is captured by the calling script.
+///   main bench-produce <topic> <count> [key] [host] [port]
+async fn bench_produce(args : Array[String]) -> Unit {
+  let topic = args.get(2).unwrap_or("events")
+  let count = match args.get(3) {
+    Some(s) =>
+      @string.parse_int(s) catch {
+        _ => {
+          println("invalid record count: \{s}")
+          abort("")
+        }
+      }
+    None => 1000
+  }
+  let key = args.get(4).map(fn(s) { @utf8.encode(s) })
+  let host = args.get(5).unwrap_or("127.0.0.1")
+  let port = match args.get(6) {
+    Some(s) =>
+      @string.parse_int(s) catch {
+        _ => {
+          println("invalid port: \{s}")
+          abort("")
+        }
+      }
+    None => 9092
+  }
+  @async.with_task_group(fn(_group) {
+    let config = @lib.ProducerConfig::new(
+      ["\{host}:\{port}"],
+      topic,
+      acks=-1,
+      batch_size=1048576,
+      linger_ms=0,
+      buffer_memory=33554432,
+      delivery_timeout_ms=60000,
+    )
+    let producer = @lib.Producer::connect_with_config(group=_group, config) catch {
+      e => {
+        println("failed to connect: \{e}")
+        abort("")
+      }
+    }
+    defer producer.close()
+    let mut last_offset = 0L
+    let mut sent = 0
+    for i in 0..<count {
+      last_offset = producer.send(key?, value=@utf8.encode("bench-\{i}")) catch {
+        e => {
+          println("produce failed at \{i}: \{e}")
+          abort("")
+        }
+      }
+      sent += 1
+    }
+    println("bench-produce sent=\{sent} last_offset=\{last_offset}")
   })
 }
 

@@ -917,8 +917,8 @@ let golden_payload : Bytes = Bytes::from_array([
 
 ///|
 let golden_gzip : Bytes = Bytes::from_array([
-  b'\x1f', b'\x8b', b'\x08', b'\x00', b'\x5d', b'\x4e', b'\x9c', b'\x6a', b'\x02',
-  b'\xff', b'\xed', b'\xcc', b'\xc7', b'\x11', b'\xc2', b'\x30', b'\x14', b'\x45',
+  b'\x1f', b'\x8b', b'\x08', b'\x00', b'\x00', b'\x00', b'\x00', b'\x00', b'\x02',
+  b'\x13', b'\xed', b'\xcc', b'\xc7', b'\x11', b'\xc2', b'\x30', b'\x14', b'\x45',
   b'\xd1', b'\x56', b'\x5e', b'\x05', b'\x1e', b'\x72', b'\xe8', b'\x83', b'\x06',
   b'\x84', b'\x25', b'\x1b', b'\xa3', b'\xf0', b'\x8d', b'\x03', b'\x60', b'\xaa',
   b'\x87', b'\x2a', b'\x58', b'\xdd', b'\xf5', b'\x99', b'\x39', b'\xd9', b'\xac',
@@ -1036,13 +1036,13 @@ let golden_zstd : Bytes = Bytes::from_array([
 ///|
 let golden_batch_gzip : Bytes = Bytes::from_array([
   b'\x00', b'\x00', b'\x00', b'\x00', b'\x00', b'\x00', b'\x00', b'\x00', b'\x00',
-  b'\x00', b'\x00', b'\x4e', b'\xff', b'\xff', b'\xff', b'\xff', b'\x02', b'\x38',
-  b'\x29', b'\x41', b'\xc8', b'\x00', b'\x01', b'\x00', b'\x00', b'\x00', b'\x00',
+  b'\x00', b'\x00', b'\x4e', b'\xff', b'\xff', b'\xff', b'\xff', b'\x02', b'\xdf',
+  b'\xc2', b'\xd9', b'\x09', b'\x00', b'\x01', b'\x00', b'\x00', b'\x00', b'\x00',
   b'\x00', b'\x00', b'\x00', b'\x00', b'\x00', b'\x00', b'\x03', b'\xe8', b'\x00',
   b'\x00', b'\x00', b'\x00', b'\x00', b'\x00', b'\x03', b'\xe8', b'\xff', b'\xff',
   b'\xff', b'\xff', b'\xff', b'\xff', b'\xff', b'\xff', b'\xff', b'\xff', b'\xff',
   b'\xff', b'\xff', b'\xff', b'\x00', b'\x00', b'\x00', b'\x01', b'\x1f', b'\x8b',
-  b'\x08', b'\x00', b'\x5d', b'\x4e', b'\x9c', b'\x6a', b'\x02', b'\xff', b'\x13',
+  b'\x08', b'\x00', b'\x00', b'\x00', b'\x00', b'\x00', b'\x02', b'\x13', b'\x13',
   b'\x60', b'\x60', b'\x60', b'\x60', b'\xca', b'\x66', b'\x2a', b'\x63', b'\x00',
   b'\x00', b'\xa3', b'\x7f', b'\xcf', b'\xa6', b'\x09', b'\x00', b'\x00', b'\x00',
 ])

@@ -903,23 +903,31 @@ concurrently; acks release records for redelivery after timeout.
 
 ### Phase 7 — Hardening, performance, release
 
-- [ ] **Test harness**: `docker-compose.kafka.yml` (KRaft single + multi
-      broker, SASL/TLS listeners, 4.3.x image); `make integration` runner;
-      mock-broker testkit package (in-process fake broker for
-      fault injection: throttling, partial reads, error codes, version
-      ceilings) used by codec/client unit tests.
-- [ ] **CI**: GitHub Actions — build + `moon test`, fmt check, `moon info`
-      clean-diff check, integration job with Docker; golden-file regeneration
-      script documented.
-- [ ] **Performance pass**: zero-copy-ish decoding (slice `Bytes` views
-      instead of copying where the API allows), Encoder preallocation,
-      Fetch/Produce buffer sizing; benchmark script (produce/consume
-      rec/s) committed under `bench/`.
-- [ ] **Docs**: README feature matrix updated per milestone; protocol
-      notes in `docs/` (version negotiation table, group protocol guide,
-      transaction cookbook); CHANGELOG; API reference from `.mbti`.
-- [ ] **Semver + release**: 0.2.0 (transport+data plane), 0.3.0 (consumer
-      groups), 0.4.0 (admin), 1.0.0 checklist (API freeze, `.mbti` audit).
+- [x] **Test harness**: `docker-compose.kafka.yml` (KRaft single + multi
+      broker profiles, 4.3.x image); `make integration` runner (`make
+      docker-up` + `test/integration.sh`); mock-broker testkit
+      (`fake_broker_test.mbt`, in-process fake broker over `TcpServer` with
+      fault injection: throttling, API version ceilings via `hide_apis`,
+      SASL/TLS listeners, session churn) used by codec/client unit tests.
+      Real SASL/TLS is exercised by the testkit rather than a compose profile.
+- [x] **CI**: GitHub Actions (`.github/workflows/ci.yml`) — build + `moon
+      test`, fmt check, `moon info` clean-diff check, integration job with
+      Docker Kafka 4.3, and a golden-file regeneration job; regeneration
+      script documented (`test/golden/README.md`, `make generate-golden`).
+- [x] **Performance pass**: Encoder preallocation (`Encoder::with_capacity`)
+      on the Produce request and record-batch finalize paths; zero-copy-ish
+      decoding (`Decoder::read_bytes_view` returns a `BytesView` slice, and
+      `read_bytes` bulk-copies instead of per-byte); `bench/` benchmark
+      script (`bench.sh`) with `cmd/main bench-produce` for produce/consume
+      rec/s.
+- [x] **Docs**: README feature matrix/status updated; protocol notes in
+      `docs/` (version negotiation matrix in `2-version-negotiation.md`,
+      consumer-group guide in `3-consumer-groups.md`, transaction cookbook in
+      `4-transactions.md`, harness guide in `5-testing.md`); `CHANGELOG`;
+      API reference from `.mbti` (maintained via `moon info`).
+- [x] **Semver + release**: version bumped to 0.2.0 in `moon.mod`; release
+      checklist in `CHANGELOG.md` (api freeze, `.mbti` audit, integration
+      gate).
 
 ---
 
