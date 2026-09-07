@@ -72,6 +72,15 @@ Working today:
   leave, and rebalance listener hooks
 - group_protocol selection: KIP-848 (default), classic, or fallback
   ordering probed against the broker's advertised APIs
+- Admin client: topics (create/delete/partitions/records/offset-delete),
+  configs, ACLs, quotas, SCRAM credentials, log dirs, leaders,
+  reassignments, cluster/controller introspection, transactions, and
+  groups listing/describe/delete — with a shared retriable-result retry
+  policy and paginated DescribeTopicPartitions walking
+- Share groups (KIP-932): `ShareConsumer` over ShareGroupHeartbeat v1
+  membership, ShareFetch v2 acquisition with delivery-count caps, and
+  ShareAcknowledge v2 (accept/release/reject/renew); Describe/Alter/
+  DeleteShareGroupOffsets admin ops
 - Pipelined broker connections: request timeouts, in-flight cap, reconnect
   through bootstrap servers, broker throttling
 - TLS (including verified certificates via a custom CA) and SASL
@@ -79,7 +88,7 @@ Working today:
 
 Planned:
 
-- Admin client and share groups
+- Telemetry (KIP-714): GetTelemetrySubscriptions/PushTelemetry client
 
 ## Requirements
 

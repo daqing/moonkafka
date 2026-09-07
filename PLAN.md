@@ -888,7 +888,7 @@ quota + SCRAM credential round-trips against a configured cluster.
 
 ### Phase 6 — Share groups (KIP-932) & telemetry (optional)
 
-- [ ] `ShareConsumer`: ShareGroupHeartbeat v1 membership, ShareFetch v2
+- [x] `ShareConsumer`: ShareGroupHeartbeat v1 membership, ShareFetch v2
       (acquisition/release semantics, `available/acknowledged` delivery
       states), ShareAcknowledge v2 (accept/release/reject per record);
       queue-size + delivery-count config; Describe/Alter/DeleteShareGroupOffsets
