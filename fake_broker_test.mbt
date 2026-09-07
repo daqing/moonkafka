@@ -1002,11 +1002,12 @@ fn fake_describe_topic_partitions_response(
   topic : String,
   partitions : Array[Int],
   next_cursor : TopicPartitionCursor?,
+  error_code? : Int = 0,
 ) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(0) // throttle
   e.write_compact_len(1) // one topic
-  e.write_i16(0) // no error
+  e.write_i16(error_code)
   e.write_compact_string(topic)
   e.write_bytes(Bytes::make(16, b'\x07')) // topic id
   e.write_bool(false) // is_internal
@@ -1370,8 +1371,11 @@ async fn fake_serve_conn(
   coordinator? : FakeCoordinator? = None,
   metadata_partitions? : Int = 1,
   hide_apis? : Array[Int] = [],
+  dtp_requests? : Array[Int] = [],
+  dtp_error_rounds? : Int = 0,
 ) -> Unit {
   // per-connection SASL state
+  let mut dtp_frames = 0
   let mut sasl_mechanism : String? = None
   let mut scram_client_first_bare : String? = None
   let mut scram_server_first : String? = None
@@ -1600,7 +1604,10 @@ async fn fake_serve_conn(
         let (group, partitions) = fake_offset_fetch_request(rest)
         fake_offset_fetch_response(group, partitions, committed_store)
       }
-      75 =>
+      75 => {
+        dtp_requests.push(1)
+        dtp_frames += 1
+        let error = if dtp_frames <= dtp_error_rounds { 5 } else { 0 }
         // Two pages: a fresh request returns partition 0 with a cursor at
         // partition 1; a resumed request returns partition 1 and completes.
         match fake_dtp_request_cursor(rest) {
@@ -1609,9 +1616,17 @@ async fn fake_serve_conn(
               topic,
               [0],
               Some({ topic_name: topic, partition_index: 1, }),
+              error_code=error,
             )
-          Some(_) => fake_describe_topic_partitions_response(topic, [1], None)
+          Some(_) =>
+            fake_describe_topic_partitions_response(
+              topic,
+              [1],
+              None,
+              error_code=error,
+            )
         }
+      }
       36 => {
         let mechanism = sasl_mechanism.unwrap_or("")
         if !sasl_ok {
@@ -1735,6 +1750,8 @@ async fn fake_broker(
   coordinator? : FakeCoordinator? = None,
   metadata_partitions? : Int = 1,
   hide_apis? : Array[Int] = [],
+  dtp_requests? : Array[Int] = [],
+  dtp_error_rounds? : Int = 0,
 ) -> Unit {
   for ;; {
     let (tcp, _) = server.accept()
@@ -1791,6 +1808,8 @@ async fn fake_broker(
         coordinator~,
         metadata_partitions~,
         hide_apis~,
+        dtp_requests~,
+        dtp_error_rounds~,
       )
     }
   }
@@ -3680,6 +3699,62 @@ async test "consumer protocol raises without KIP-848 broker support" {
     } catch {
       _ => ()
     }
+    server.close()
+  }
+}
+
+///|
+async test "admin describes topics and retries retriable results" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted)
+    }
+    let admin = @moonkafka.Admin::connect(
+      group=root,
+      host="127.0.0.1",
+      port=server.addr.port(),
+    )
+    defer admin.close()
+    // The two-page fake topic merges into one description.
+    let topics = admin.describe_topic_partitions(["events"])
+    assert_eq(topics.length(), 1)
+    assert_eq(topics[0].name, "events")
+    assert_eq(topics[0].error_code, 0)
+    assert_eq(topics[0].partitions.length(), 2)
+    server.close()
+  }
+}
+
+///|
+async test "admin retries retriable topic errors under the policy" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let dtp_requests : Array[Int] = []
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(
+        server,
+        root,
+        "events",
+        accepted,
+        dtp_requests~,
+        dtp_error_rounds=2,
+      )
+    }
+    let admin = @moonkafka.Admin::connect(
+      group=root,
+      host="127.0.0.1",
+      port=server.addr.port(),
+    )
+    defer admin.close()
+    // The first two responses carry a retriable per-topic error; the
+    // retry policy re-issues until the topic resolves.
+    let topics = admin.describe_topic_partitions(["events"])
+    assert_eq(topics.length(), 1)
+    assert_eq(topics[0].error_code, 0)
+    assert_true(dtp_requests.length() >= 3)
     server.close()
   }
 }

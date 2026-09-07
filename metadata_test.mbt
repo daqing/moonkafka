@@ -224,14 +224,10 @@ test "describe topic partitions raises per-topic broker errors" {
   e.write_tag_buffer()
   e.write_i8(-1) // no next cursor
   e.write_tag_buffer()
-  let mut matched = false
-  ignore(
-    @moonkafka.decode_describe_topic_partitions_response(
-      @buf.Decoder::new(e.to_bytes()),
-    ),
-  ) catch {
-    @moonkafka.BrokerError(3, _) => matched = true
-    e => fail("expected BrokerError 3, got \{e}")
-  }
-  assert_true(matched)
+  // Per-topic error codes surface as values for the admin client.
+  let (page, _throttle) = @moonkafka.decode_describe_topic_partitions_response(
+    @buf.Decoder::new(e.to_bytes()),
+  )
+  assert_eq(page.topics[0].error_code, 3)
+  assert_eq(page.topics[0].name, "gone")
 }
