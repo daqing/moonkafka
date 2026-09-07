@@ -252,9 +252,9 @@ P6 = share/telemetry.
 
 Classic group management (still required for compat): JoinGroup, SyncGroup,
 Heartbeat, LeaveGroup, DescribeGroups, ListGroups — implement at the 4.3 max
-versions (9/5/4/5/6/5 respectively per the guide) (P4). All are done except
-ListGroups; DescribeGroups v6 landed with the P5 admin group ops, since it is
-an admin call rather than part of the coordination path.
+versions (9/5/4/5/6/5 respectively per the guide) (P4). All are done;
+DescribeGroups v6 and ListGroups v5 landed with the P5 admin group ops, since
+they are admin calls rather than part of the coordination path.
 
 Error codes: implement the complete table (codes 0 through 133 as of 4.3) in
 `protocol/errors.mbt`, each carrying `name`, `retriable`, and
@@ -821,9 +821,25 @@ rejoins); read_committed skips aborted txns (producer txn test from P3).
       codec tests for the byte-identical request bodies, the
       empty-assignment tag buffers, the unknown member type, foreign
       member metadata, and both not-found paths.
-- [ ] Groups — the rest: ListGroups v5 (state/type filters),
-      DeleteGroups v2; consumers-of / DescribeProducers v0,
-      DescribeTransactions v0, ListTransactions v2.
+- [x] Groups — ListGroups v5 (state/type filters): codecs, `Admin::list_groups`
+      fanning out to every broker in the cached snapshot and merging (each
+      broker answers only from the state it holds itself), per-call error code
+      under the retry policy; fake-broker E2E and codec tests.
+- [x] Groups — DeleteGroups v2: codecs, `Admin::delete_groups` with
+      per-group error codes as values under the retry policy; fake-broker
+      E2E and codec tests.
+- [x] DescribeProducers v0: codecs, `Admin::describe_producers` over the
+      any-broker control connection (the broker forwards to partition
+      leaders), per-partition error codes as values under the retry policy;
+      fake-broker E2E and codec tests.
+- [x] DescribeTransactions v0: codecs, `Admin::describe_transactions` over
+      the any-broker control connection (the broker forwards to the
+      transaction coordinator), per-id error codes as values under the
+      retry policy; fake-broker E2E and codec tests.
+- [x] ListTransactions v2: codecs (v1/v2 request split at the
+      transactional-id pattern field), `Admin::list_transactions` fanning
+      out to every broker and merging, per-call error code under the retry
+      policy; fake-broker E2E and codec tests.
 - [x] Security — ACLs: DONE (this commit, root scope `admin_acls.mbt`):
       DescribeAcls v2-v3, CreateAcls v2-v3, DeleteAcls v2-v3 (v3 only
       adds the USER resource type — v2/v3 share one wire shape, so the

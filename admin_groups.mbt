@@ -1,7 +1,8 @@
-// Admin client group-inspection operations (Phase 5): DescribeGroups v6
-// and ConsumerGroupDescribe v1. Field order is pinned from
-// DescribeGroupsRequest/Response.json and
-// ConsumerGroupDescribeRequest/Response.json in the Kafka 4.3 tree under
+// Admin client group-inspection operations (Phase 5): DescribeGroups v6,
+// ConsumerGroupDescribe v1, and ListGroups v5. Field order is pinned from
+// DescribeGroupsRequest/Response.json,
+// ConsumerGroupDescribeRequest/Response.json, and
+// ListGroupsRequest/Response.json in the Kafka 4.3 tree under
 // clients/src/main/resources/common/message/; the member-type byte values
 // from ConsumerGroupDescribeResponse.json (KIP-1099). DescribeGroups v5 is
 // the first flexible version and v6 (KIP-1043) adds the per-group
@@ -461,6 +462,231 @@ pub async fn Admin::describe_consumer_groups(
         include_authorized_operations~,
         timeout_ms=self.request_timeout_ms,
       )
+    },
+  )
+}
+
+///|
+/// One group a broker listed in a ListGroups v5 response.
+pub struct AdminListedGroup {
+  group_id : String
+  /// The protocol type ("consumer", "connect", ...); empty when the
+  /// coordinator has not settled one.
+  protocol_type : String
+  /// The state name as the coordinator reports it: Stable, Empty,
+  /// PreparingRebalance, CompletingRebalance, or Dead for classic
+  /// groups; Empty, Assigning, Reconciling, Stable, or Dead for
+  /// KIP-848 groups.
+  group_state : String
+  /// The KIP-848 group type: "classic", "consumer", "share", or
+  /// "streams".
+  group_type : String
+} derive(@debug.Debug)
+
+///|
+/// One ListGroups result. Unlike DescribeGroups, the error is per-call: a
+/// single top-level error covers the whole listing, and `groups` is empty
+/// when it is non-zero.
+pub struct AdminListGroupsResult {
+  error_code : Int
+  groups : Array[AdminListedGroup]
+} derive(@debug.Debug)
+
+///|
+/// Encode a ListGroups v5 request body. An empty filter matches every
+/// group, so both arrays default to "no filtering".
+pub fn encode_list_groups_request(
+  states_filter : Array[String],
+  types_filter : Array[String],
+) -> Bytes {
+  let body = @buf.Encoder::new()
+  body.write_compact_len(states_filter.length())
+  for state in states_filter {
+    body.write_compact_string(state)
+  }
+  body.write_compact_len(types_filter.length())
+  for type_ in types_filter {
+    body.write_compact_string(type_)
+  }
+  body.write_tag_buffer()
+  body.to_bytes()
+}
+
+///|
+/// Decode a ListGroups v5 response body: a top-level error plus the
+/// groups the broker listed, with their state and type names.
+pub fn decode_list_groups_response(
+  d : @buf.Decoder,
+) -> (AdminListGroupsResult, Int) raise {
+  let throttle = d.read_i32()
+  let error_code = d.read_i16()
+  let groups : Array[AdminListedGroup] = []
+  let n = d.read_compact_len()
+  for _ in 0..<n {
+    let group_id = d.read_compact_string()
+    let protocol_type = d.read_compact_string()
+    let group_state = d.read_compact_string()
+    let group_type = d.read_compact_string()
+    d.skip_tag_buffer()
+    groups.push({ group_id, protocol_type, group_state, group_type, })
+  }
+  d.skip_tag_buffer()
+  ({ error_code, groups, }, throttle)
+}
+
+///|
+pub async fn BrokerConnection::list_groups(
+  self : BrokerConnection,
+  states_filter : Array[String],
+  types_filter : Array[String],
+  timeout_ms? : Int = 30000,
+) -> AdminListGroupsResult {
+  let d = self.request(
+    API_LIST_GROUPS,
+    self.api_version(API_LIST_GROUPS),
+    encode_list_groups_request(states_filter, types_filter),
+    timeout_ms~,
+  )
+  let (result, throttle) = decode_list_groups_response(d)
+  self.note_throttle(throttle)
+  result
+}
+
+///|
+/// List the groups a cluster's brokers know about, optionally filtered by
+/// group state and group type (empty filters mean "all"). ListGroups is
+/// answered only from the state each broker holds itself, so the call
+/// fans out to every broker in the cached metadata snapshot and merges
+/// the results, de-duplicating groups shared across brokers. The returned
+/// error is the first non-zero error any broker reported; retriable ones
+/// re-issue the whole call under the retry policy. Transport failures
+/// raise.
+pub async fn Admin::list_groups(
+  self : Admin,
+  states_filter? : Array[String] = [],
+  types_filter? : Array[String] = [],
+) -> AdminListGroupsResult {
+  self.with_retries(
+    fn(result : AdminListGroupsResult) {
+      admin_error_retriable(result.error_code)
+    },
+    async fn() { self.list_groups_once(states_filter, types_filter) },
+  )
+}
+
+///|
+async fn Admin::list_groups_once(
+  self : Admin,
+  states_filter : Array[String],
+  types_filter : Array[String],
+) -> AdminListGroupsResult {
+  self.cluster.refresh_metadata(None)
+  let ids = self.cluster.broker_ids()
+  let by_id : Map[String, AdminListedGroup] = Map([])
+  let order : Array[String] = []
+  let mut error_code = 0
+  for node in ids {
+    let conn = self.cluster.connection(node)
+    let result = conn.list_groups(
+      states_filter,
+      types_filter,
+      timeout_ms=self.request_timeout_ms,
+    )
+    if result.error_code != 0 && error_code == 0 {
+      error_code = result.error_code
+    }
+    for group in result.groups {
+      if by_id.contains(group.group_id) {
+        continue
+      }
+      by_id[group.group_id] = group
+      order.push(group.group_id)
+    }
+  }
+  { error_code, groups: order.map(fn(id) { by_id[id] }), }
+}
+
+///|
+/// One group's DeleteGroups v2 result (error codes as values).
+pub struct AdminDeletedGroup {
+  group_id : String
+  /// 0 on success; otherwise the per-group error, e.g. GROUP_ID_NOT_FOUND
+  /// (69) for an unknown group or NON_EMPTY_GROUP (68) for one that still
+  /// has members.
+  error_code : Int
+} derive(@debug.Debug)
+
+///|
+/// Encode a DeleteGroups v2 request body.
+pub fn encode_delete_groups_request(groups : Array[String]) -> Bytes {
+  let body = @buf.Encoder::new()
+  body.write_compact_len(groups.length())
+  for group in groups {
+    body.write_compact_string(group)
+  }
+  body.write_tag_buffer()
+  body.to_bytes()
+}
+
+///|
+/// Decode a DeleteGroups v2 response body: one result per requested
+/// group, in request order, with per-group error codes as values.
+pub fn decode_delete_groups_response(
+  d : @buf.Decoder,
+) -> (Array[AdminDeletedGroup], Int) raise {
+  let throttle = d.read_i32()
+  let out : Array[AdminDeletedGroup] = []
+  let n = d.read_compact_len()
+  for _ in 0..<n {
+    let group_id = d.read_compact_string()
+    let error_code = d.read_i16()
+    d.skip_tag_buffer()
+    out.push({ group_id, error_code, })
+  }
+  d.skip_tag_buffer()
+  (out, throttle)
+}
+
+///|
+pub async fn BrokerConnection::delete_groups(
+  self : BrokerConnection,
+  groups : Array[String],
+  timeout_ms? : Int = 30000,
+) -> Array[AdminDeletedGroup] {
+  let d = self.request(
+    API_DELETE_GROUPS,
+    self.api_version(API_DELETE_GROUPS),
+    encode_delete_groups_request(groups),
+    timeout_ms~,
+  )
+  let (result, throttle) = decode_delete_groups_response(d)
+  self.note_throttle(throttle)
+  result
+}
+
+///|
+/// Delete the given consumer groups. Each requested group comes back with
+/// its own error code as a value (0 = deleted, NON_EMPTY_GROUP if it still
+/// has members, GROUP_ID_NOT_FOUND if unknown); a retriable per-group
+/// error re-issues the whole call under the retry policy. The broker
+/// forwards to the group coordinator, so the call runs on any broker.
+pub async fn Admin::delete_groups(
+  self : Admin,
+  groups : Array[String],
+) -> Array[AdminDeletedGroup] {
+  self.with_retries(
+    fn(results : Array[AdminDeletedGroup]) {
+      let mut retry = false
+      for result in results {
+        if admin_error_retriable(result.error_code) {
+          retry = true
+        }
+      }
+      retry
+    },
+    async fn() {
+      let conn = self.any_conn()
+      conn.delete_groups(groups, timeout_ms=self.request_timeout_ms)
     },
   )
 }

@@ -33,6 +33,8 @@ fn fake_api_versions_response(
     (14, 5),
     (15, 6),
     (69, 1),
+    (16, 5),
+    (42, 2),
     (19, 7),
     (20, 6),
     (21, 2),
@@ -46,6 +48,9 @@ fn fake_api_versions_response(
     (50, 0),
     (51, 0),
     (60, 2),
+    (61, 0),
+    (65, 0),
+    (66, 2),
     (32, 4),
     (44, 1),
     (33, 2),
@@ -1049,6 +1054,19 @@ struct FakeClusterOps {
   describe_consumer_groups : Array[(Array[String], Bool)]
   /// Group ids ConsumerGroupDescribe answers with GROUP_ID_NOT_FOUND.
   describe_consumer_groups_not_found : Array[String]
+  /// ListGroups requests: (states_filter, types_filter).
+  list_groups : Array[(Array[String], Array[String])]
+  /// DeleteGroups requests: the group names to delete.
+  delete_groups : Array[Array[String]]
+  /// Group ids DeleteGroups answers with GROUP_ID_NOT_FOUND.
+  delete_groups_not_found : Array[String]
+  /// DescribeProducers requests: topics and their partition indexes.
+  describe_producers : Array[Array[(String, Array[Int])]]
+  /// DescribeTransactions requests: the transactional ids.
+  describe_transactions : Array[Array[String]]
+  /// ListTransactions requests: (state_filters, producer_id_filters,
+  /// duration_filter, transactional_id_pattern).
+  list_transactions : Array[(Array[String], Array[Int64], Int64, String?)]
 }
 
 ///|
@@ -1080,6 +1098,12 @@ fn FakeClusterOps::new() -> FakeClusterOps {
     describe_groups_not_found: [],
     describe_consumer_groups: [],
     describe_consumer_groups_not_found: [],
+    list_groups: [],
+    delete_groups: [],
+    delete_groups_not_found: [],
+    describe_producers: [],
+    describe_transactions: [],
+    list_transactions: [],
   }
 }
 
@@ -2161,6 +2185,248 @@ fn fake_group_describe_request(rest : Bytes) -> (Array[String], Bool) raise {
     groups.push(d.read_compact_string())
   }
   (groups, d.read_bool())
+}
+
+///|
+/// Parse a ListGroups v5 request: the states filter array then the types
+/// filter array (both compact), empty meaning "all".
+fn fake_list_groups_request(
+  rest : Bytes,
+) -> (Array[String], Array[String]) raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  let states : Array[String] = []
+  let n = d.read_compact_len()
+  for _ in 0..<n {
+    states.push(d.read_compact_string())
+  }
+  let types : Array[String] = []
+  let m = d.read_compact_len()
+  for _ in 0..<m {
+    types.push(d.read_compact_string())
+  }
+  (states, types)
+}
+
+///|
+/// ListGroups v5 response body: the broker's canned group catalog —
+/// one classic consumer group, one KIP-848 consumer group, and one
+/// share group — filtered by the requested state and type filters, so
+/// the filters are exercised end to end rather than just echoed.
+fn fake_list_groups_response(
+  states_filter : Array[String],
+  types_filter : Array[String],
+) -> Bytes {
+  let catalog = [
+    ("classic-group", "consumer", "Stable", "classic"),
+    ("k848-group", "consumer", "Stable", "consumer"),
+    ("share-group", "share", "Empty", "share"),
+  ]
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_i16(0) // error code
+  let listed : Array[(String, String, String, String)] = []
+  for entry in catalog {
+    let (_, _, state, type_) = entry
+    if (states_filter.length() == 0 || states_filter.contains(state)) &&
+      (types_filter.length() == 0 || types_filter.contains(type_)) {
+      listed.push(entry)
+    }
+  }
+  e.write_compact_len(listed.length())
+  for entry in listed {
+    let (id, protocol, state, type_) = entry
+    e.write_compact_string(id)
+    e.write_compact_string(protocol)
+    e.write_compact_string(state)
+    e.write_compact_string(type_)
+    e.write_tag_buffer()
+  }
+  e.write_tag_buffer() // top level
+  e.to_bytes()
+}
+
+///|
+/// Parse a DeleteGroups v2 request: the compact array of group names.
+fn fake_delete_groups_request(rest : Bytes) -> Array[String] raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  let groups : Array[String] = []
+  let n = d.read_compact_len()
+  for _ in 0..<n {
+    groups.push(d.read_compact_string())
+  }
+  groups
+}
+
+///|
+/// DeleteGroups v2 response body: one result per requested group, in
+/// request order. Groups in `not_found` come back GROUP_ID_NOT_FOUND;
+/// the rest succeed with error 0.
+fn fake_delete_groups_response(
+  groups : Array[String],
+  not_found : Array[String],
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(groups.length())
+  for group in groups {
+    e.write_compact_string(group)
+    e.write_i16(if not_found.contains(group) { 69 } else { 0 })
+    e.write_tag_buffer()
+  }
+  e.write_tag_buffer() // top level
+  e.to_bytes()
+}
+
+///|
+/// Parse a DescribeProducers v0 request: topics and their partition
+/// indexes.
+fn fake_describe_producers_request(
+  rest : Bytes,
+) -> Array[(String, Array[Int])] raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  let out : Array[(String, Array[Int])] = []
+  let n = d.read_compact_len()
+  for _ in 0..<n {
+    let name = d.read_compact_string()
+    let partitions : Array[Int] = []
+    let pcount = d.read_compact_len()
+    for _ in 0..<pcount {
+      partitions.push(d.read_i32())
+    }
+    d.skip_tag_buffer() // topic
+    out.push((name, partitions))
+  }
+  out
+}
+
+///|
+/// DescribeProducers v0 response body: echoes the requested topics and
+/// partitions. Partition 0 carries one active producer; the rest are idle.
+fn fake_describe_producers_response(
+  topics : Array[(String, Array[Int])],
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(topics.length())
+  for topic in topics {
+    let (name, partitions) = topic
+    e.write_compact_string(name)
+    e.write_compact_len(partitions.length())
+    for partition in partitions {
+      e.write_i32(partition)
+      e.write_i16(0) // error code
+      e.write_compact_nullable_string(None) // error message
+      if partition == 0 {
+        e.write_compact_len(1) // one active producer
+        e.write_i64(12345L)
+        e.write_i32(1) // producer epoch
+        e.write_i32(42) // last sequence
+        e.write_i64(1234567890L) // last timestamp
+        e.write_i32(0) // coordinator epoch
+        e.write_i64(100L) // current txn start offset
+        e.write_tag_buffer()
+      } else {
+        e.write_compact_len(0) // idle
+      }
+      e.write_tag_buffer() // partition
+    }
+    e.write_tag_buffer() // topic
+  }
+  e.write_tag_buffer() // top level
+  e.to_bytes()
+}
+
+///|
+/// Parse a DescribeTransactions v0 request: the transactional ids.
+fn fake_describe_transactions_request(rest : Bytes) -> Array[String] raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  let out : Array[String] = []
+  let n = d.read_compact_len()
+  for _ in 0..<n {
+    out.push(d.read_compact_string())
+  }
+  out
+}
+
+///|
+/// DescribeTransactions v0 response body: echoes the requested ids with a
+/// canned Ongoing transaction spanning two partitions.
+fn fake_describe_transactions_response(ids : Array[String]) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(ids.length())
+  for id in ids {
+    e.write_i16(0) // error code
+    e.write_compact_string(id)
+    e.write_compact_string("Ongoing")
+    e.write_i32(30000) // transaction timeout
+    e.write_i64(1234567890L) // start time
+    e.write_i64(12345L) // producer id
+    e.write_i16(1) // producer epoch
+    e.write_compact_len(1) // one topic
+    e.write_compact_string("events")
+    e.write_compact_len(2) // two partitions
+    e.write_i32(0)
+    e.write_i32(1)
+    e.write_tag_buffer() // TopicData
+    e.write_tag_buffer() // TransactionState
+  }
+  e.write_tag_buffer() // top level
+  e.to_bytes()
+}
+
+///|
+/// Parse a ListTransactions v2 request: state filters, producer id
+/// filters, duration filter, and the nullable transactional-id pattern.
+fn fake_list_transactions_request(
+  rest : Bytes,
+) -> (Array[String], Array[Int64], Int64, String?) raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  let states : Array[String] = []
+  let scount = d.read_compact_len()
+  for _ in 0..<scount {
+    states.push(d.read_compact_string())
+  }
+  let producers : Array[Int64] = []
+  let pcount = d.read_compact_len()
+  for _ in 0..<pcount {
+    producers.push(d.read_i64())
+  }
+  let duration = d.read_i64()
+  let pattern = d.read_compact_nullable_string()
+  (states, producers, duration, pattern)
+}
+
+///|
+/// ListTransactions v2 response body: a top-level error, the unknown
+/// state filters, and the transactions this broker coordinates.
+fn fake_list_transactions_response(
+  error_code : Int,
+  unknown : Array[String],
+  transactions : Array[(String, Int64, String)],
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_i16(error_code)
+  e.write_compact_len(unknown.length())
+  for state in unknown {
+    e.write_compact_string(state)
+  }
+  e.write_compact_len(transactions.length())
+  for txn in transactions {
+    let (id, producer_id, state) = txn
+    e.write_compact_string(id)
+    e.write_i64(producer_id)
+    e.write_compact_string(state)
+    e.write_tag_buffer() // TransactionState
+  }
+  e.write_tag_buffer() // top level
+  e.to_bytes()
 }
 
 ///|
@@ -3426,9 +3692,38 @@ async fn fake_serve_conn(
           cluster_ops.describe_consumer_groups_not_found,
         )
       }
+      16 => {
+        let (states, types) = fake_list_groups_request(rest)
+        cluster_ops.list_groups.push((states, types))
+        fake_list_groups_response(states, types)
+      }
+      42 => {
+        let groups = fake_delete_groups_request(rest)
+        cluster_ops.delete_groups.push(groups)
+        fake_delete_groups_response(groups, cluster_ops.delete_groups_not_found)
+      }
       60 => {
         cluster_ops.describe_cluster.push(fake_describe_cluster_request(rest))
         fake_describe_cluster_response(broker_port, version)
+      }
+      61 => {
+        let topics = fake_describe_producers_request(rest)
+        cluster_ops.describe_producers.push(topics)
+        fake_describe_producers_response(topics)
+      }
+      65 => {
+        let ids = fake_describe_transactions_request(rest)
+        cluster_ops.describe_transactions.push(ids)
+        fake_describe_transactions_response(ids)
+      }
+      66 => {
+        let (states, producers, duration, pattern) = fake_list_transactions_request(
+          rest,
+        )
+        cluster_ops.list_transactions.push(
+          (states, producers, duration, pattern),
+        )
+        fake_list_transactions_response(0, [], [("txn-1", 12345L, "Ongoing")])
       }
       32 => {
         let (resources, _, _) = fake_describe_configs_request(rest)
@@ -6301,6 +6596,190 @@ async test "admin describes classic groups and KIP-848 consumer groups" {
     let (cg_requested, cg_wanted_operations) = ops.describe_consumer_groups[0]
     assert_eq(cg_requested, ["k848", "gone"])
     assert_true(!cg_wanted_operations)
+    server.close()
+  }
+}
+
+///|
+async test "admin lists groups with state and type filters" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let ops = FakeClusterOps::new()
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, cluster_ops=ops)
+    }
+    let admin = @moonkafka.Admin::connect(
+      group=root,
+      host="127.0.0.1",
+      port=server.addr.port(),
+    )
+    defer admin.close()
+    // No filters: the broker's whole catalog — a classic group, a
+    // KIP-848 group, and a share group.
+    let all = admin.list_groups()
+    assert_eq(all.error_code, 0)
+    assert_eq(all.groups.length(), 3)
+    assert_eq(all.groups[0].group_id, "classic-group")
+    assert_eq(all.groups[0].protocol_type, "consumer")
+    assert_eq(all.groups[0].group_state, "Stable")
+    assert_eq(all.groups[0].group_type, "classic")
+    assert_eq(all.groups[1].group_id, "k848-group")
+    assert_eq(all.groups[1].group_type, "consumer")
+    assert_eq(all.groups[2].group_id, "share-group")
+    assert_eq(all.groups[2].group_type, "share")
+    // The first request carried empty filters on the wire.
+    let (states, types) = ops.list_groups[0]
+    assert_eq(states, [])
+    assert_eq(types, [])
+    // A state filter narrows to the two Stable groups (the share group is
+    // Empty), and the filter travels on the wire.
+    let stable = admin.list_groups(states_filter=["Stable"])
+    assert_eq(stable.error_code, 0)
+    assert_eq(stable.groups.length(), 2)
+    assert_eq(stable.groups[0].group_id, "classic-group")
+    assert_eq(stable.groups[1].group_id, "k848-group")
+    let (states2, types2) = ops.list_groups[1]
+    assert_eq(states2, ["Stable"])
+    assert_eq(types2, [])
+    // A type filter picks just the new-protocol consumer group.
+    let consumers = admin.list_groups(types_filter=["consumer"])
+    assert_eq(consumers.groups.length(), 1)
+    assert_eq(consumers.groups[0].group_id, "k848-group")
+    let (_, types3) = ops.list_groups[2]
+    assert_eq(types3, ["consumer"])
+    server.close()
+  }
+}
+
+///|
+async test "admin deletes groups with per-group error codes" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let ops = FakeClusterOps::new()
+    ops.delete_groups_not_found.push("gone")
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, cluster_ops=ops)
+    }
+    let admin = @moonkafka.Admin::connect(
+      group=root,
+      host="127.0.0.1",
+      port=server.addr.port(),
+    )
+    defer admin.close()
+    let results = admin.delete_groups(["empty-group", "gone"])
+    assert_eq(results.length(), 2)
+    assert_eq(results[0].group_id, "empty-group")
+    assert_eq(results[0].error_code, 0)
+    assert_eq(results[1].group_id, "gone")
+    assert_eq(results[1].error_code, @moonkafka.GROUP_ID_NOT_FOUND)
+    // The group names traveled on the wire in request order.
+    assert_eq(ops.delete_groups[0], ["empty-group", "gone"])
+    server.close()
+  }
+}
+
+///|
+async test "admin describes active producers per partition" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let ops = FakeClusterOps::new()
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, cluster_ops=ops)
+    }
+    let admin = @moonkafka.Admin::connect(
+      group=root,
+      host="127.0.0.1",
+      port=server.addr.port(),
+    )
+    defer admin.close()
+    let results = admin.describe_producers([("events", [0, 1])])
+    assert_eq(results.length(), 1)
+    let topic = results[0]
+    assert_eq(topic.name, "events")
+    assert_eq(topic.partitions.length(), 2)
+    // Partition 0 has one active producer; partition 1 is idle.
+    let p0 = topic.partitions[0]
+    assert_eq(p0.partition_index, 0)
+    assert_eq(p0.error_code, 0)
+    assert_eq(p0.error_message, None)
+    assert_eq(p0.active_producers.length(), 1)
+    let producer = p0.active_producers[0]
+    assert_eq(producer.producer_id, 12345L)
+    assert_eq(producer.producer_epoch, 1)
+    assert_eq(producer.last_sequence, 42)
+    assert_eq(producer.current_txn_start_offset, 100L)
+    let p1 = topic.partitions[1]
+    assert_eq(p1.partition_index, 1)
+    assert_eq(p1.active_producers.length(), 0)
+    // The topic and partition indexes traveled on the wire.
+    assert_eq(ops.describe_producers[0], [("events", [0, 1])])
+    server.close()
+  }
+}
+
+///|
+async test "admin describes transactions by id" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let ops = FakeClusterOps::new()
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, cluster_ops=ops)
+    }
+    let admin = @moonkafka.Admin::connect(
+      group=root,
+      host="127.0.0.1",
+      port=server.addr.port(),
+    )
+    defer admin.close()
+    let results = admin.describe_transactions(["tx1"])
+    assert_eq(results.length(), 1)
+    let txn = results[0]
+    assert_eq(txn.error_code, 0)
+    assert_eq(txn.transactional_id, "tx1")
+    assert_eq(txn.transaction_state, "Ongoing")
+    assert_eq(txn.transaction_timeout_ms, 30000)
+    assert_eq(txn.producer_id, 12345L)
+    assert_eq(txn.producer_epoch, 1)
+    assert_eq(txn.topics[0].topic, "events")
+    assert_eq(txn.topics[0].partitions, [0, 1])
+    // The transactional id traveled on the wire.
+    assert_eq(ops.describe_transactions[0], ["tx1"])
+    server.close()
+  }
+}
+
+///|
+async test "admin lists transactions with filters" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let ops = FakeClusterOps::new()
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, cluster_ops=ops)
+    }
+    let admin = @moonkafka.Admin::connect(
+      group=root,
+      host="127.0.0.1",
+      port=server.addr.port(),
+    )
+    defer admin.close()
+    let result = admin.list_transactions(
+      state_filters=["Ongoing"],
+      duration_filter=5000L,
+    )
+    assert_eq(result.error_code, 0)
+    assert_eq(result.transactions.length(), 1)
+    assert_eq(result.transactions[0].transactional_id, "txn-1")
+    assert_eq(result.transactions[0].producer_id, 12345L)
+    assert_eq(result.transactions[0].transaction_state, "Ongoing")
+    // The filters traveled on the wire; the pattern defaults to None.
+    assert_eq(ops.list_transactions[0].0, ["Ongoing"])
+    assert_eq(ops.list_transactions[0].2, 5000L)
+    assert_eq(ops.list_transactions[0].3, None)
     server.close()
   }
 }
