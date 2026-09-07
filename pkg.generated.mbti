@@ -146,6 +146,8 @@ pub const API_FETCH : Int = 1
 
 pub const API_FIND_COORDINATOR : Int = 10
 
+pub const API_GET_TELEMETRY_SUBSCRIPTIONS : Int = 71
+
 pub const API_HEARTBEAT : Int = 12
 
 pub const API_INCREMENTAL_ALTER_CONFIGS : Int = 44
@@ -177,6 +179,8 @@ pub const API_OFFSET_FETCH : Int = 9
 pub const API_OFFSET_FOR_LEADER_EPOCH : Int = 23
 
 pub const API_PRODUCE : Int = 0
+
+pub const API_PUSH_TELEMETRY : Int = 72
 
 pub const API_SASL_AUTHENTICATE : Int = 36
 
@@ -358,6 +362,8 @@ pub fn decode_fetch_response(Int, @buf.Decoder) -> (FetchResult, Int) raise
 
 pub fn decode_find_coordinator_response(@buf.Decoder) -> (Array[CoordinatorInfo], Int) raise
 
+pub fn decode_get_telemetry_subscriptions_response(@buf.Decoder) -> (TelemetrySubscription, Int) raise
+
 pub fn decode_heartbeat_response(@buf.Decoder) -> (Int, Int) raise
 
 pub fn decode_incremental_alter_configs_response(@buf.Decoder) -> (Array[AlterConfigsResult], Int) raise
@@ -389,6 +395,8 @@ pub fn decode_offset_fetch_response(Int, @buf.Decoder) -> (Array[OffsetFetchGrou
 pub fn decode_offset_for_leader_epoch_response(@buf.Decoder) -> (Array[EpochEndOffset], Int) raise
 
 pub fn decode_produce_response(Int, @buf.Decoder) -> (Array[ProducePartitionResult], Int) raise
+
+pub fn decode_push_telemetry_response(@buf.Decoder) -> (Int, Int) raise
 
 pub fn decode_record_batches(Bytes) -> Array[Record] raise @buf.DecodeError
 
@@ -488,6 +496,8 @@ pub fn encode_fetch_request(Int, Array[FetchTopicReq], session~ : FetchSessionRe
 
 pub fn encode_find_coordinator_request(Array[String], CoordinatorType) -> Bytes
 
+pub fn encode_get_telemetry_subscriptions_request(Uuid) -> Bytes
+
 pub fn encode_heartbeat_request(String, Int, String, group_instance_id? : String?) -> Bytes
 
 pub fn encode_incremental_alter_configs_request(Array[AlterableConfigResource], Bool) -> Bytes
@@ -520,6 +530,8 @@ pub fn encode_offset_for_leader_epoch_request(String, Array[(Int, Int, Int)], ti
 
 pub fn encode_produce_request(Int, String, Uuid, Array[(Int, Bytes)], transactional_id? : String?, acks~ : Int, timeout_ms~ : Int) -> Bytes raise
 
+pub fn encode_push_telemetry_request(Uuid, Int, Bool, Int, Bytes) -> Bytes
+
 pub fn encode_record_batch(Array[Record]) -> Bytes
 
 pub fn encode_record_batch_with_base_offset(Int64, Array[Record]) -> Bytes
@@ -547,6 +559,8 @@ pub fn encode_update_features_request(Array[FeatureUpdate], Int, Bool) -> Bytes
 pub fn error_name(Int) -> String
 
 pub fn error_retriable(Int) -> Bool
+
+pub fn render_metrics(Array[(String, Int64)]) -> Bytes
 
 pub fn scram_auth_message(String, String, String) -> String
 
@@ -1005,6 +1019,7 @@ pub async fn BrokerConnection::end_txn(Self, String, Int64, Int, Bool, timeout_m
 pub async fn BrokerConnection::fetch(Self, Array[FetchTopicReq], session~ : FetchSessionReq, max_wait_ms~ : Int, min_bytes? : Int, max_bytes? : Int, isolation_level? : Int, timeout_ms? : Int) -> FetchResult
 pub async fn BrokerConnection::fetch_metadata(Self, Array[String]?, timeout_ms? : Int) -> Metadata
 pub async fn BrokerConnection::find_coordinator(Self, Array[String], CoordinatorType, timeout_ms? : Int) -> Array[CoordinatorInfo]
+pub async fn BrokerConnection::get_telemetry_subscriptions(Self, Uuid, timeout_ms? : Int) -> (TelemetrySubscription, Int)
 pub async fn BrokerConnection::group_heartbeat(Self, String, Int, String, group_instance_id? : String?, timeout_ms? : Int) -> Int
 pub async fn BrokerConnection::incremental_alter_configs(Self, Array[AlterableConfigResource], timeout_ms? : Int, validate_only? : Bool) -> Array[AlterConfigsResult]
 pub async fn BrokerConnection::init_producer_id(Self, transactional_id? : String?, transaction_timeout_ms? : Int, producer_id? : Int64, producer_epoch? : Int, timeout_ms? : Int) -> InitProducerIdResult
@@ -1022,6 +1037,7 @@ pub async fn BrokerConnection::offset_delete(Self, String, Array[(String, Array[
 pub async fn BrokerConnection::offset_fetch(Self, String, member_id? : String, member_epoch? : Int, topics~ : Array[FetchOffsetTopic], require_stable? : Bool, timeout_ms? : Int) -> Array[OffsetFetchGroupResult]
 pub async fn BrokerConnection::offset_for_leader_epoch(Self, String, Array[(Int, Int, Int)], timeout_ms? : Int) -> Array[EpochEndOffset]
 pub async fn BrokerConnection::produce(Self, String, topic_id? : Uuid, transactional_id? : String?, partitions~ : Array[(Int, Bytes)], acks~ : Int, timeout_ms~ : Int) -> Array[ProducePartitionResult]
+pub async fn BrokerConnection::push_telemetry(Self, Uuid, Int, Bytes, terminating? : Bool, compression_type? : Int, timeout_ms? : Int) -> Int
 pub async fn BrokerConnection::request(Self, Int, Int, Bytes, timeout_ms? : Int) -> @buf.Decoder
 pub async fn BrokerConnection::request_raw(Self, Int, Int, Bytes, timeout_ms? : Int, flexible? : Bool) -> @buf.Decoder
 pub async fn BrokerConnection::send_only(Self, Int, Int, Bytes) -> Unit
@@ -2083,6 +2099,36 @@ pub struct SyncGroupResult {
   assignment : Bytes
 } derive(@debug.Debug)
 
+pub struct TelemetryClient {
+  cluster : ClusterClient
+  group : @async.TaskGroup[Unit]
+  max_push_bytes : Int
+  metrics_provider : () -> Bytes
+  // private fields
+}
+pub fn TelemetryClient::close(Self) -> Unit
+pub async fn TelemetryClient::connect_with_config(group~ : @async.TaskGroup[Unit], TelemetryClientConfig) -> Self
+pub async fn TelemetryClient::run(Self) -> Unit
+
+pub struct TelemetryClientConfig {
+  common : CommonConfig
+  client_instance_id : Uuid
+  max_push_bytes : Int
+  metrics_provider : () -> Bytes
+}
+pub fn TelemetryClientConfig::new(Array[String], client_instance_id? : Uuid, max_push_bytes? : Int, metrics_provider~ : () -> Bytes, request_timeout_ms? : Int, security_protocol? : SecurityProtocol, sasl? : SaslConfig?, tls? : TlsClientOptions?, metadata_max_age_ms? : Int) -> Self raise
+
+pub struct TelemetrySubscription {
+  error_code : Int
+  client_instance_id : Uuid
+  subscription_id : Int
+  accepted_compression_types : Array[Int]
+  push_interval_ms : Int
+  telemetry_max_bytes : Int
+  delta_temporality : Bool
+  requested_metrics : Array[String]
+} derive(@debug.Debug)
+
 pub(all) struct TlsClientOptions {
   server_name : String
   verify_certificates : Bool
@@ -2129,5 +2175,6 @@ pub fn Uuid::zero() -> Self
 pub impl Show for Uuid
 
 // Type aliases
+pub type MetricsProvider = () -> Bytes
 
 // Traits

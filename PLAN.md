@@ -893,7 +893,7 @@ quota + SCRAM credential round-trips against a configured cluster.
       states), ShareAcknowledge v2 (accept/release/reject per record);
       queue-size + delivery-count config; Describe/Alter/DeleteShareGroupOffsets
       via admin; share-group error codes (`SHARE_SESSION_LIMIT_REACHED` …).
-- [ ] Telemetry (KIP-714): GetTelemetrySubscriptions/PushTelemetry client
+- [x] Telemetry (KIP-714): GetTelemetrySubscriptions/PushTelemetry client
       with pluggable metrics provider; low priority — only if there's a
       consumer for the telemetry (e.g. expose driver's own metrics via it).
 

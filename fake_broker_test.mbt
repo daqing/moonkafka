@@ -68,6 +68,8 @@ fn fake_api_versions_response(
     (90, 1),
     (91, 0),
     (92, 0),
+    (71, 0),
+    (72, 0),
   ]
   let apis = all_apis.filter(fn(pair) { !hide_apis.contains(pair.0) })
   e.write_compact_len(apis.length())
