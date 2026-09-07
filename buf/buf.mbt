@@ -21,6 +21,16 @@ pub fn Encoder::new() -> Encoder {
 }
 
 ///|
+/// Preallocate the backing array to hold roughly `n` bytes up front, so
+/// the hot request/record-batch encoding paths avoid repeated array
+/// growth reallocations. Growth stalls when the estimate is exceeded.
+/// `n` < 0 inserts a default growable capacity (16 bytes).
+pub fn Encoder::with_capacity(n : Int) -> Encoder {
+  let capacity = if n < 0 { 16 } else { n }
+  { buf: Array::new(capacity~), }
+}
+
+///|
 pub fn Encoder::to_bytes(self : Encoder) -> Bytes {
   Bytes::from_array(self.buf)
 }
@@ -57,6 +67,15 @@ pub fn Encoder::write_i32(self : Encoder, v : Int) -> Unit {
 pub fn Encoder::write_i64(self : Encoder, v : Int64) -> Unit {
   for shift in [56, 48, 40, 32, 24, 16, 8, 0] {
     self.buf.push((v >> shift).to_byte())
+  }
+}
+
+///|
+/// FLOAT64: big-endian IEEE 754 double (quota config values).
+pub fn Encoder::write_f64(self : Encoder, v : Double) -> Unit {
+  let bits = v.reinterpret_as_uint64()
+  for shift in [56, 48, 40, 32, 24, 16, 8, 0] {
+    self.buf.push((bits >> shift).to_byte())
   }
 }
 
@@ -139,6 +158,25 @@ pub fn Encoder::write_tag_buffer(self : Encoder) -> Unit {
 }
 
 ///|
+/// Tag buffer with the given tagged fields. Count, tag numbers, and payload
+/// sizes are plain unsigned varints (not compact +1). Fields are written in
+/// ascending tag order as the protocol requires; tag numbers must be unique.
+pub fn Encoder::write_tagged_fields(
+  self : Encoder,
+  tags : Array[(Int, Bytes)],
+) -> Unit {
+  let sorted = tags.copy()
+  sorted.sort_by(fn(a, b) { a.0.compare(b.0) })
+  self.write_uvarint(sorted.length().reinterpret_as_uint())
+  for pair in sorted {
+    let (tag, data) = pair
+    self.write_uvarint(tag.reinterpret_as_uint())
+    self.write_uvarint(data.length().reinterpret_as_uint())
+    self.write_bytes(data)
+  }
+}
+
+///|
 pub struct Decoder {
   data : Bytes
   mut pos : Int
@@ -155,8 +193,10 @@ pub fn Decoder::remaining(self : Decoder) -> Int {
 }
 
 ///|
+/// Bounds check computed by subtraction (never overflows); negative
+/// lengths from malformed input raise instead of rewinding or panicking.
 fn Decoder::need(self : Decoder, n : Int) -> Unit raise DecodeError {
-  if self.pos + n > self.data.length() {
+  if n < 0 || n > self.data.length() - self.pos {
     raise DecodeError::UnexpectedEof
   }
 }
@@ -215,21 +255,51 @@ pub fn Decoder::read_i64(self : Decoder) -> Int64 raise DecodeError {
 }
 
 ///|
-/// Skip n bytes, raising on overrun.
+/// FLOAT64: big-endian IEEE 754 double.
+pub fn Decoder::read_f64(self : Decoder) -> Double raise DecodeError {
+  self.need(8)
+  let mut bits = 0UL
+  for _ in 0..<8 {
+    bits = (bits << 8) |
+      Int64::from_int(self.data[self.pos].to_int()).reinterpret_as_uint64()
+    self.pos += 1
+  }
+  bits.reinterpret_as_double()
+}
+
+///|
+/// Skip n bytes. Negative n and overruns raise; bounds are computed by
+/// subtraction so a malformed huge length cannot overflow the check.
 pub fn Decoder::skip(self : Decoder, n : Int) -> Unit raise DecodeError {
-  self.need(n)
+  if n < 0 || n > self.data.length() - self.pos {
+    raise DecodeError::UnexpectedEof
+  }
   self.pos += n
 }
 
 ///|
 pub fn Decoder::read_bytes(self : Decoder, n : Int) -> Bytes raise DecodeError {
   self.need(n)
-  let out : Array[Byte] = Array::new(capacity=n)
-  for _ in 0..<n {
-    out.push(self.data[self.pos])
-    self.pos += 1
-  }
-  Bytes::from_array(out)
+  let copy = self.data[self.pos:self.pos + n].to_owned()
+  self.pos += n
+  copy
+}
+
+///|
+/// Zero-copy view over the next `n` bytes of the backing buffer — no
+/// copy is made, so callers that only inspect or immediately re-read the
+/// bytes (e.g. blobbing a whole compressed records region before
+/// building the owned `Bytes` a decompressor needs) avoid a defensive
+/// copy. The returned `BytesView` borrows `self.data` and stays valid
+/// while that `Bytes` outlives the decoder.
+pub fn Decoder::read_bytes_view(
+  self : Decoder,
+  n : Int,
+) -> BytesView raise DecodeError {
+  self.need(n)
+  let view = self.data[self.pos:self.pos + n]
+  self.pos += n
+  view
 }
 
 ///|
