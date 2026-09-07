@@ -36,6 +36,9 @@ fn fake_api_versions_response(
     (21, 2),
     (37, 3),
     (47, 0),
+    (29, 3),
+    (30, 3),
+    (31, 3),
     (60, 2),
     (32, 4),
     (44, 1),
@@ -1024,6 +1027,9 @@ struct FakeClusterOps {
   quorum_requests : Array[(String, Int)]
   update_features : Array[(String, Int, Int, Bool)] // (feature, level, type, validate-only)
   mut update_features_error : Int
+  describe_acls : Array[@moonkafka.AclFilter]
+  create_acls : Array[@moonkafka.AclCreation]
+  delete_acls : Array[@moonkafka.AclFilter]
 }
 
 ///|
@@ -1042,6 +1048,9 @@ fn FakeClusterOps::new() -> FakeClusterOps {
     quorum_requests: [],
     update_features: [],
     update_features_error: 0,
+    describe_acls: [],
+    create_acls: [],
+    delete_acls: [],
   }
 }
 
@@ -1654,6 +1663,145 @@ fn fake_update_features_response(error_code : Int) -> Bytes {
   e.write_i32(0) // throttle
   e.write_i16(error_code)
   e.write_compact_nullable_string(None)
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse one AclFilter from the current decoder position.
+fn fake_acl_filter(d : @buf.Decoder) -> @moonkafka.AclFilter raise {
+  let resource_type = d.read_i8()
+  let resource_name = d.read_compact_nullable_string()
+  let pattern_type = d.read_i8()
+  let principal = d.read_compact_nullable_string()
+  let host = d.read_compact_nullable_string()
+  let operation = d.read_i8()
+  let permission_type = d.read_i8()
+  d.skip_tag_buffer()
+  {
+    resource_type,
+    resource_name,
+    pattern_type,
+    principal,
+    host,
+    operation,
+    permission_type,
+  }
+}
+
+///|
+/// Parse a DescribeAcls request: one filter.
+fn fake_describe_acls_request(rest : Bytes) -> @moonkafka.AclFilter raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  fake_acl_filter(d)
+}
+
+///|
+/// Parse a CreateAcls request: the creations.
+fn fake_create_acls_request(
+  rest : Bytes,
+) -> Array[@moonkafka.AclCreation] raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  let out : Array[@moonkafka.AclCreation] = []
+  let n = d.read_compact_len()
+  for _ in 0..<n {
+    let resource_type = d.read_i8()
+    let resource_name = d.read_compact_string()
+    let pattern_type = d.read_i8()
+    let principal = d.read_compact_string()
+    let host = d.read_compact_string()
+    let operation = d.read_i8()
+    let permission_type = d.read_i8()
+    d.skip_tag_buffer()
+    out.push({
+      resource_type,
+      resource_name,
+      pattern_type,
+      principal,
+      host,
+      operation,
+      permission_type,
+    })
+  }
+  out
+}
+
+///|
+/// Parse a DeleteAcls request: the filters.
+fn fake_delete_acls_request(rest : Bytes) -> Array[@moonkafka.AclFilter] raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  let out : Array[@moonkafka.AclFilter] = []
+  let n = d.read_compact_len()
+  for _ in 0..<n {
+    out.push(fake_acl_filter(d))
+  }
+  out
+}
+
+///|
+/// DescribeAcls response body: the "events" topic (literal) carrying
+/// one ALLOW/READ ACL for User:alice.
+fn fake_describe_acls_response() -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_i16(0) // error
+  e.write_compact_nullable_string(None)
+  e.write_compact_len(1) // one resource
+  e.write_i8(2) // topic
+  e.write_compact_string("events")
+  e.write_i8(3) // literal
+  e.write_compact_len(1) // one acl
+  e.write_compact_string("User:alice")
+  e.write_compact_string("*")
+  e.write_i8(3) // read
+  e.write_i8(3) // allow
+  e.write_tag_buffer()
+  e.write_tag_buffer()
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// CreateAcls response body: success per creation.
+fn fake_create_acls_response(count : Int) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(count)
+  for _ in 0..<count {
+    e.write_i16(0) // error
+    e.write_compact_nullable_string(None)
+    e.write_tag_buffer()
+  }
+  e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// DeleteAcls response body: per filter, the canned "events" ACL as the
+/// only match (deleted successfully).
+fn fake_delete_acls_response(count : Int) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(count)
+  for _ in 0..<count {
+    e.write_i16(0) // filter error
+    e.write_compact_nullable_string(None)
+    e.write_compact_len(1) // one matching acl
+    e.write_i16(0) // deletion error
+    e.write_compact_nullable_string(None)
+    e.write_i8(2) // topic
+    e.write_compact_string("events")
+    e.write_i8(3) // literal
+    e.write_compact_string("User:alice")
+    e.write_compact_string("*")
+    e.write_i8(3) // read
+    e.write_i8(3) // allow
+    e.write_tag_buffer()
+    e.write_tag_buffer()
+  }
   e.write_tag_buffer()
   e.to_bytes()
 }
@@ -2691,6 +2839,24 @@ async fn fake_serve_conn(
             }
           }
         }
+      }
+      29 => {
+        cluster_ops.describe_acls.push(fake_describe_acls_request(rest))
+        fake_describe_acls_response()
+      }
+      30 => {
+        let creations = fake_create_acls_request(rest)
+        for creation in creations {
+          cluster_ops.create_acls.push(creation)
+        }
+        fake_create_acls_response(creations.length())
+      }
+      31 => {
+        let filters = fake_delete_acls_request(rest)
+        for filter in filters {
+          cluster_ops.delete_acls.push(filter)
+        }
+        fake_delete_acls_response(filters.length())
       }
       60 => {
         cluster_ops.describe_cluster.push(fake_describe_cluster_request(rest))
@@ -5232,6 +5398,117 @@ async test "admin reads the quorum, updates features, unregisters brokers" {
     let unregistered = admin.unregister_broker(5)
     assert_eq(unregistered.error_code, 0)
     assert_eq(ops.unregister_broker, [5])
+    server.close()
+  }
+}
+
+///|
+async test "admin creates, describes, and deletes ACLs" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let ops = FakeClusterOps::new()
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, cluster_ops=ops)
+    }
+    let admin = @moonkafka.Admin::connect(
+      group=root,
+      host="127.0.0.1",
+      port=server.addr.port(),
+    )
+    defer admin.close()
+    // Grant alice read on the topic from any host, and alice consume on
+    // the group with a prefixed pattern.
+    let created = admin.create_acls([
+      {
+        resource_type: @moonkafka.ACL_RESOURCE_TOPIC,
+        resource_name: "events",
+        pattern_type: @moonkafka.ACL_PATTERN_LITERAL,
+        principal: "User:alice",
+        host: "*",
+        operation: @moonkafka.ACL_OPERATION_READ,
+        permission_type: @moonkafka.ACL_PERMISSION_ALLOW,
+      },
+      {
+        resource_type: @moonkafka.ACL_RESOURCE_GROUP,
+        resource_name: "gid-",
+        pattern_type: @moonkafka.ACL_PATTERN_PREFIXED,
+        principal: "User:alice",
+        host: "*",
+        operation: @moonkafka.ACL_OPERATION_READ,
+        permission_type: @moonkafka.ACL_PERMISSION_ALLOW,
+      },
+    ])
+    assert_eq(created.length(), 2)
+    assert_eq(created[0].error_code, 0)
+    assert_eq(created[1].error_code, 0)
+    assert_eq(ops.create_acls.length(), 2)
+    let first = ops.create_acls[0]
+    assert_eq(first.resource_type, @moonkafka.ACL_RESOURCE_TOPIC)
+    assert_eq(first.resource_name, "events")
+    assert_eq(first.pattern_type, @moonkafka.ACL_PATTERN_LITERAL)
+    assert_eq(first.principal, "User:alice")
+    assert_eq(first.host, "*")
+    assert_eq(first.operation, @moonkafka.ACL_OPERATION_READ)
+    assert_eq(first.permission_type, @moonkafka.ACL_PERMISSION_ALLOW)
+    // Describe the topic's ACLs: any principal/host, any operation.
+    let described = admin.describe_acls({
+      resource_type: @moonkafka.ACL_RESOURCE_TOPIC,
+      resource_name: Some("events"),
+      pattern_type: @moonkafka.ACL_PATTERN_LITERAL,
+      principal: None,
+      host: None,
+      operation: @moonkafka.ACL_OPERATION_ANY,
+      permission_type: @moonkafka.ACL_PERMISSION_ANY,
+    })
+    assert_eq(described.error_code, 0)
+    assert_eq(described.resources.length(), 1)
+    assert_eq(
+      described.resources[0].resource_type,
+      @moonkafka.ACL_RESOURCE_TOPIC,
+    )
+    assert_eq(described.resources[0].resource_name, "events")
+    assert_eq(
+      described.resources[0].pattern_type,
+      @moonkafka.ACL_PATTERN_LITERAL,
+    )
+    assert_eq(described.resources[0].acls.length(), 1)
+    assert_eq(described.resources[0].acls[0].principal, "User:alice")
+    assert_eq(described.resources[0].acls[0].host, "*")
+    assert_eq(
+      described.resources[0].acls[0].operation,
+      @moonkafka.ACL_OPERATION_READ,
+    )
+    assert_eq(
+      described.resources[0].acls[0].permission_type,
+      @moonkafka.ACL_PERMISSION_ALLOW,
+    )
+    let listed_filter = ops.describe_acls[0]
+    assert_eq(listed_filter.resource_type, @moonkafka.ACL_RESOURCE_TOPIC)
+    assert_eq(listed_filter.resource_name, Some("events"))
+    assert_true(listed_filter.principal is None)
+    assert_true(listed_filter.host is None)
+    // Delete alice's bindings: the filter matches the canned ACL.
+    let deleted = admin.delete_acls([
+      {
+        resource_type: @moonkafka.ACL_RESOURCE_ANY,
+        resource_name: None,
+        pattern_type: @moonkafka.ACL_PATTERN_ANY,
+        principal: Some("User:alice"),
+        host: None,
+        operation: @moonkafka.ACL_OPERATION_ANY,
+        permission_type: @moonkafka.ACL_PERMISSION_ANY,
+      },
+    ])
+    assert_eq(deleted.length(), 1)
+    assert_eq(deleted[0].error_code, 0)
+    assert_eq(deleted[0].matching_acls.length(), 1)
+    let removed = deleted[0].matching_acls[0]
+    assert_eq(removed.error_code, 0)
+    assert_eq(removed.binding.resource_name, "events")
+    assert_eq(removed.binding.principal, "User:alice")
+    assert_eq(ops.delete_acls.length(), 1)
+    assert_eq(ops.delete_acls[0].principal, Some("User:alice"))
     server.close()
   }
 }

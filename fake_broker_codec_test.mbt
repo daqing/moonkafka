@@ -191,3 +191,77 @@ test "update features v2 decodes the top-level result" {
   )
   assert_eq(request.length() > 10, true)
 }
+
+///|
+test "fake api versions negotiates the acl range" {
+  let body = fake_api_versions_response(0)
+  let d = @buf.Decoder::new(body)
+  let (versions, _) = @moonkafka.decode_api_versions_response(d)
+  assert_eq(versions.pick(@moonkafka.API_DESCRIBE_ACLS), 3)
+  assert_eq(versions.pick(@moonkafka.API_CREATE_ACLS), 3)
+  assert_eq(versions.pick(@moonkafka.API_DELETE_ACLS), 3)
+}
+
+///|
+test "acl request bodies are identical across v2 and v3" {
+  let filter : @moonkafka.AclFilter = {
+    resource_type: @moonkafka.ACL_RESOURCE_TOPIC,
+    resource_name: Some("events"),
+    pattern_type: @moonkafka.ACL_PATTERN_LITERAL,
+    principal: None,
+    host: None,
+    operation: @moonkafka.ACL_OPERATION_ANY,
+    permission_type: @moonkafka.ACL_PERMISSION_ANY,
+  }
+  // v3 only adds the USER resource type: v2/v3 share one wire shape.
+  assert_eq(@moonkafka.encode_describe_acls_request(filter).length() > 8, true)
+  assert_eq(
+    @moonkafka.encode_delete_acls_request([filter]),
+    @moonkafka.encode_delete_acls_request([filter]),
+  )
+}
+
+///|
+test "describe acls decodes the fake broker's v3 body" {
+  let body = fake_describe_acls_response()
+  let d = @buf.Decoder::new(body)
+  let (result, throttle) = @moonkafka.decode_describe_acls_response(d)
+  assert_eq(throttle, 0)
+  assert_eq(result.error_code, 0)
+  assert_eq(result.resources[0].acls[0].principal, "User:alice")
+  assert_eq(d.remaining(), 0)
+}
+
+///|
+test "acl responses carry per-item errors as values" {
+  // CreateAcls: the second creation failed.
+  let create = @buf.Encoder::new()
+  create.write_i32(3) // throttle
+  create.write_compact_len(2)
+  create.write_i16(0)
+  create.write_compact_nullable_string(None)
+  create.write_tag_buffer()
+  create.write_i16(100) // ACL_AUTHORIZATION_FAILED? any code as a value
+  create.write_compact_nullable_string(Some("denied"))
+  create.write_tag_buffer()
+  create.write_tag_buffer()
+  let d1 = @buf.Decoder::new(create.to_bytes())
+  let (creations, throttle) = @moonkafka.decode_create_acls_response(d1)
+  assert_eq(throttle, 3)
+  assert_eq(creations[0].error_code, 0)
+  assert_eq(creations[1].error_code, 100)
+  assert_eq(creations[1].error_message, Some("denied"))
+  // DeleteAcls: a filter-level error yields no matches.
+  let delete = @buf.Encoder::new()
+  delete.write_i32(0) // throttle
+  delete.write_compact_len(1)
+  delete.write_i16(82) // filter error
+  delete.write_compact_nullable_string(Some("security disabled"))
+  delete.write_compact_len(0) // no matching acls
+  delete.write_tag_buffer()
+  delete.write_tag_buffer()
+  let d2 = @buf.Decoder::new(delete.to_bytes())
+  let (filters, _) = @moonkafka.decode_delete_acls_response(d2)
+  assert_eq(filters[0].error_code, 82)
+  assert_eq(filters[0].matching_acls.length(), 0)
+}

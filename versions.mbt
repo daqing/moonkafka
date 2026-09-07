@@ -81,6 +81,15 @@ pub const API_TXN_OFFSET_COMMIT : Int = 28
 pub const API_DESCRIBE_TOPIC_PARTITIONS : Int = 75
 
 ///|
+pub const API_DESCRIBE_ACLS : Int = 29
+
+///|
+pub const API_CREATE_ACLS : Int = 30
+
+///|
+pub const API_DELETE_ACLS : Int = 31
+
+///|
 pub const API_DESCRIBE_CONFIGS : Int = 32
 
 ///|
@@ -250,6 +259,14 @@ pub fn driver_api_range(api_key : Int) -> ApiRange? {
         min: 0,
         max: 0,
       })
+    // ACL admin: v1 added pattern types, v2 is the first flexible
+    // version, v3 only adds the USER resource type (same wire shape).
+    API_DESCRIBE_ACLS =>
+      Some({ key: API_DESCRIBE_ACLS, name: "DescribeAcls", min: 2, max: 3, })
+    API_CREATE_ACLS =>
+      Some({ key: API_CREATE_ACLS, name: "CreateAcls", min: 2, max: 3, })
+    API_DELETE_ACLS =>
+      Some({ key: API_DELETE_ACLS, name: "DeleteAcls", min: 2, max: 3, })
     // DescribeConfigs v4 is the first flexible version and every 4.0+
     // broker accepts it; v1-v3 stay non-flexible and unimplemented.
     API_DESCRIBE_CONFIGS =>
