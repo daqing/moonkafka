@@ -39,6 +39,12 @@ pub const API_HEARTBEAT : Int = 12
 pub const API_LEAVE_GROUP : Int = 13
 
 ///|
+pub const API_DESCRIBE_GROUPS : Int = 15
+
+///|
+pub const API_CONSUMER_GROUP_DESCRIBE : Int = 69
+
+///|
 pub const API_CREATE_TOPICS : Int = 19
 
 ///|
@@ -202,6 +208,22 @@ pub fn driver_api_range(api_key : Int) -> ApiRange? {
       Some({ key: API_HEARTBEAT, name: "Heartbeat", min: 4, max: 4, })
     API_LEAVE_GROUP =>
       Some({ key: API_LEAVE_GROUP, name: "LeaveGroup", min: 5, max: 5, })
+    // DescribeGroups v6 is the 4.3 ceiling and every 4.0+ broker already
+    // advertises it (4.0 ships validVersions 0-6), so no older shape is
+    // needed; v5 is the first flexible version and v6 adds the per-group
+    // error message (KIP-1043).
+    API_DESCRIBE_GROUPS =>
+      Some({ key: API_DESCRIBE_GROUPS, name: "DescribeGroups", min: 6, max: 6, })
+    // ConsumerGroupDescribe is the KIP-848 counterpart: DescribeGroups only
+    // sees classic groups. v1 adds the per-member MemberType field
+    // (KIP-1099), and 4.0 brokers already advertise 0-1, so pin to v1.
+    API_CONSUMER_GROUP_DESCRIBE =>
+      Some({
+        key: API_CONSUMER_GROUP_DESCRIBE,
+        name: "ConsumerGroupDescribe",
+        min: 1,
+        max: 1,
+      })
     // Topic admin ops; v7 echoes topic ids, DeleteTopics v6 deletes by
     // id (topic-id-first, KIP-516).
     API_CREATE_TOPICS =>

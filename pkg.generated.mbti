@@ -92,6 +92,8 @@ pub const API_ALTER_USER_SCRAM_CREDENTIALS : Int = 51
 
 pub const API_API_VERSIONS : Int = 18
 
+pub const API_CONSUMER_GROUP_DESCRIBE : Int = 69
+
 pub const API_CONSUMER_GROUP_HEARTBEAT : Int = 68
 
 pub const API_CREATE_ACLS : Int = 30
@@ -113,6 +115,8 @@ pub const API_DESCRIBE_CLIENT_QUOTAS : Int = 48
 pub const API_DESCRIBE_CLUSTER : Int = 60
 
 pub const API_DESCRIBE_CONFIGS : Int = 32
+
+pub const API_DESCRIBE_GROUPS : Int = 15
 
 pub const API_DESCRIBE_LOG_DIRS : Int = 35
 
@@ -170,6 +174,8 @@ pub const API_UNREGISTER_BROKER : Int = 64
 
 pub const API_UPDATE_FEATURES : Int = 57
 
+pub const AUTHORIZED_OPERATIONS_NONE : Int = -2147483648
+
 pub const CONFIG_OP_APPEND : Int = 2
 
 pub const CONFIG_OP_DELETE : Int = 1
@@ -211,6 +217,14 @@ pub const FEATURE_UPGRADE : Int = 1
 pub const FETCH_FULL_EPOCH : Int = 0
 
 pub const FETCH_SESSION_ID_NOT_FOUND : Int = 70
+
+pub const GROUP_ID_NOT_FOUND : Int = 69
+
+pub const GROUP_MEMBER_TYPE_CLASSIC : Int = 0
+
+pub const GROUP_MEMBER_TYPE_CONSUMER : Int = 1
+
+pub const GROUP_MEMBER_TYPE_UNKNOWN : Int = -1
 
 pub const INVALID_FETCH_SESSION_EPOCH : Int = 71
 
@@ -264,6 +278,8 @@ pub fn decode_alter_user_scram_response(@buf.Decoder) -> (Array[AlterUserScramRe
 
 pub fn decode_api_versions_response(@buf.Decoder) -> (BrokerVersions, Int) raise
 
+pub fn decode_consumer_group_describe_response(@buf.Decoder) -> (Array[AdminConsumerGroupDescription], Int) raise
+
 pub fn decode_consumer_group_heartbeat_response(@buf.Decoder) -> (ConsumerGroupHeartbeatResult, Int) raise
 
 pub fn decode_consumer_protocol_assignment(Bytes) -> Array[(String, Array[Int])] raise
@@ -289,6 +305,8 @@ pub fn decode_describe_client_quotas_response(Int, @buf.Decoder) -> (DescribeCli
 pub fn decode_describe_cluster_response(Int, @buf.Decoder) -> (AdminClusterDescription, Int) raise
 
 pub fn decode_describe_configs_response(@buf.Decoder) -> (Array[AdminConfigsResult], Int) raise
+
+pub fn decode_describe_groups_response(@buf.Decoder) -> (Array[AdminGroupDescription], Int) raise
 
 pub fn decode_describe_log_dirs_response(Int, @buf.Decoder) -> (AdminLogDirs, Int) raise
 
@@ -368,6 +386,8 @@ pub fn encode_alter_user_scram_request(Array[ScramCredentialDeletion], Array[Scr
 
 pub fn encode_api_versions_request() -> Bytes
 
+pub fn encode_consumer_group_describe_request(Array[String], Bool) -> Bytes
+
 pub fn encode_consumer_group_heartbeat_request(Int, String, String, Int, instance_id? : String?, rack_id? : String?, rebalance_timeout_ms? : Int, subscribed_topic_names? : Array[String]?, subscribed_topic_regex? : String?, server_assignor? : String?) -> Bytes raise
 
 pub fn encode_consumer_protocol_assignment(Array[(String, Array[Int])]) -> Bytes
@@ -393,6 +413,8 @@ pub fn encode_describe_client_quotas_request(ClientQuotaFilter, Int) -> Bytes
 pub fn encode_describe_cluster_request(Bool, Bool, Int) -> Bytes
 
 pub fn encode_describe_configs_request(Array[ConfigResourceKey]) -> Bytes
+
+pub fn encode_describe_groups_request(Array[String], Bool) -> Bytes
 
 pub fn encode_describe_log_dirs_request(Array[(String, Array[Int])]?, Int) -> Bytes
 
@@ -565,6 +587,8 @@ pub async fn Admin::describe_acls(Self, AclFilter) -> DescribeAclsResult
 pub async fn Admin::describe_client_quotas(Self, ClientQuotaFilter) -> DescribeClientQuotasResult
 pub async fn Admin::describe_cluster(Self, include_authorized_operations? : Bool, include_fenced_brokers? : Bool) -> AdminClusterDescription
 pub async fn Admin::describe_configs(Self, Array[ConfigResourceKey]) -> Array[AdminConfigsResult]
+pub async fn Admin::describe_consumer_groups(Self, Array[String], include_authorized_operations? : Bool) -> Array[AdminConsumerGroupDescription]
+pub async fn Admin::describe_groups(Self, Array[String], include_authorized_operations? : Bool) -> Array[AdminGroupDescription]
 pub async fn Admin::describe_log_dirs(Self, topics? : Array[(String, Array[Int])]?) -> AdminLogDirs
 pub async fn Admin::describe_quorum(Self, topic? : String, partition? : Int) -> AdminQuorumDescription
 pub async fn Admin::describe_topic_partitions(Self, Array[String]) -> Array[AdminTopicDescription]
@@ -576,6 +600,12 @@ pub async fn Admin::list_partition_reassignments(Self, topics? : Array[(String, 
 pub async fn Admin::offset_delete(Self, String, Array[(String, Array[Int])]) -> OffsetDeleteResult
 pub async fn Admin::unregister_broker(Self, Int) -> UnregisterBrokerResult
 pub async fn Admin::update_features(Self, Array[FeatureUpdate], validate_only? : Bool) -> AdminUpdateFeaturesResult
+
+pub struct AdminAssignedTopicPartitions {
+  topic_id : Uuid
+  topic_name : String
+  partitions : Array[Int]
+} derive(@debug.Debug)
 
 pub(all) struct AdminClusterBroker {
   node_id : Int
@@ -620,10 +650,59 @@ pub struct AdminConfigsResult {
   configs : Array[AdminConfigEntry]
 } derive(@debug.Debug)
 
+pub struct AdminConsumerGroupDescription {
+  error_code : Int
+  error_message : String?
+  group_id : String
+  group_state : String
+  group_epoch : Int
+  assignment_epoch : Int
+  assignor_name : String
+  members : Array[AdminConsumerGroupMember]
+  authorized_operations : Int?
+} derive(@debug.Debug)
+
+pub struct AdminConsumerGroupMember {
+  member_id : String
+  instance_id : String?
+  rack_id : String?
+  member_epoch : Int
+  client_id : String
+  client_host : String
+  subscribed_topic_names : Array[String]
+  subscribed_topic_regex : String?
+  assignment : Array[AdminAssignedTopicPartitions]
+  target_assignment : Array[AdminAssignedTopicPartitions]
+  member_type : Int
+} derive(@debug.Debug)
+
 pub struct AdminElectionResult {
   error_code : Int
   results : Array[ElectLeadersTopicResult]
 } derive(@debug.Debug)
+
+pub struct AdminGroupDescription {
+  error_code : Int
+  error_message : String?
+  group_id : String
+  group_state : String
+  protocol_type : String
+  protocol_data : String
+  members : Array[AdminGroupMember]
+  authorized_operations : Int?
+} derive(@debug.Debug)
+pub fn AdminGroupDescription::is_not_found(Self) -> Bool
+
+pub struct AdminGroupMember {
+  member_id : String
+  group_instance_id : String?
+  client_id : String
+  client_host : String
+  member_metadata : Bytes
+  member_assignment : Bytes
+} derive(@debug.Debug)
+pub fn AdminGroupMember::assigned_partitions(Self) -> Array[(String, Array[Int])]
+pub fn AdminGroupMember::subscribed_topics(Self) -> Array[String]
 
 pub struct AdminLogDirs {
   error_code : Int
@@ -769,6 +848,8 @@ pub async fn BrokerConnection::describe_acls(Self, AclFilter, timeout_ms? : Int)
 pub async fn BrokerConnection::describe_client_quotas(Self, ClientQuotaFilter, timeout_ms? : Int) -> DescribeClientQuotasResult
 pub async fn BrokerConnection::describe_cluster(Self, include_authorized_operations? : Bool, include_fenced_brokers? : Bool, timeout_ms? : Int) -> AdminClusterDescription
 pub async fn BrokerConnection::describe_configs(Self, Array[ConfigResourceKey], timeout_ms? : Int) -> Array[AdminConfigsResult]
+pub async fn BrokerConnection::describe_consumer_groups(Self, Array[String], include_authorized_operations? : Bool, timeout_ms? : Int) -> Array[AdminConsumerGroupDescription]
+pub async fn BrokerConnection::describe_groups(Self, Array[String], include_authorized_operations? : Bool, timeout_ms? : Int) -> Array[AdminGroupDescription]
 pub async fn BrokerConnection::describe_log_dirs(Self, topics? : Array[(String, Array[Int])]?, timeout_ms? : Int) -> AdminLogDirs
 pub async fn BrokerConnection::describe_quorum(Self, Array[(String, Array[Int])], timeout_ms? : Int) -> AdminQuorumDescription
 pub async fn BrokerConnection::describe_topic_partitions(Self, Array[String], response_partition_limit? : Int, cursor? : TopicPartitionCursor?, timeout_ms? : Int) -> DescribeTopicPartitions

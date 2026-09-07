@@ -471,3 +471,202 @@ test "scram credential upsertion rejects unknown mechanisms" {
   )
   assert_true(outcome is Err(_))
 }
+
+///|
+test "fake api versions negotiates the group describe range" {
+  let body = fake_api_versions_response(0)
+  let d = @buf.Decoder::new(body)
+  let (versions, _) = @moonkafka.decode_api_versions_response(d)
+  assert_eq(versions.pick(@moonkafka.API_DESCRIBE_GROUPS), 6)
+  assert_eq(versions.pick(@moonkafka.API_CONSUMER_GROUP_DESCRIBE), 1)
+}
+
+///|
+test "group describe requests are wire-identical across both apis" {
+  // DescribeGroups v6 and ConsumerGroupDescribe v1 declare the same two
+  // request fields, so their bodies match byte for byte.
+  let classic = @moonkafka.encode_describe_groups_request(["g1"], false)
+  let consumer = @moonkafka.encode_consumer_group_describe_request(
+    ["g1"],
+    false,
+  )
+  assert_eq(classic, consumer)
+  // Compact array count, compact group id, the flag, the tag buffer.
+  assert_eq(classic, b"\x02\x03g1\x00\x00")
+  assert_eq(
+    @moonkafka.encode_describe_groups_request(["g1"], true),
+    b"\x02\x03g1\x01\x00",
+  )
+}
+
+///|
+test "group describe request parses back through the fake broker" {
+  let framed = @moonkafka.encode_request(
+    @moonkafka.API_DESCRIBE_GROUPS,
+    6,
+    1,
+    "cid",
+    @moonkafka.encode_describe_groups_request(["a", "b"], true),
+  )
+  let d = @buf.Decoder::new(framed)
+  d.skip(4) // size
+  let (groups, wanted) = fake_group_describe_request(
+    d.read_bytes(d.remaining()),
+  )
+  assert_eq(groups, ["a", "b"])
+  assert_true(wanted)
+}
+
+///|
+test "describe groups v6 decodes the classic member payloads" {
+  let d = @buf.Decoder::new(fake_describe_groups_response(["g"], true, []))
+  let (groups, throttle) = @moonkafka.decode_describe_groups_response(d)
+  assert_eq(throttle, 0)
+  assert_eq(d.remaining(), 0)
+  assert_eq(groups.length(), 1)
+  let group = groups[0]
+  assert_eq(group.error_code, 0)
+  assert_eq(group.error_message, None)
+  assert_eq(group.group_state, "Stable")
+  assert_eq(group.protocol_type, "consumer")
+  assert_eq(group.protocol_data, "range")
+  assert_eq(group.authorized_operations, Some(4094))
+  let member = group.members[0]
+  assert_eq(member.member_id, "g-member-1")
+  assert_eq(member.group_instance_id, Some("g-instance-1"))
+  // The opaque classic payloads decode through the consumer protocol.
+  assert_eq(member.subscribed_topics(), ["g-topic"])
+  assert_eq(member.assigned_partitions(), [("g-topic", [0, 1])])
+}
+
+///|
+test "describe groups v6 reports a KIP-848 group as not found" {
+  let d = @buf.Decoder::new(
+    fake_describe_groups_response(["k848"], true, ["k848"]),
+  )
+  let (groups, _) = @moonkafka.decode_describe_groups_response(d)
+  assert_eq(d.remaining(), 0)
+  let group = groups[0]
+  assert_eq(group.error_code, @moonkafka.GROUP_ID_NOT_FOUND)
+  assert_true(group.is_not_found())
+  assert_eq(group.error_message, Some("Group k848 is not a classic group."))
+  assert_eq(group.group_state, "Dead")
+  assert_eq(group.protocol_type, "")
+  assert_eq(group.members.length(), 0)
+  // An errored group carries the MIN_VALUE sentinel, not a bitfield, even
+  // though the request asked for authorized operations.
+  assert_eq(group.authorized_operations, None)
+}
+
+///|
+test "consumer group describe v1 decodes epochs, regex, and targets" {
+  let d = @buf.Decoder::new(
+    fake_consumer_group_describe_response(["k848"], true, []),
+  )
+  let (groups, throttle) = @moonkafka.decode_consumer_group_describe_response(d)
+  assert_eq(throttle, 0)
+  assert_eq(d.remaining(), 0)
+  let group = groups[0]
+  assert_eq(group.group_state, "Stable")
+  assert_eq(group.group_epoch, 7)
+  assert_eq(group.assignment_epoch, 6)
+  assert_eq(group.assignor_name, "range")
+  assert_eq(group.authorized_operations, Some(4094))
+  let consumer = group.members[0]
+  assert_eq(consumer.member_type, @moonkafka.GROUP_MEMBER_TYPE_CONSUMER)
+  assert_eq(consumer.member_epoch, 6)
+  assert_eq(consumer.rack_id, Some("rack-a"))
+  assert_eq(consumer.subscribed_topic_names, ["k848-topic"])
+  assert_eq(consumer.subscribed_topic_regex, None)
+  // The member epoch lags the group epoch, so the assignment it is
+  // fetching from is behind the one the broker targeted.
+  assert_eq(consumer.assignment[0].partitions, [0])
+  assert_eq(consumer.target_assignment[0].partitions, [0, 1])
+  assert_eq(
+    consumer.assignment[0].topic_id,
+    consumer.target_assignment[0].topic_id,
+  )
+  let migrated = group.members[1]
+  assert_eq(migrated.member_type, @moonkafka.GROUP_MEMBER_TYPE_CLASSIC)
+  assert_eq(migrated.subscribed_topic_names.length(), 0)
+  assert_eq(migrated.subscribed_topic_regex, Some("k848-.*"))
+}
+
+///|
+test "consumer group describe v1 decodes empty assignments" {
+  // A member with nothing assigned yet: both Assignment wrappers still
+  // carry their own tag buffer, and MemberType reports unknown.
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(1) // groups
+  e.write_i16(0) // error
+  e.write_compact_nullable_string(None)
+  e.write_compact_string("g")
+  e.write_compact_string("Empty")
+  e.write_i32(0) // group epoch
+  e.write_i32(-1) // assignment epoch
+  e.write_compact_string("range")
+  e.write_compact_len(1) // members
+  e.write_compact_string("m")
+  e.write_compact_nullable_string(None) // instance id
+  e.write_compact_nullable_string(None) // rack id
+  e.write_i32(-1) // member epoch
+  e.write_compact_string("c")
+  e.write_compact_string("/h")
+  e.write_compact_len(0) // subscribed topic names
+  e.write_compact_nullable_string(None) // subscribed topic regex
+  e.write_compact_len(0) // assignment: no topics
+  e.write_tag_buffer() // assignment wrapper
+  e.write_compact_len(0) // target assignment: no topics
+  e.write_tag_buffer() // assignment wrapper
+  e.write_i8(-1) // member type: unknown
+  e.write_tag_buffer() // member
+  e.write_i32(@moonkafka.AUTHORIZED_OPERATIONS_NONE)
+  e.write_tag_buffer() // group
+  e.write_tag_buffer() // top level
+  let d = @buf.Decoder::new(e.to_bytes())
+  let (groups, _) = @moonkafka.decode_consumer_group_describe_response(d)
+  assert_eq(d.remaining(), 0)
+  let member = groups[0].members[0]
+  assert_eq(member.member_type, @moonkafka.GROUP_MEMBER_TYPE_UNKNOWN)
+  assert_eq(member.assignment.length(), 0)
+  assert_eq(member.target_assignment.length(), 0)
+  assert_eq(groups[0].authorized_operations, None)
+}
+
+///|
+test "foreign member metadata decodes to no topics" {
+  // A custom protocol (Kafka Connect, say) ships member metadata this
+  // driver cannot parse: the helpers report nothing rather than raising,
+  // and the raw bytes stay available to a caller that understands them.
+  let foreign = b"\x00\x01\x00\x00" // ConsumerProtocol version 1: unsupported
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(1) // groups
+  e.write_i16(0) // error
+  e.write_compact_nullable_string(None)
+  e.write_compact_string("connect-group")
+  e.write_compact_string("Stable")
+  e.write_compact_string("connect") // protocol type
+  e.write_compact_string("default") // protocol data
+  e.write_compact_len(1) // members
+  e.write_compact_string("m")
+  e.write_compact_nullable_string(None) // group instance id
+  e.write_compact_string("c")
+  e.write_compact_string("/h")
+  e.write_compact_len(foreign.length())
+  e.write_bytes(foreign)
+  e.write_compact_len(0) // no assignment payload
+  e.write_tag_buffer() // member
+  e.write_i32(@moonkafka.AUTHORIZED_OPERATIONS_NONE)
+  e.write_tag_buffer() // group
+  e.write_tag_buffer() // top level
+  let d = @buf.Decoder::new(e.to_bytes())
+  let (groups, _) = @moonkafka.decode_describe_groups_response(d)
+  assert_eq(d.remaining(), 0)
+  let member = groups[0].members[0]
+  assert_eq(member.subscribed_topics(), [])
+  assert_eq(member.assigned_partitions(), [])
+  assert_eq(member.member_metadata, foreign)
+  assert_eq(member.member_assignment, Bytes::make(0, b'\x00'))
+}

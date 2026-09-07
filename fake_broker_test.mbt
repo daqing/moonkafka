@@ -31,6 +31,8 @@ fn fake_api_versions_response(
     (12, 4),
     (13, 5),
     (14, 5),
+    (15, 6),
+    (69, 1),
     (19, 7),
     (20, 6),
     (21, 2),
@@ -1040,6 +1042,13 @@ struct FakeClusterOps {
   describe_scram : Array[Array[String]?]
   alter_scram_deletions : Array[@moonkafka.ScramCredentialDeletion]
   alter_scram_upsertions : Array[@moonkafka.ScramCredentialUpsertion]
+  describe_groups : Array[(Array[String], Bool)]
+  /// Group ids DescribeGroups answers with GROUP_ID_NOT_FOUND — how the
+  /// coordinator reports a KIP-848 group, which is not a classic group.
+  describe_groups_not_found : Array[String]
+  describe_consumer_groups : Array[(Array[String], Bool)]
+  /// Group ids ConsumerGroupDescribe answers with GROUP_ID_NOT_FOUND.
+  describe_consumer_groups_not_found : Array[String]
 }
 
 ///|
@@ -1067,6 +1076,10 @@ fn FakeClusterOps::new() -> FakeClusterOps {
     describe_scram: [],
     alter_scram_deletions: [],
     alter_scram_upsertions: [],
+    describe_groups: [],
+    describe_groups_not_found: [],
+    describe_consumer_groups: [],
+    describe_consumer_groups_not_found: [],
   }
 }
 
@@ -2132,6 +2145,185 @@ fn fake_alter_user_scram_response(
     e.write_tag_buffer()
   }
   e.write_tag_buffer()
+  e.to_bytes()
+}
+
+///|
+/// Parse a DescribeGroups v6 or ConsumerGroupDescribe v1 request: both
+/// carry a compact array of group ids plus the include-authorized-
+/// operations flag (their schemas are field-for-field the same).
+fn fake_group_describe_request(rest : Bytes) -> (Array[String], Bool) raise {
+  let d = @buf.Decoder::new(rest)
+  fake_skip_flexible_header(d)
+  let groups : Array[String] = []
+  let n = d.read_compact_len()
+  for _ in 0..<n {
+    groups.push(d.read_compact_string())
+  }
+  (groups, d.read_bool())
+}
+
+///|
+/// The AuthorizedOperations bitfield: a real one when the request asked
+/// for it, the MIN_VALUE sentinel when it did not.
+fn fake_authorized_operations(requested : Bool) -> Int {
+  if requested {
+    4094
+  } else {
+    -2147483648
+  }
+}
+
+///|
+/// DescribeGroups v6 response body: one description per requested group,
+/// in request order. Groups in `not_found` come back Dead with
+/// GROUP_ID_NOT_FOUND — the coordinator's answer for a KIP-848 group,
+/// which is not a classic group. The rest come back Stable with one
+/// static member carrying real ConsumerProtocol metadata, so the decoded
+/// member's subscription and assignment round-trip.
+fn fake_describe_groups_response(
+  groups : Array[String],
+  include_authorized : Bool,
+  not_found : Array[String],
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  e.write_i32(0) // throttle
+  e.write_compact_len(groups.length())
+  for group in groups {
+    if not_found.contains(group) {
+      e.write_i16(69) // GROUP_ID_NOT_FOUND
+      e.write_compact_nullable_string(
+        Some("Group \{group} is not a classic group."),
+      )
+      e.write_compact_string(group)
+      e.write_compact_string("Dead")
+      e.write_compact_string("") // protocol type
+      e.write_compact_string("") // protocol data
+      e.write_compact_len(0) // members: always empty when Dead
+      e.write_i32(fake_authorized_operations(false))
+      e.write_tag_buffer() // group
+      continue
+    }
+    e.write_i16(0) // error
+    e.write_compact_nullable_string(None)
+    e.write_compact_string(group)
+    e.write_compact_string("Stable")
+    e.write_compact_string("consumer") // protocol type
+    e.write_compact_string("range") // protocol data: the settled assignor
+    e.write_compact_len(1) // members
+    e.write_compact_string("\{group}-member-1")
+    e.write_compact_nullable_string(Some("\{group}-instance-1"))
+    e.write_compact_string("client-1")
+    e.write_compact_string("/127.0.0.1")
+    let metadata = @moonkafka.encode_consumer_protocol_subscription([
+      "\{group}-topic",
+    ])
+    e.write_compact_len(metadata.length())
+    e.write_bytes(metadata)
+    let assignment = @moonkafka.encode_consumer_protocol_assignment([
+      ("\{group}-topic", [0, 1]),
+    ])
+    e.write_compact_len(assignment.length())
+    e.write_bytes(assignment)
+    e.write_tag_buffer() // member
+    e.write_i32(fake_authorized_operations(include_authorized))
+    e.write_tag_buffer() // group
+  }
+  e.write_tag_buffer() // top level
+  e.to_bytes()
+}
+
+///|
+/// Write one ConsumerGroupDescribe Assignment: a wrapper struct around a
+/// TopicPartitions array, so the wrapper and each element each carry a
+/// tag buffer.
+fn fake_write_group_assignment(
+  e : @buf.Encoder,
+  assignment : Array[(Bytes, String, Array[Int])],
+) -> Unit {
+  e.write_compact_len(assignment.length())
+  for entry in assignment {
+    let (topic_id, topic_name, partitions) = entry
+    e.write_bytes(topic_id)
+    e.write_compact_string(topic_name)
+    e.write_compact_len(partitions.length())
+    for partition in partitions {
+      e.write_i32(partition)
+    }
+    e.write_tag_buffer() // topic partitions
+  }
+  e.write_tag_buffer() // assignment wrapper
+}
+
+///|
+/// ConsumerGroupDescribe v1 response body: one description per requested
+/// group, in request order. Groups in `not_found` come back with
+/// GROUP_ID_NOT_FOUND; the rest come back Stable at group epoch 7 with two
+/// members — a new-protocol member whose current assignment still lags
+/// its target, and a migrated classic member subscribing by regex.
+fn fake_consumer_group_describe_response(
+  groups : Array[String],
+  include_authorized : Bool,
+  not_found : Array[String],
+) -> Bytes {
+  let e = @buf.Encoder::new()
+  let topic_id = Bytes::make(16, b'\x2a')
+  e.write_i32(0) // throttle
+  e.write_compact_len(groups.length())
+  for group in groups {
+    if not_found.contains(group) {
+      e.write_i16(69) // GROUP_ID_NOT_FOUND
+      e.write_compact_nullable_string(Some("Group \{group} not found."))
+      e.write_compact_string(group)
+      e.write_compact_string("") // group state
+      e.write_i32(-1) // group epoch
+      e.write_i32(-1) // assignment epoch
+      e.write_compact_string("") // assignor
+      e.write_compact_len(0) // members
+      e.write_i32(fake_authorized_operations(false))
+      e.write_tag_buffer() // group
+      continue
+    }
+    e.write_i16(0) // error
+    e.write_compact_nullable_string(None)
+    e.write_compact_string(group)
+    e.write_compact_string("Stable")
+    e.write_i32(7) // group epoch
+    e.write_i32(6) // assignment epoch
+    e.write_compact_string("range") // assignor
+    e.write_compact_len(2) // members
+    // A new-protocol member at epoch 6: its assignment is what it is
+    // fetching now, its target what the broker computed at epoch 7.
+    e.write_compact_string("\{group}-member-1")
+    e.write_compact_nullable_string(None) // instance id
+    e.write_compact_nullable_string(Some("rack-a"))
+    e.write_i32(6) // member epoch
+    e.write_compact_string("client-1")
+    e.write_compact_string("/127.0.0.1")
+    e.write_compact_len(1) // subscribed topic names
+    e.write_compact_string("\{group}-topic")
+    e.write_compact_nullable_string(None) // subscribed topic regex
+    fake_write_group_assignment(e, [(topic_id, "\{group}-topic", [0])])
+    fake_write_group_assignment(e, [(topic_id, "\{group}-topic", [0, 1])])
+    e.write_i8(1) // member type: consumer
+    e.write_tag_buffer() // member
+    // A classic member migrated into the group, subscribing by regex.
+    e.write_compact_string("\{group}-member-2")
+    e.write_compact_nullable_string(Some("\{group}-instance-2"))
+    e.write_compact_nullable_string(None) // rack id
+    e.write_i32(7) // member epoch
+    e.write_compact_string("client-2")
+    e.write_compact_string("/10.0.0.2")
+    e.write_compact_len(0) // subscribed topic names
+    e.write_compact_nullable_string(Some("\{group}-.*"))
+    fake_write_group_assignment(e, [(topic_id, "\{group}-topic", [1])])
+    fake_write_group_assignment(e, [(topic_id, "\{group}-topic", [1])])
+    e.write_i8(0) // member type: classic
+    e.write_tag_buffer() // member
+    e.write_i32(fake_authorized_operations(include_authorized))
+    e.write_tag_buffer() // group
+  }
+  e.write_tag_buffer() // top level
   e.to_bytes()
 }
 
@@ -3215,6 +3407,24 @@ async fn fake_serve_conn(
           cluster_ops.alter_scram_upsertions.push(upsertion)
         }
         fake_alter_user_scram_response(deletions, upsertions)
+      }
+      15 => {
+        let (groups, include_authorized) = fake_group_describe_request(rest)
+        cluster_ops.describe_groups.push((groups, include_authorized))
+        fake_describe_groups_response(
+          groups,
+          include_authorized,
+          cluster_ops.describe_groups_not_found,
+        )
+      }
+      69 => {
+        let (groups, include_authorized) = fake_group_describe_request(rest)
+        cluster_ops.describe_consumer_groups.push((groups, include_authorized))
+        fake_consumer_group_describe_response(
+          groups,
+          include_authorized,
+          cluster_ops.describe_consumer_groups_not_found,
+        )
       }
       60 => {
         cluster_ops.describe_cluster.push(fake_describe_cluster_request(rest))
@@ -5979,6 +6189,118 @@ async test "admin describes and alters client quotas and scram credentials" {
     assert_eq(upsertion.iterations, 4096)
     assert_true(upsertion.salt.length() > 0)
     assert_true(upsertion.salted_password.length() > 0)
+    server.close()
+  }
+}
+
+///|
+async test "admin describes classic groups and KIP-848 consumer groups" {
+  @async.with_task_group() <| root => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+    let accepted : Array[@socket.Tcp] = []
+    let ops = FakeClusterOps::new()
+    // "k848" runs the new consumer protocol, so DescribeGroups cannot see
+    // it; "gone" is unknown to ConsumerGroupDescribe.
+    ops.describe_groups_not_found.push("k848")
+    ops.describe_consumer_groups_not_found.push("gone")
+    root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
+      fake_broker(server, root, "events", accepted, cluster_ops=ops)
+    }
+    let admin = @moonkafka.Admin::connect(
+      group=root,
+      host="127.0.0.1",
+      port=server.addr.port(),
+    )
+    defer admin.close()
+    // One call asks for both a classic group and a new-protocol one.
+    let groups = admin.describe_groups(
+      ["classic", "k848"],
+      include_authorized_operations=true,
+    )
+    assert_eq(groups.length(), 2)
+    let classic = groups[0]
+    assert_eq(classic.error_code, 0)
+    assert_eq(classic.error_message, None)
+    assert_eq(classic.group_id, "classic")
+    assert_eq(classic.group_state, "Stable")
+    assert_eq(classic.protocol_type, "consumer")
+    assert_eq(classic.protocol_data, "range")
+    assert_eq(classic.authorized_operations, Some(4094))
+    assert_eq(classic.members.length(), 1)
+    let member = classic.members[0]
+    assert_eq(member.member_id, "classic-member-1")
+    assert_eq(member.group_instance_id, Some("classic-instance-1"))
+    assert_eq(member.client_id, "client-1")
+    assert_eq(member.client_host, "/127.0.0.1")
+    // The broker's opaque classic payloads decode back through this
+    // driver's own consumer-protocol codecs.
+    assert_eq(member.subscribed_topics(), ["classic-topic"])
+    assert_eq(member.assigned_partitions(), [("classic-topic", [0, 1])])
+    // The new-protocol group is not a classic group: v6 reports
+    // GROUP_ID_NOT_FOUND, state Dead, no members, and a message.
+    let dead = groups[1]
+    assert_true(dead.is_not_found())
+    assert_eq(dead.error_code, @moonkafka.GROUP_ID_NOT_FOUND)
+    assert_eq(dead.group_state, "Dead")
+    assert_eq(dead.members.length(), 0)
+    assert_eq(dead.error_message, Some("Group k848 is not a classic group."))
+    // An errored group carries no authorized operations even when asked.
+    assert_eq(dead.authorized_operations, None)
+    let (requested, wanted_operations) = ops.describe_groups[0]
+    assert_eq(requested, ["classic", "k848"])
+    assert_true(wanted_operations)
+    // ConsumerGroupDescribe is the call that sees the new-protocol group.
+    let described = admin.describe_consumer_groups(["k848", "gone"])
+    assert_eq(described.length(), 2)
+    let live = described[0]
+    assert_eq(live.error_code, 0)
+    assert_eq(live.group_id, "k848")
+    assert_eq(live.group_state, "Stable")
+    assert_eq(live.group_epoch, 7)
+    assert_eq(live.assignment_epoch, 6)
+    assert_eq(live.assignor_name, "range")
+    assert_eq(live.authorized_operations, None)
+    assert_eq(live.members.length(), 2)
+    let consumer = live.members[0]
+    assert_eq(consumer.member_id, "k848-member-1")
+    assert_eq(consumer.instance_id, None)
+    assert_eq(consumer.rack_id, Some("rack-a"))
+    assert_eq(consumer.member_epoch, 6)
+    assert_eq(consumer.client_id, "client-1")
+    assert_eq(consumer.client_host, "/127.0.0.1")
+    assert_eq(consumer.subscribed_topic_names, ["k848-topic"])
+    assert_eq(consumer.subscribed_topic_regex, None)
+    assert_eq(consumer.member_type, @moonkafka.GROUP_MEMBER_TYPE_CONSUMER)
+    // Its member epoch lags the group epoch, so it is still fetching the
+    // old assignment while the target has grown.
+    assert_eq(consumer.assignment.length(), 1)
+    assert_eq(consumer.assignment[0].topic_name, "k848-topic")
+    assert_eq(consumer.assignment[0].partitions, [0])
+    assert_eq(consumer.target_assignment[0].partitions, [0, 1])
+    assert_eq(
+      consumer.assignment[0].topic_id,
+      consumer.target_assignment[0].topic_id,
+    )
+    // A classic member migrated into the group subscribes by regex.
+    let migrated = live.members[1]
+    assert_eq(migrated.member_id, "k848-member-2")
+    assert_eq(migrated.member_type, @moonkafka.GROUP_MEMBER_TYPE_CLASSIC)
+    assert_eq(migrated.instance_id, Some("k848-instance-2"))
+    assert_eq(migrated.rack_id, None)
+    assert_eq(migrated.member_epoch, 7)
+    assert_eq(migrated.subscribed_topic_names.length(), 0)
+    assert_eq(migrated.subscribed_topic_regex, Some("k848-.*"))
+    assert_eq(migrated.assignment[0].partitions, [1])
+    assert_eq(migrated.target_assignment[0].partitions, [1])
+    let missing = described[1]
+    assert_eq(missing.error_code, @moonkafka.GROUP_ID_NOT_FOUND)
+    assert_eq(missing.group_id, "gone")
+    assert_eq(missing.group_state, "")
+    assert_eq(missing.group_epoch, -1)
+    assert_eq(missing.members.length(), 0)
+    let (cg_requested, cg_wanted_operations) = ops.describe_consumer_groups[0]
+    assert_eq(cg_requested, ["k848", "gone"])
+    assert_true(!cg_wanted_operations)
     server.close()
   }
 }

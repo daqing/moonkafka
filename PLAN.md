@@ -239,7 +239,7 @@ P6 = share/telemetry.
 | DescribeTransactions | 0 | v0 | P5 | |
 | ListTransactions | 2 | v2 | P5 | |
 | ConsumerGroupHeartbeat | 1 | v1 (adds `subscribed_topic_regex`) | P4 | KIP-848 — primary group protocol |
-| ConsumerGroupDescribe | 1 | v1 | P4 | |
+| ConsumerGroupDescribe | 1 | v1 | P5 (done) | table said P4 but it was never implemented there; it is the only call that describes a KIP-848 group, so it landed with DescribeGroups |
 | ListConfigResources | 1 | v0 + v1 (type filter, KIP-1142) | P5 | table said max 0; the 4.3 schema has v0-v1 |
 | ShareGroupHeartbeat | 1 | v1 | P6 | KIP-932 |
 | GetTelemetrySubscriptions / PushTelemetry | 0 | v0 | P6 | optional (KIP-714) |
@@ -252,7 +252,9 @@ P6 = share/telemetry.
 
 Classic group management (still required for compat): JoinGroup, SyncGroup,
 Heartbeat, LeaveGroup, DescribeGroups, ListGroups — implement at the 4.3 max
-versions (9/5/4/5/6/5 respectively per the guide) (P4).
+versions (9/5/4/5/6/5 respectively per the guide) (P4). All are done except
+ListGroups; DescribeGroups v6 landed with the P5 admin group ops, since it is
+an admin call rather than part of the coordination path.
 
 Error codes: implement the complete table (codes 0 through 133 as of 4.3) in
 `protocol/errors.mbt`, each carrying `name`, `retriable`, and
@@ -791,10 +793,37 @@ rejoins); read_committed skips aborted txns (producer txn test from P3).
       broker plus codec tests covering the version-dependent shapes the
       fake does not serve (DescribeCluster v0, DescribeLogDirs v2-v5,
       reassignments v0, ListConfigResources v0).
-- [ ] Groups/consumers: DescribeGroups v6 (incl. 848 members),
-      ListGroups v5 (state/type filters), DeleteGroups v2;
-      consumers-of / DescribeProducers v0, DescribeTransactions v0,
-      ListTransactions v2.
+- [x] Groups — describing them: DONE (this commit, root scope
+      `admin_groups.mbt`): DescribeGroups v6 and ConsumerGroupDescribe v1.
+      This bullet's original wording, "DescribeGroups v6 (incl. 848
+      members)", is not what the protocol offers: DescribeGroupsResponse
+      v6 adds no KIP-848 fields (v6 adds only the per-group ErrorMessage,
+      KIP-1043), and the coordinator's `GroupMetadataManager.classicGroup`
+      raises GroupIdNotFoundException for any non-classic group, which v6
+      turns into error code GROUP_ID_NOT_FOUND (69) with group state
+      "Dead" and no members. So DescribeGroups describes classic groups
+      only — `AdminGroupDescription::is_not_found` marks the 848 case —
+      and ConsumerGroupDescribe (key 69, tabled for P4 in §5 but never
+      implemented there) is what returns new-protocol members: member,
+      group, and assignment epochs, topic-name and regex subscriptions,
+      current versus target assignment, rack and instance ids, and the v1
+      MemberType byte (KIP-1099: -1 unknown, 0 classic, +1 consumer, a
+      group mid-migration holding both). Classic member metadata and
+      assignment stay opaque bytes with `subscribed_topics` /
+      `assigned_partitions` helpers over the Phase 4 ConsumerProtocol
+      codecs, which report nothing rather than raising on a foreign
+      protocol (Kafka Connect, say). Both pin to a single version — 4.0
+      brokers already advertise DescribeGroups 0-6 and ConsumerGroupDescribe
+      0-1 — both take the any-broker control connection, and per-group
+      error codes travel as values under the retry policy. E2E against the
+      fake broker (one DescribeGroups call covering a classic group and an
+      848 group, then ConsumerGroupDescribe on that same 848 group) plus
+      codec tests for the byte-identical request bodies, the
+      empty-assignment tag buffers, the unknown member type, foreign
+      member metadata, and both not-found paths.
+- [ ] Groups — the rest: ListGroups v5 (state/type filters),
+      DeleteGroups v2; consumers-of / DescribeProducers v0,
+      DescribeTransactions v0, ListTransactions v2.
 - [x] Security — ACLs: DONE (this commit, root scope `admin_acls.mbt`):
       DescribeAcls v2-v3, CreateAcls v2-v3, DeleteAcls v2-v3 (v3 only
       adds the USER resource type — v2/v3 share one wire shape, so the
