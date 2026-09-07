@@ -90,6 +90,18 @@ pub const API_CREATE_ACLS : Int = 30
 pub const API_DELETE_ACLS : Int = 31
 
 ///|
+pub const API_DESCRIBE_CLIENT_QUOTAS : Int = 48
+
+///|
+pub const API_ALTER_CLIENT_QUOTAS : Int = 49
+
+///|
+pub const API_DESCRIBE_USER_SCRAM_CREDENTIALS : Int = 50
+
+///|
+pub const API_ALTER_USER_SCRAM_CREDENTIALS : Int = 51
+
+///|
 pub const API_DESCRIBE_CONFIGS : Int = 32
 
 ///|
@@ -267,6 +279,37 @@ pub fn driver_api_range(api_key : Int) -> ApiRange? {
       Some({ key: API_CREATE_ACLS, name: "CreateAcls", min: 2, max: 3, })
     API_DELETE_ACLS =>
       Some({ key: API_DELETE_ACLS, name: "DeleteAcls", min: 2, max: 3, })
+    // Quota admin: v0 is the pre-flexible shape, v1 enables flexible
+    // versions; both wire shapes are implemented.
+    API_DESCRIBE_CLIENT_QUOTAS =>
+      Some({
+        key: API_DESCRIBE_CLIENT_QUOTAS,
+        name: "DescribeClientQuotas",
+        min: 0,
+        max: 1,
+      })
+    API_ALTER_CLIENT_QUOTAS =>
+      Some({
+        key: API_ALTER_CLIENT_QUOTAS,
+        name: "AlterClientQuotas",
+        min: 0,
+        max: 1,
+      })
+    // SCRAM credential admin is v0-only, flexible from the start.
+    API_DESCRIBE_USER_SCRAM_CREDENTIALS =>
+      Some({
+        key: API_DESCRIBE_USER_SCRAM_CREDENTIALS,
+        name: "DescribeUserScramCredentials",
+        min: 0,
+        max: 0,
+      })
+    API_ALTER_USER_SCRAM_CREDENTIALS =>
+      Some({
+        key: API_ALTER_USER_SCRAM_CREDENTIALS,
+        name: "AlterUserScramCredentials",
+        min: 0,
+        max: 0,
+      })
     // DescribeConfigs v4 is the first flexible version and every 4.0+
     // broker accepts it; v1-v3 stay non-flexible and unimplemented.
     API_DESCRIBE_CONFIGS =>
