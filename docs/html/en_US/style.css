@@ -108,4 +108,15 @@ footer { margin-top: 3rem; border-top: 1px solid var(--border); padding-top: 1re
   .layout { flex-direction: column; }
   nav { width: 100%; height: auto; position: static; border-right: none; border-bottom: 1px solid var(--border); }
   main { padding: 1.5rem; }
+}nav .repo-link {
+  margin: 0.75rem 0 1.25rem;
+}
+nav .repo-link a {
+  display: inline-block;
+  font-size: 0.82rem;
+  color: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.25rem 0.6rem;
+  text-decoration: none;
 }
