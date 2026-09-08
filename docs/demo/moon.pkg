@@ -1,0 +1,15 @@
+import {
+  "daqing/moonkafka" @lib,
+  "moonbitlang/async",
+  "moonbitlang/core/encoding/utf8",
+  "moonbitlang/core/env",
+  "moonbitlang/core/string",
+}
+
+pkgtype(kind: "executable")
+
+supported_targets = "+native"
+
+options(
+  link: { "native": { "cc-link-flags": "-lz" } },
+)
