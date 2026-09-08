@@ -3,6 +3,38 @@
 // Run `moon test` to execute and `moon test --update` to refresh snapshots.
 
 ///|
-test "dummy" {
-  assert_eq(1 + 1, 2)
+test "record batch encode/decode roundtrip" {
+  let records : Array[@moonkafka.Record] = [
+    {
+      offset: 0L,
+      timestamp: 1700000000000L,
+      key: Some(@utf8.encode("key-1")),
+      value: Some(@utf8.encode("value-1")),
+      headers: [],
+    },
+    {
+      offset: 0L,
+      timestamp: 1700000001234L,
+      key: None,
+      value: Some(b"\x00\xff"),
+      headers: [],
+    },
+    {
+      offset: 0L,
+      timestamp: 1700000001234L,
+      key: None,
+      value: None,
+      headers: [],
+    },
+  ]
+  let decoded = @moonkafka.decode_record_batches(
+    @moonkafka.encode_record_batch(records),
+  )
+  assert_eq(decoded.length(), 3)
+  for i, record in decoded {
+    assert_eq(record.offset, i.to_int64())
+    assert_eq(record.timestamp, records[i].timestamp)
+    assert_eq(record.key, records[i].key)
+    assert_eq(record.value, records[i].value)
+  }
 }

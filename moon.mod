@@ -11,16 +11,21 @@
 
 name = "daqing/moonkafka"
 
-version = "0.1.0"
+version = "0.2.0"
 
 readme = "README.mbt.md"
 
-repository = ""
+repository = "https://github.com/daqing/moonkafka"
 
-license = "Apache-2.0"
+license = "MIT"
 
-keywords = []
+keywords = [ "Kafka", "streaming" ]
 
-preferred_target = "wasm"
+preferred_target = "native"
 
-description = ""
+description = "Open-source Apache Kafka client driver written in pure MoonBit"
+
+import {
+  "moonbitlang/async@0.21.2",
+  "moonbitlang/x@0.5.1",
+}

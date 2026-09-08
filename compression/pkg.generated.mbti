@@ -1,0 +1,51 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "daqing/moonkafka/compression"
+
+import {
+  "daqing/moonkafka/buf",
+}
+
+// Values
+pub fn codec_by_id(Int) -> Codec?
+
+pub fn codecs() -> Array[Codec]
+
+pub fn gzip_compress(Bytes) -> Bytes raise @buf.DecodeError
+
+pub fn gzip_decompress(Bytes) -> Bytes raise @buf.DecodeError
+
+pub fn lz4_compress(Bytes) -> Bytes
+
+pub fn lz4_decode_block(Bytes, Int) -> Bytes raise @buf.DecodeError
+
+pub fn lz4_decompress(Bytes) -> Bytes raise @buf.DecodeError
+
+pub fn lz4_encode_block(Bytes) -> Bytes
+
+pub fn snappy_compress(Bytes) -> Bytes
+
+pub fn snappy_decode_block(Bytes) -> Bytes raise @buf.DecodeError
+
+pub fn snappy_decompress(Bytes) -> Bytes raise @buf.DecodeError
+
+pub fn snappy_encode_block(Bytes) -> Bytes
+
+pub fn xxh32(Bytes, UInt) -> UInt
+
+pub fn zstd_compress(Bytes) -> Bytes raise @buf.DecodeError
+
+pub fn zstd_decompress(Bytes) -> Bytes raise @buf.DecodeError
+
+// Errors
+
+// Types and methods
+pub(all) struct Codec {
+  id : Int
+  name : String
+  compress : (Bytes) -> Bytes raise @buf.DecodeError
+  decompress : (Bytes) -> Bytes raise @buf.DecodeError
+}
+
+// Type aliases
+
+// Traits

@@ -1,0 +1,9 @@
+import {
+  "daqing/moonkafka/buf",
+}
+
+options(
+  "native-stub": [ "stub.c", "zstddeclib.c" ],
+  targets: { "ffi.mbt": [ "native" ] },
+  link: { "native": { "cc-link-flags": "-lz" } },
+)

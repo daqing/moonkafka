@@ -24,6 +24,11 @@ You can browse and install extra skills here:
 - Try to keep deprecated blocks in file called `deprecated.mbt` in each
   directory.
 
+## Commit messages
+
+- Keep the subject short. If a body is needed, write a simple paragraph
+  describing the change; do not list implementation details.
+
 ## Tooling
 
 - `moon fmt` is used to format your code properly.
