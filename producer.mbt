@@ -165,16 +165,10 @@ async fn Producer::recover(self : Producer) -> Unit {
 
 ///|
 async fn Producer::refresh_metadata(self : Producer) -> Unit {
-  self.cluster.refresh_metadata(Some([self.topic]))
-  let topic_meta = match self.cluster.topic(self.topic) {
-    Some(t) => t
-    None => raise ProtocolError::ProtocolError("topic \{self.topic} not found")
-  }
-  if topic_meta.partitions.is_empty() {
-    raise ProtocolError::ProtocolError(
-      "topic \{self.topic} has no partitions with a leader",
-    )
-  }
+  let topic_meta = self.cluster.wait_for_topic(
+    self.topic,
+    timeout_ms=self.timeout_ms,
+  )
   self.partitions = topic_meta.partitions
   self.topic_id = topic_meta.topic_id
 }

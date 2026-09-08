@@ -23,14 +23,18 @@ echo "==> integration smoke against ${HOST}:${PORT} on topic ${TOPIC}"
 
 # Produce one record (empty key so host/port can be passed positionally).
 echo "==> producing..."
-OUT="$("${MOON}" run --target native cmd/main -- produce "${TOPIC}" "${VALUE}" "" "${HOST}" "${PORT}")"
+if ! OUT="$("${MOON}" run --target native cmd/main -- produce "${TOPIC}" "${VALUE}" "" "${HOST}" "${PORT}" 2>&1)"; then
+  echo "    ${OUT}"
+  echo "produce command failed"
+  exit 1
+fi
 echo "    ${OUT}"
 grep -q 'produced to' <<<"${OUT}" || { echo "produce step failed"; exit 1; }
 
 # Consume the same record back from the earliest offset and confirm the
 # payload round-trips intact.
 echo "==> consuming..."
-OUT="$(timeout 30 "${MOON}" run --target native cmd/main -- consume "${TOPIC}" "${HOST}" "${PORT}" 2>&1 || true)"
+OUT="$(timeout 30 "${MOON}" run --target native cmd/main -- consume "${TOPIC}" "${HOST}" "${PORT}" earliest 2>&1 || true)"
 echo "    ${OUT}" | head -5
 grep -qF "value=${VALUE}" <<<"${OUT}" || { echo "consume step did not observe the produced value"; exit 1; }
 

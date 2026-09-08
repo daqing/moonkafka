@@ -1136,6 +1136,7 @@ pub fn ClusterClient::topic(Self, String) -> TopicMetadata?
 pub fn ClusterClient::topic_name(Self, Uuid) -> String?
 pub fn ClusterClient::topics_snapshot(Self) -> Array[String]
 pub fn ClusterClient::total_throttle_ms(Self) -> Int64
+pub async fn ClusterClient::wait_for_topic(Self, String, timeout_ms? : Int) -> TopicMetadata
 
 pub(all) struct CommitTopic {
   name : String

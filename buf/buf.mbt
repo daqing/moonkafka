@@ -379,6 +379,19 @@ pub fn Decoder::read_compact_nullable_string(
 }
 
 ///|
+/// Legacy NULLABLE_STRING: INT16 length, -1 = null.
+pub fn Decoder::read_nullable_string(
+  self : Decoder,
+) -> String? raise DecodeError {
+  let len = self.read_i16()
+  if len < 0 {
+    None
+  } else {
+    Some(@utf8.decode_lossy(self.read_bytes(len)[:]))
+  }
+}
+
+///|
 /// Read and discard a tag buffer.
 pub fn Decoder::skip_tag_buffer(self : Decoder) -> Unit raise DecodeError {
   let count = self.read_uvarint()

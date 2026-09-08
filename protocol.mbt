@@ -29,11 +29,14 @@ pub fn encode_request(
   header.write_i16(api_key)
   header.write_i16(api_version)
   header.write_i32(correlation_id)
+  // ClientId is a legacy NULLABLE_STRING (two-byte length prefix) in every
+  // header version — RequestHeader.json marks it flexibleVersions "none" so
+  // the header stays readable by brokers that predate flexible framing (the
+  // ApiVersions handshake depends on it). Only the trailing tag buffer
+  // differs between header v1 and v2.
+  header.write_nullable_string(Some(client_id))
   if flexible {
-    header.write_compact_nullable_string(Some(client_id))
     header.write_tag_buffer()
-  } else {
-    header.write_nullable_string(Some(client_id))
   }
   let frame = @buf.Encoder::new()
   frame.write_i32(header.buf.length() + body.length())
