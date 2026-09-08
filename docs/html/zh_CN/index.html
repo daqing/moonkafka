@@ -16,7 +16,7 @@
   <a href="#design">设计决策</a>
   <a href="#layout">包结构</a>
   <a href="#protocol">协议覆盖面</a>
-  <a href="https://github.com/daqing/moonkafka/blob/main/docs/demo/README.zh_CN.md" target="_blank" rel="noopener">示例代码与指南</a>
+  <a href="#demo">示例代码与指南</a>
   <a href="#testing">测试策略</a>
   <a href="#risks">风险与待解问题</a>
   <div class="lang-switch">
@@ -139,6 +139,12 @@ moonkafka.mbt 根包重导出（公共 API 面）</code></pre>
 <p>错误码：4.3 的完整错误码表（−1 至 133）已在 <code>protocol/errors.mbt</code>
 中实现，每项带 <code>name</code>、<code>retriable</code> 以及致命性 /
 需刷新元数据等标志。</p>
+
+<h2 id="demo">尝试示例</h2>
+<p>想快速连接 Kafka？仓库包含一个可运行的 MoonBit 原生示例，演示发布消息、
+不加入消费组直接消费，以及加入 KIP-848 消费组。请阅读
+<a href="https://github.com/daqing/moonkafka/blob/main/docs/demo/README.zh_CN.md" target="_blank" rel="noopener">示例指南和源代码</a>，
+了解环境准备、运行命令以及示例的工作方式。</p>
 
 <h2 id="testing">测试策略</h2>
 <ol>
