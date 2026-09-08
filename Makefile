@@ -4,8 +4,14 @@
 .PHONY: help build test test-unit test-integration fmt fmt-check info info-check \
         generate-golden docker-up docker-down docker-ps bench coverage clean
 
-DOCKER_COMPOSE ?= docker compose -f docker-compose.kafka.yml --project-name moonkafka
 MOON          ?= moon
+
+# Container engine for the Kafka test cluster: `auto` lets
+# test/kafka-cluster.sh pick docker (if its daemon answers) or podman; force one
+# with `make ENGINE=podman ...`. The script uses a compose provider when the
+# engine has one, else drives podman with `podman run` directly.
+ENGINE        ?= auto
+KAFKA_CLUSTER  = $(if $(filter auto,$(ENGINE)),,CONTAINER_ENGINE=$(ENGINE)) ./test/kafka-cluster.sh
 
 ## help             : print available targets
 help:
@@ -17,11 +23,12 @@ help:
 	@echo "  make fmt-check       fail if code is not formatted"
 	@echo "  make info-check      fail on unexpected .mbti diffs"
 	@echo "  make generate-golden regenerate golden compression fixtures"
-	@echo "  make docker-up [MULTI=1] bring up a KRaft Kafka cluster (Docker)"
+	@echo "  make docker-up [MULTI=1] bring up a KRaft Kafka cluster (docker or podman)"
 	@echo "  make docker-down     tear the cluster down"
-	@echo "  make integration     docker cluster + real-client smoker via cmd/main"
+	@echo "  make integration     cluster + real-client smoker via cmd/main"
 	@echo "  make bench           run the throughput benchmark (needs a broker)"
 	@echo "  make coverage        write per-line coverage to uncovered.log"
+	@echo "  ENGINE=docker|podman force the container engine (default: auto-detect)"
 
 ## build            : type-check the whole library (no link; the module root
 ##                    is a library, so `moon build` would try to link a main)
@@ -63,24 +70,19 @@ generate-golden:
 	$(MOON) fmt
 
 ## docker-up        : start KRaft Kafka (single by default, MULTI=1 for 3 nodes)
+##                    docker or podman; ENGINE= overrides auto-detection
 docker-up:
-ifneq ($(MULTI),)
-	$(DOCKER_COMPOSE) --profile multi up -d
-else
-	$(DOCKER_COMPOSE) up -d
-endif
-	@echo "waiting for brokers..."; \
-	timeout 120 sh -c 'until docker compose -f docker-compose.kafka.yml ps --status running | grep -q Healthy; do sleep 2; done' && echo "cluster healthy"
+	$(KAFKA_CLUSTER) up $(if $(MULTI),--multi,)
 
 ## docker-down      : stop and remove the cluster (use KEEP_VOLUMES=1 to retain data)
 docker-down:
-	$(DOCKER_COMPOSE) down $(if $(KEEP_VOLUMES),, -v)
+	$(KAFKA_CLUSTER) down $(if $(KEEP_VOLUMES),--keep-volumes,)
 
 ## docker-ps        : show cluster status
 docker-ps:
-	$(DOCKER_COMPOSE) ps
+	$(KAFKA_CLUSTER) ps
 
-## integration      : real-client smoke test against the docker cluster
+## integration      : real-client smoke test against the cluster
 integration: docker-up
 	@KAFKA_BOOTSTRAP=localhost:9092 ./test/integration.sh
 
