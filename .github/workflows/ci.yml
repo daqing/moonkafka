@@ -16,6 +16,7 @@ jobs:
         run: |
           curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
           echo "$HOME/.moon/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.moon/bin:$PATH"
 
       - name: Update dependencies
         run: |
@@ -62,6 +63,7 @@ jobs:
         run: |
           curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
           echo "$HOME/.moon/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.moon/bin:$PATH"
           moon update
 
       - name: Run the mock-broker (fake broker) suite
@@ -79,6 +81,7 @@ jobs:
         run: |
           curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
           echo "$HOME/.moon/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.moon/bin:$PATH"
           pip install cramjam
       - name: Regenerate golden files and diff (deterministic, fmt twice)
         run: |
