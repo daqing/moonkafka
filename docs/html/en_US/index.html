@@ -16,7 +16,7 @@
   <a href="#design">Design decisions</a>
   <a href="#layout">Package layout</a>
   <a href="#protocol">Protocol surface</a>
-  <a href="https://github.com/daqing/moonkafka/blob/main/docs/demo/README.md" target="_blank" rel="noopener">Demo code &amp; guide</a>
+  <a href="#demo">Demo code &amp; guide</a>
   <a href="#testing">Testing strategy</a>
   <a href="#risks">Risks &amp; open questions</a>
   <div class="lang-switch">
@@ -151,6 +151,13 @@ Selected highlights:</p>
 <p>Error codes: the complete 4.3 table (codes −1 through 133) is implemented in
 <code>protocol/errors.mbt</code>, each carrying <code>name</code>,
 <code>retriable</code>, and fatality / metadata-refresh flags.</p>
+
+<h2 id="demo">Try the demo</h2>
+<p>Want to connect to Kafka quickly? The repository includes a runnable native
+MoonBit demo for publishing messages, consuming without a group, and joining a
+KIP-848 consumer group. Read the
+<a href="https://github.com/daqing/moonkafka/blob/main/docs/demo/README.md" target="_blank" rel="noopener">demo guide and source code</a>
+for setup instructions, commands, and an explanation of how the examples work.</p>
 
 <h2 id="testing">Testing strategy</h2>
 <ol>
