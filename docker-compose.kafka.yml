@@ -11,7 +11,7 @@
 # Quick start:
 #   make docker-up                       # single broker
 #   make docker-up MULTI=1               # multi-broker
-#   make integration                     # docker up + real-client smoke test
+#   make integration                     # cluster up + real-client smoke test
 #   make docker-down
 
 name: moonkafka

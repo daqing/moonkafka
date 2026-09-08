@@ -67,6 +67,10 @@ through Phases 0–6, hardened for real-cluster use.
 
 - `Makefile` (build/test/fmt/info/integration/bench/coverage/golden targets).
 - `docker-compose.kafka.yml` KRaft cluster (single + 3-broker profiles).
+- `test/kafka-cluster.sh`: engine-aware cluster driver, so the `docker-up` /
+  `docker-down` / `docker-ps` targets and `make integration` work with podman
+  as well as docker (`ENGINE=docker|podman`, auto-detected; direct `podman run`
+  fallback when no compose provider is installed).
 - `.github/workflows/ci.yml`: build+test, fmt + `.mbti` clean diff, Docker
   integration, golden-fixture regeneration.
 - Protocol docs in `docs/` (`2`-version negotiation, `3`-consumer groups,
@@ -86,7 +90,7 @@ through Phases 0–6, hardened for real-cluster use.
 1. `moon info` + commit `.mbti` changes (public API freeze audit).
 2. `moon fmt`, `moon test` (all 200+ incl. mock-broker).
 3. `make generate-golden` and commit any fixture diffs.
-4. `make integration` (Docker Kafka 4.3) once green.
+4. `make integration` (Kafka 4.3 via docker or podman) once green.
 5. Bump `version` in `moon.mod`; update tag (`git tag -s vX.Y.Z`).
 6. Update `Makefile`/CI if the harness changed.
 

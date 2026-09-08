@@ -26,15 +26,24 @@ the `Makefile` (`make help` for all targets) and GitHub Actions
    hermetic home for the group/txn state machines and reconnect-under-load —
    no Kafka installation required. Runs as part of `moon test`.
 
-4. **Integration (real Kafka 4.3)**: `docker-compose.kafka.yml` starts a
-   KRaft cluster (single by default, `--profile multi` for 3 combined
-   broker/controller nodes). `make integration` brings it up and runs
-   `test/integration.sh`, which drives `cmd/main` to produce a record and
-   consume it back over the full socket/negotiate/encode/fetch path.
+4. **Integration (real Kafka 4.3)**: `test/kafka-cluster.sh` starts a KRaft
+   cluster (single by default, 3 combined broker/controller nodes for the
+   multi profile) and waits until the brokers accept connections.
+   `make integration` brings it up and runs `test/integration.sh`, which drives
+   `cmd/main` to produce a record and consume it back over the full
+   socket/negotiate/encode/fetch path.
+
+   The container engine is auto-detected — docker if its daemon answers, else
+   podman — and can be forced with `ENGINE=docker|podman`. When the engine has
+   a compose provider (`docker compose`, `docker-compose`, `podman compose`,
+   `podman-compose`) the cluster is driven from `docker-compose.kafka.yml`,
+   which also provides the 3-node profile. Without one, podman is driven
+   directly with `podman run` (single broker; `MULTI=1` then needs a compose
+   provider).
 
    ```
-   make docker-up            # single broker, waits for Healthy
-   make docker-up MULTI=1    # 3-node cluster
+   make docker-up            # single broker, waits until ready
+   make docker-up MULTI=1    # 3-node cluster (needs a compose provider)
    make integration          # docker-up + real-client smoke test
    make docker-down          # tear down (add KEEP_VOLUMES=1 to keep data)
    ```

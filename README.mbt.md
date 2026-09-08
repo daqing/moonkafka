@@ -155,7 +155,7 @@ module targets `native`.
 moon test           # unit + mock-broker (fake broker) suite
 make fmt            # format code
 make info           # regenerate package interfaces (.mbti)
-make integration    # Docker Kafka 4.3 + real-client smoke test
+make integration    # Kafka 4.3 (docker or podman) + real-client smoke test
 make bench          # produce/consume throughput (needs a broker)
 make docker-up      # start a KRaft cluster (make docker-up MULTI=1 for 3 nodes)
 ```
