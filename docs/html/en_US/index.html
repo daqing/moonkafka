@@ -16,7 +16,6 @@
   <a href="#design">Design decisions</a>
   <a href="#layout">Package layout</a>
   <a href="#protocol">Protocol surface</a>
-  <a href="#roadmap">Roadmap</a>
   <a href="#testing">Testing strategy</a>
   <a href="#risks">Risks &amp; open questions</a>
   <div class="lang-switch">
@@ -38,10 +37,9 @@ fixtures) plus an optional real-cluster integration harness. The API may still
 change before 1.0.</blockquote>
 
 <h2 id="overview">Overview</h2>
-<p>The project grows moonkafka from a simple producer/consumer into a fully
-featured Kafka client through a sequence of independently committable phases
-(0–7). Phases 0–4 are the critical path; 5–7 are breadth and polish. Sources
-of truth for implementation work:</p>
+<p>moonkafka is a fully featured Apache Kafka client driver written in
+<a href="https://www.moonbitlang.com/">MoonBit</a>. Its implementation follows
+authoritative sources:</p>
 <ul>
   <li><a href="https://kafka.apache.org/43/protocol.html">Kafka 4.3 protocol guide</a></li>
   <li>Per-API message schemas: <code>clients/src/main/resources/common/message/*.json</code> in the Kafka repo</li>
@@ -153,92 +151,13 @@ Selected highlights:</p>
 <code>protocol/errors.mbt</code>, each carrying <code>name</code>,
 <code>retriable</code>, and fatality / metadata-refresh flags.</p>
 
-<h2 id="roadmap">Roadmap</h2>
-
-<h3>Phase 0 — Foundations &amp; housekeeping <span class="badge">done</span></h3>
-<ul class="checklist">
-  <li><strong>Error taxonomy</strong> — <code>errors.mbt</code> with the full published 4.3 table (codes −1–133); <code>BrokerError(code, context)</code> suberror with <code>name()</code>/<code>is_retriable()</code>.</li>
-  <li><strong>Primitives</strong> — murmur2 port verified against all six <code>UtilsTest</code> vectors; <code>Uuid</code> with Java-canonical 22-char base64url formatting.</li>
-  <li><strong>Tagged-field encode</strong> — <code>write_tagged_fields</code> writes ascending, plain-uvarint tag buffers.</li>
-  <li><strong>Config structs</strong> — <code>CommonConfig</code> (bootstrap parsing, security protocol + SASL shells), <code>ProducerConfig</code>, <code>ConsumerConfig</code>, all validated at construction.</li>
-  <li><strong>Time/backoff helpers</strong> — pure <code>backoff_ms</code>, jittered <code>Backoff</code> schedule (±20%), <code>Deadline</code> on <code>@async.now()</code>.</li>
-  <li><strong>Package split</strong> — <code>buf/</code> and <code>internal/</code> subpackages; root surface deliberately shrunk (Encoder/Decoder/crc32c/murmur2 no longer public API).</li>
-</ul>
-
-<h3>Phase 1 — Transport hardening <span class="badge">done</span></h3>
-<ul class="checklist">
-  <li><strong>BrokerConnection v2</strong> — pipelining via write-lock + frame-level read-lock + pooled out-of-order responses; per-request timeouts closing the connection; <code>TransportError</code> on EOF/corrupt frames; max in-flight via semaphore.</li>
-  <li><strong>Reconnect &amp; bootstrap set</strong> — round-robin bootstrap rotation, failover at dial time, producer/consumer recovery from <code>TransportError</code> and leadership errors with backoff; <code>REBOOTSTRAP_REQUIRED</code> handling.</li>
-  <li><strong>Throttling</strong> — every response decoder returns <code>throttle_time_ms</code>; the connection delays subsequent requests.</li>
-  <li><strong>TLS</strong> — <code>BrokerStream</code> enum, <code>TlsClientOptions</code> (SNI, custom CA PEM), wired through config for SSL / SASL_SSL.</li>
-  <li><strong>SASL</strong> — SaslHandshake v1 + SaslAuthenticate v2; PLAIN, SCRAM-SHA-256/512 (pure MoonBit PBKDF2), OAUTHBEARER via user-supplied token provider; re-authentication tracked.</li>
-  <li><strong>Cluster layer</strong> — <code>ClusterClient</code> owns the bootstrap set, connection pool keyed by node id, metadata caching with refresh scheduling, topic-id map (KIP-516), batched FindCoordinator v4 (KIP-699).</li>
-</ul>
-
-<h3>Phase 2 — Protocol completeness (data plane) <span class="badge">done</span></h3>
-<ul class="checklist">
-  <li><strong>Version negotiation matrix</strong> — per-API floor/ceiling matrix; the handshake parses the broker's ranges into <code>BrokerVersions</code> stored on every connection; choose-highest-common logic with clear no-overlap errors; <code>REBOOTSTRAP_REQUIRED</code> recovery.</li>
-  <li><strong>Metadata</strong> — v12/v13 dispatch; <code>topic_id</code> exposure (Fetch v13+); <code>DescribeTopicPartitions</code> v0 with cursor pagination; hardened decoder bounds checks.</li>
-  <li><strong>Produce</strong> — v12 (topic names) / v13 (topic-id, KIP-516); per-record <code>record_errors</code> with messages (KIP-467).</li>
-  <li><strong>Fetch</strong> — v12–v16; incremental fetch sessions (KIP-227) with eviction/session-restart handling; truncated-batch handling with <code>records_complete</code>.</li>
-  <li><strong>ListOffsets</strong> v10/v11 — KIP-1075 timeout, KIP-1023 earliest-pending sentinel; public offset sentinel constants.</li>
-  <li><strong>Record layer</strong> — record headers round-trip; detailed batch decode (producer id/epoch, control/transactional flags); <code>collect_committed</code> read-committed primitive; <code>RecordBatchBuilder</code>.</li>
-  <li><strong>Compression</strong> — one <code>Codec</code> interface mapped to attribute bits 0–4; snappy (xerial framing) and LZ4 (Kafka frame framing) pure MoonBit; gzip via system zlib FFI; zstd via vendored single-file decompressor; golden fixtures from independent implementations.</li>
-  <li><strong>Decoder robustness</strong> — deterministic fuzz over compressed streams, record batches, and five wire decoders: everything raises a decode error or succeeds, never panics.</li>
-</ul>
-
-<h3>Phase 3 — Full producer <span class="badge">done</span></h3>
-<ul class="checklist">
-  <li><strong>Partitioner</strong> — <code>Murmur2</code> (default), <code>Murmur2RoundRobin</code>, <code>RoundRobin</code>; sticky partitioner per batch (KIP-794); manual partition override.</li>
-  <li><strong>Batching accumulator</strong> — per-partition queues over <code>RecordBatchBuilder</code>; <code>batch_size</code> rotation, <code>linger_ms</code> readiness, <code>buffer_memory</code> accounting with <code>BufferExhausted</code>; per-partition order preserved across coalescing.</li>
-  <li><strong>Sender task</strong> — per-producer drain loop in the caller's task group; one Produce request per leader, pipelined up to <code>max_in_flight</code>; acks=0 fire-and-forget; retriable failure requeue with backoff inside <code>delivery_timeout_ms</code> (default 120s).</li>
-  <li><strong>Public API</strong> — <code>send</code>, per-record <code>SendHandle</code> (<code>await</code>/<code>cancel</code>), batched <code>send_all</code>, async <code>on_complete</code> callbacks.</li>
-  <li><strong>Idempotence</strong> — InitProducerId v5; pid/epoch + per-partition sequence stamping; Java-client reset rules on <code>UNKNOWN_PRODUCER_ID</code>; config validation (acks=-1, max_in_flight ≤ 5).</li>
-  <li><strong>Transactions</strong> — coordinator init, <code>begin_transaction</code>/<code>commit_transaction</code>/<code>abort_transaction</code>, AddPartitionsToTxn v3, AddOffsetsToTxn v4 + TxnOffsetCommit v4, EndTxn v5 with epoch adoption (KIP-890); coordinator retry/refind, fencing detection, abort-on-error commit policy.</li>
-  <li><strong>Producer metrics</strong> — <code>metrics()</code> with queue depth, in-flight batches, sent/failed counters, throttle hints.</li>
-</ul>
-
-<h3>Phase 4 — Full consumer <span class="badge">done</span></h3>
-<ul class="checklist">
-  <li><strong>Offset management</strong> — OffsetCommit v8–v10 / OffsetFetch v8–v10; <code>commit</code>/<code>commit_async</code>/<code>committed</code> with coordinator retry; seek family over ListOffsets; background autocommit with commit-on-close.</li>
-  <li><strong>Fetcher</strong> — concurrent long-poll per leader through incremental sessions; <code>max_poll_records</code>/<code>max_partition_fetch_bytes</code> caps with rewind; pause/resume; <code>auto_offset_reset</code> policies; KIP-320 truncation detection via OffsetForLeaderEpoch v4; read_committed filtering via <code>collect_committed</code>.</li>
-  <li><strong>KIP-848 member</strong> — ConsumerGroupHeartbeat v0/v1; client-generated member ids; server-driven assignment applied atomically around RebalanceListener hooks; static membership; regex subscription (glob subset); graceful leave; fencing recovery.</li>
-  <li><strong>Classic member</strong> — JoinGroup v9 / SyncGroup v5 / Heartbeat v4 / LeaveGroup v5; Range, RoundRobin, Sticky, and CooperativeSticky (KIP-429 two-round) assignors; static membership; rebalance listeners.</li>
-  <li><strong>Consumer surface</strong> — subscribe/assign split, <code>position</code>/<code>committed</code>/<code>assignment</code>/<code>group_metadata</code>; <code>max_poll_interval_ms</code> enforcement; utf8 record helpers.</li>
-  <li><strong><code>group_protocol</code> config</strong> — KIP-848 (default), classic, or fallback ordering probed against the broker's advertised APIs. Documented interop caveats: mixed-vendor cooperative groups, glob-subset regex, classic <code>UNSTABLE_OFFSET_COMMIT</code> handling.</li>
-</ul>
-
-<h3>Phase 5 — Admin client <span class="badge">done</span></h3>
-<ul class="checklist">
-  <li><strong>Admin core</strong> — shared retriable-result retry policy; any-broker control connection vs controller-routed ops; per-item error codes as values; paginated DescribeTopicPartitions walking.</li>
-  <li><strong>Topic ops</strong> — CreateTopics v7, DeleteTopics v6 (names, ids, mixed), CreatePartitions v3, DeleteRecords v2, OffsetDelete v0.</li>
-  <li><strong>Cluster/config</strong> — DescribeCluster v0–v2, DescribeConfigs v4, IncrementalAlterConfigs v1 + AlterConfigs v2, ListConfigResources v0–v1 (KIP-1142), DescribeLogDirs v2–v5, ElectLeaders v2, reassignments, UnregisterBroker v0, DescribeQuorum v2, UpdateFeatures v2.</li>
-  <li><strong>Groups</strong> — DescribeGroups v6 (classic only), ConsumerGroupDescribe v1 (KIP-848 members), ListGroups v5, DeleteGroups v2.</li>
-  <li><strong>Producers/transactions</strong> — DescribeProducers v0, DescribeTransactions v0, ListTransactions v2.</li>
-  <li><strong>Security</strong> — Describe/Create/DeleteAcls v2–v3 with pinned enum byte values; DescribeClientQuotas/AlterClientQuotas v0–v1; Describe/AlterUserScramCredentials v0 with password-derived SCRAM upserts.</li>
-</ul>
-
-<h3>Phase 6 — Share groups (KIP-932) &amp; telemetry <span class="badge">done</span></h3>
-<ul class="checklist">
-  <li><strong><code>ShareConsumer</code></strong> — ShareGroupHeartbeat v1 membership, ShareFetch v2 (acquisition/release, delivery-count caps), ShareAcknowledge v2 (accept/release/reject/renew); Describe/Alter/DeleteShareGroupOffsets admin ops.</li>
-  <li><strong>Telemetry (KIP-714)</strong> — GetTelemetrySubscriptions/PushTelemetry client with a pluggable metrics provider.</li>
-</ul>
-
-<h3>Phase 7 — Hardening, performance, release <span class="badge">done</span></h3>
-<ul class="checklist">
-  <li><strong>Test harness</strong> — Docker compose (KRaft single/multi broker), <code>make integration</code>, in-process fake-broker testkit with fault injection (throttling, version ceilings, SASL/TLS, session churn).</li>
-  <li><strong>CI</strong> — GitHub Actions: build + tests, fmt check, <code>moon info</code> clean-diff, Docker Kafka 4.3 integration job, golden-file regeneration.</li>
-  <li><strong>Performance</strong> — encoder preallocation, zero-copy-ish decoding (<code>BytesView</code>), benchmark script with <code>bench-produce</code>.</li>
-  <li><strong>Docs &amp; release</strong> — README feature matrix, protocol notes, CHANGELOG, version 0.2.0 with release checklist.</li>
-</ul>
-
 <h2 id="testing">Testing strategy</h2>
 <ol>
   <li><strong>Unit (pure)</strong> — codec round-trips with <code>debug_inspect</code> snapshot tests; known-vector tests (murmur2, CRC32C, varints, SCRAM); decoder robustness (truncation must raise, never panic).</li>
   <li><strong>Golden files</strong> — byte-exact request/response fixtures in <code>test/golden/</code>; decoders must parse them, encoders must byte-match where deterministic.</li>
   <li><strong>Mock broker</strong> — an in-MoonBit fake broker speaking the real protocol: version ceilings, error injection, throttling, session churn.</li>
-  <li><strong>Integration</strong> — Dockerized <code>apache/kafka:4.3.x</code> (KRaft) covering every phase's acceptance criteria.</li>
-  <li>Per AGENTS.md: <code>moon info &amp;&amp; moon fmt</code> and <code>.mbti</code> diff review every commit; coverage reviewed at phase end.</li>
+  <li><strong>Integration</strong> — Dockerized <code>apache/kafka:4.3.x</code> (KRaft) end-to-end acceptance suite.</li>
+  <li>Per AGENTS.md: <code>moon info &amp;&amp; moon fmt</code> and <code>.mbti</code> diff review every commit; coverage reviewed regularly.</li>
 </ol>
 
 <h2 id="risks">Risks &amp; open questions</h2>

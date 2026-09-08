@@ -16,7 +16,6 @@
   <a href="#design">设计决策</a>
   <a href="#layout">包结构</a>
   <a href="#protocol">协议覆盖面</a>
-  <a href="#roadmap">路线图</a>
   <a href="#testing">测试策略</a>
   <a href="#risks">风险与待解问题</a>
   <div class="lang-switch">
@@ -36,10 +35,8 @@ Apache Kafka 客户端驱动，面向 <strong>Kafka 4.3.x</strong>（4.3.0 首�
 在 1.0 之前 API 仍可能调整。</blockquote>
 
 <h2 id="overview">概览</h2>
-<p>本项目的目标是将 moonkafka 从简单的生产者/消费者逐步演进为功能完备的
-Kafka 客户端驱动。整体规划分为 0–7 共八个阶段，每个阶段均由可独立提交的
-工作项组成并有验收标准；阶段 0–4 是关键路径，5–7 属于广度与打磨。实现工作
-的权威依据：</p>
+<p>moonkafka 是一个用 <a href="https://www.moonbitlang.com/">MoonBit</a> 编写的功能完备的
+Apache Kafka 客户端驱动。其实现遵循权威资料：</p>
 <ul>
   <li><a href="https://kafka.apache.org/43/protocol.html">Kafka 4.3 协议指南</a></li>
   <li>各 API 的消息 schema：Kafka 仓库中的
@@ -142,92 +139,13 @@ moonkafka.mbt 根包重导出（公共 API 面）</code></pre>
 中实现，每项带 <code>name</code>、<code>retriable</code> 以及致命性 /
 需刷新元数据等标志。</p>
 
-<h2 id="roadmap">路线图</h2>
-
-<h3>阶段 0 —— 地基与整理 <span class="badge">已完成</span></h3>
-<ul class="checklist">
-  <li><strong>错误分类</strong> —— <code>errors.mbt</code> 含完整 4.3 错误码表（-1–133）；<code>BrokerError(code, context)</code> 子错误带 <code>name()</code>/<code>is_retriable()</code>。</li>
-  <li><strong>基础类型</strong> —— murmur2 移植，全部六个 <code>UtilsTest</code> 向量通过；<code>Uuid</code> 采用 Java 规范的 22 字符 base64url 格式。</li>
-  <li><strong>标记字段编码</strong> —— <code>write_tagged_fields</code> 以升序普通 uvarint 写标记缓冲。</li>
-  <li><strong>配置结构体</strong> —— <code>CommonConfig</code>（引导服务器解析、安全协议 + SASL 外壳）、<code>ProducerConfig</code>、<code>ConsumerConfig</code>，均在构造时校验。</li>
-  <li><strong>时间/退避工具</strong> —— 纯函数 <code>backoff_ms</code>、带 ±20% 抖动的 <code>Backoff</code>、基于 <code>@async.now()</code> 的 <code>Deadline</code>。</li>
-  <li><strong>包拆分</strong> —— <code>buf/</code> 与 <code>internal/</code> 子包；根包 API 面有意收缩。</li>
-</ul>
-
-<h3>阶段 1 —— 传输层加固 <span class="badge">已完成</span></h3>
-<ul class="checklist">
-  <li><strong>BrokerConnection v2</strong> —— 写锁 + 帧级读锁 + 乱序响应池实现流水线；单请求超时关闭连接；EOF/坏帧抛 <code>TransportError</code>；信号量限制最大在途请求。</li>
-  <li><strong>重连与引导集合</strong> —— 引导服务器轮询，拨号时故障转移，生产者/消费者从 <code>TransportError</code> 和领导权错误中恢复；处理 <code>REBOOTSTRAP_REQUIRED</code>。</li>
-  <li><strong>限流</strong> —— 每个响应解码器返回 <code>throttle_time_ms</code>；连接延迟后续请求。</li>
-  <li><strong>TLS</strong> —— <code>BrokerStream</code> 枚举、<code>TlsClientOptions</code>（SNI、自定义 CA），支持 SSL / SASL_SSL。</li>
-  <li><strong>SASL</strong> —— SaslHandshake v1 + SaslAuthenticate v2；PLAIN、SCRAM-SHA-256/512（纯 MoonBit PBKDF2）、OAUTHBEARER（用户提供的令牌提供者）；支持重新认证。</li>
-  <li><strong>集群层</strong> —— <code>ClusterClient</code> 统一管理引导集合、按节点 id 的连接池、带刷新调度的元数据缓存、topic-id 映射（KIP-516）、批量 FindCoordinator v4（KIP-699）。</li>
-</ul>
-
-<h3>阶段 2 —— 协议完备（数据面） <span class="badge">已完成</span></h3>
-<ul class="checklist">
-  <li><strong>版本协商矩阵</strong> —— 逐 API 的下限/上限矩阵；握手解析 broker 区间为 <code>BrokerVersions</code> 存于每个连接；选择最高共同版本，无重叠时清晰报错。</li>
-  <li><strong>Metadata</strong> —— v12/v13 按协商版本分发；暴露 <code>topic_id</code>（Fetch v13+ 需要）；<code>DescribeTopicPartitions</code> v0 游标分页；解码器边界检查加固。</li>
-  <li><strong>Produce</strong> —— v12/v13（topic-id，KIP-516）；逐记录 <code>record_errors</code> 携带消息（KIP-467）。</li>
-  <li><strong>Fetch</strong> —— v12–v16；增量 fetch 会话（KIP-227）含会话失效/重建；截断批次的显式处理（<code>records_complete</code>）。</li>
-  <li><strong>ListOffsets</strong> v10/v11 —— KIP-1075 超时、KIP-1023 哨兵；公开偏移量哨兵常量。</li>
-  <li><strong>记录层</strong> —— 记录头往返；详细批次解码（producer id/epoch、control/transactional 标志）；<code>collect_committed</code> read_committed 原语；<code>RecordBatchBuilder</code>。</li>
-  <li><strong>压缩</strong> —— 统一 <code>Codec</code> 接口映射属性位 0–4；snappy/lz4 纯 MoonBit，gzip 经系统 zlib FFI，zstd 经内嵌解压库；来自独立实现的 golden fixture。</li>
-  <li><strong>解码器健壮性</strong> —— 对压缩流、记录批次和五个线解码器做确定性模糊测试：只允许解码错误或成功，绝不 panic。</li>
-</ul>
-
-<h3>阶段 3 —— 完整生产者 <span class="badge">已完成</span></h3>
-<ul class="checklist">
-  <li><strong>分区器</strong> —— <code>Murmur2</code>（默认）、<code>Murmur2RoundRobin</code>、<code>RoundRobin</code>；按批次的粘性分区（KIP-794）；手动指定分区。</li>
-  <li><strong>批处理累加器</strong> —— 每分区队列；<code>batch_size</code> 轮换、<code>linger_ms</code> 就绪、<code>buffer_memory</code> 记账（<code>BufferExhausted</code>）；合并发送时保持分区顺序。</li>
-  <li><strong>Sender 任务</strong> —— 每生产者一个排空循环；按 leader 分组、流水线在途上限（默认 5）；acks=0 免应答；可重试失败回到队首并按 <code>delivery_timeout_ms</code>（默认 120s）退避重试。</li>
-  <li><strong>公共 API</strong> —— <code>send</code>、逐记录 <code>SendHandle</code>（<code>await</code>/<code>cancel</code>）、批量 <code>send_all</code>、异步 <code>on_complete</code> 回调。</li>
-  <li><strong>幂等</strong> —— InitProducerId v5；pid/epoch + 每分区序列号；<code>UNKNOWN_PRODUCER_ID</code> 时按 Java 客户端规则重置；配置校验（acks=-1、max_in_flight ≤ 5）。</li>
-  <li><strong>事务</strong> —— 协调器初始化；<code>begin/commit/abort_transaction</code>；AddPartitionsToTxn v3；AddOffsetsToTxn v4 + TxnOffsetCommit v4；EndTxn v5 带纪元晋升（KIP-890）；协调器重试/重寻、栅栏检测、失败时需中止的提交策略。</li>
-  <li><strong>生产者指标</strong> —— <code>metrics()</code>：队列深度、在途批次、发送/失败计数、限流提示。</li>
-</ul>
-
-<h3>阶段 4 —— 完整消费者 <span class="badge">已完成</span></h3>
-<ul class="checklist">
-  <li><strong>偏移量管理</strong> —— OffsetCommit v8–v10 / OffsetFetch v8–v10；<code>commit</code>/<code>commit_async</code>/<code>committed</code> 带协调器重试；seek 系列；后台自动提交含关闭前提交。</li>
-  <li><strong>Fetcher</strong> —— 每 leader 并发长轮询 + 增量会话；<code>max_poll_records</code>/<code>max_partition_fetch_bytes</code> 上限与回退；暂停/恢复；<code>auto_offset_reset</code> 策略；KIP-320 截断检测（OffsetForLeaderEpoch v4）；read_committed 过滤。</li>
-  <li><strong>KIP-848 成员</strong> —— ConsumerGroupHeartbeat v0/v1；客户端生成成员 id；服务端驱动分配围绕 RebalanceListener 原子生效；静态成员；正则订阅（glob 子集）；优雅退出；栅栏恢复。</li>
-  <li><strong>经典组成员</strong> —— JoinGroup v9 / SyncGroup v5 / Heartbeat v4 / LeaveGroup v5；Range、RoundRobin、Sticky 与 CooperativeSticky（KIP-429 两轮）分配器；静态成员；再均衡监听器。</li>
-  <li><strong>消费者 API 面</strong> —— subscribe/assign 互斥；<code>position</code>/<code>committed</code>/<code>assignment</code>/<code>group_metadata</code>；<code>max_poll_interval_ms</code> 强制；utf8 记录辅助方法。</li>
-  <li><strong><code>group_protocol</code> 配置</strong> —— KIP-848（默认）、经典、或按 broker 通告 API 探测回退。已记录互操作注意事项：混合厂商协作组、glob 正则子集、经典路径 <code>UNSTABLE_OFFSET_COMMIT</code>。</li>
-</ul>
-
-<h3>阶段 5 —— Admin 客户端 <span class="badge">已完成</span></h3>
-<ul class="checklist">
-  <li><strong>Admin 核心</strong> —— 共享的可重试结果重试策略；任意 broker 控制连接 vs 控制器路由；逐项错误码以值返回；DescribeTopicPartitions 分页游标遍历。</li>
-  <li><strong>主题操作</strong> —— CreateTopics v7、DeleteTopics v6（按名字/ID/混合）、CreatePartitions v3、DeleteRecords v2、OffsetDelete v0。</li>
-  <li><strong>集群/配置</strong> —— DescribeCluster v0–v2、DescribeConfigs v4、IncrementalAlterConfigs v1 + AlterConfigs v2、ListConfigResources v0–v1（KIP-1142）、DescribeLogDirs v2–v5、ElectLeaders v2、分区重分配、UnregisterBroker v0、DescribeQuorum v2、UpdateFeatures v2。</li>
-  <li><strong>消费组</strong> —— DescribeGroups v6（仅经典组）、ConsumerGroupDescribe v1（KIP-848 成员）、ListGroups v5、DeleteGroups v2。</li>
-  <li><strong>生产者/事务</strong> —— DescribeProducers v0、DescribeTransactions v0、ListTransactions v2。</li>
-  <li><strong>安全</strong> —— Describe/Create/DeleteAcls v2–v3（枚举字节值取自 Java 源码）；配额 Describe/AlterClientQuotas v0–v1；Describe/AlterUserScramCredentials v0（从口令派生 SCRAM 凭证）。</li>
-</ul>
-
-<h3>阶段 6 —— 共享组（KIP-932）与遥测 <span class="badge">已完成</span></h3>
-<ul class="checklist">
-  <li><strong><code>ShareConsumer</code></strong> —— ShareGroupHeartbeat v1 成员关系；ShareFetch v2（获取/释放语义、投递计数上限）；ShareAcknowledge v2（accept/release/reject/renew）；共享组偏移量的 Describe/Alter/Delete admin 操作。</li>
-  <li><strong>遥测（KIP-714）</strong> —— GetTelemetrySubscriptions/PushTelemetry 客户端 + 可插拔指标提供者。</li>
-</ul>
-
-<h3>阶段 7 —— 加固、性能与发布 <span class="badge">已完成</span></h3>
-<ul class="checklist">
-  <li><strong>测试设施</strong> —— Docker compose（KRaft 单/多 broker）、<code>make integration</code>、进程内模拟 broker testkit（限流、版本上限、SASL/TLS、会话翻动等故障注入）。</li>
-  <li><strong>CI</strong> —— GitHub Actions：构建 + 测试、fmt 检查、<code>moon info</code> 干净差异、Docker Kafka 4.3 集成任务、golden 文件再生成。</li>
-  <li><strong>性能</strong> —— 编码器预分配、近零拷贝解码（<code>BytesView</code>）、基准脚本与 <code>bench-produce</code>。</li>
-  <li><strong>文档与发布</strong> —— README 特性矩阵、协议笔记、CHANGELOG，版本升至 0.2.0 并附发布检查清单。</li>
-</ul>
-
 <h2 id="testing">测试策略</h2>
 <ol>
   <li><strong>单元（纯函数）</strong> —— 编解码往返用 <code>debug_inspect</code> 快照测试；已知向量测试（murmur2、CRC32C、varint、SCRAM）；解码器健壮性（截断必须报错，绝不 panic）。</li>
   <li><strong>Golden 文件</strong> —— <code>test/golden/</code> 中的字节级请求/响应 fixture；解码器必须能解析，编码器在确定性场景下必须字节一致。</li>
   <li><strong>模拟 broker</strong> —— 用 MoonBit 编写的进程内假 broker，说真协议：版本上限、错误注入、限流、会话翻动。</li>
-  <li><strong>集成测试</strong> —— Docker 化的 <code>apache/kafka:4.3.x</code>（KRaft），覆盖各阶段验收标准。</li>
-  <li>遵循 AGENTS.md：每次提交运行 <code>moon info &amp;&amp; moon fmt</code> 并审查 <code>.mbti</code> 差异；阶段末审查覆盖率。</li>
+  <li><strong>集成测试</strong> —— Docker 化的 <code>apache/kafka:4.3.x</code>（KRaft）端到端验收套件。</li>
+  <li>遵循 AGENTS.md：每次提交运行 <code>moon info &amp;&amp; moon fmt</code> 并审查 <code>.mbti</code> 差异；定期审查覆盖率。</li>
 </ol>
 
 <h2 id="risks">风险与待解问题</h2>
