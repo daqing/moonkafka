@@ -121,7 +121,7 @@ config/       shared + per-surface config
 moonkafka.mbt root re-exports (public API surface)</code></pre>
 <p>Public API stays in the root package (<code>@moonkafka.Producer</code>,
 <code>…Consumer</code>, <code>…Admin</code>, <code>…ShareConsumer</code>);
-internals are subpackages. Every phase ends with <code>moon info &amp;&amp; moon fmt</code>
+internals are subpackages. Every commit ends with <code>moon info &amp;&amp; moon fmt</code>
 and a <code>.mbti</code> diff review.</p>
 
 <h2 id="protocol">Protocol surface (Kafka 4.3)</h2>

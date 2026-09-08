@@ -110,7 +110,7 @@ config/       共享配置 + 各客户端面配置
 moonkafka.mbt 根包重导出（公共 API 面）</code></pre>
 <p>公共 API 保留在根包（<code>@moonkafka.Producer</code>、
 <code>…Consumer</code>、<code>…Admin</code>、<code>…ShareConsumer</code>），
-内部实现为子包。每个阶段以 <code>moon info &amp;&amp; moon fmt</code> 和
+内部实现为子包。每次提交都以 <code>moon info &amp;&amp; moon fmt</code> 和
 <code>.mbti</code> 差异审查收尾。</p>
 
 <h2 id="protocol">协议覆盖面（Kafka 4.3）</h2>
