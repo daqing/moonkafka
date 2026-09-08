@@ -146,6 +146,54 @@ pub async fn ClusterClient::refresh_metadata(
 }
 
 ///|
+/// Fetch metadata for one topic and wait until it has at least one
+/// partition with a leader. Topic auto-creation is asynchronous in KRaft:
+/// the broker answers the first metadata request for a brand-new topic with
+/// UNKNOWN_TOPIC_OR_PARTITION and materializes it (then elects leaders)
+/// moments later. Retry on those retriable per-topic errors — Java's
+/// waitOnMetadata — until the topic is ready or `timeout_ms` lapses.
+pub async fn ClusterClient::wait_for_topic(
+  self : ClusterClient,
+  topic : String,
+  timeout_ms? : Int = 30000,
+) -> TopicMetadata {
+  let deadline = Deadline::after_ms(timeout_ms.to_int64())
+  let backoff = Backoff::new(base_ms=100, max_ms=1000)
+  for ;; {
+    let fetched : Result[Unit, Error] = try
+      self.refresh_metadata(Some([topic])) |> Ok
+    catch {
+      e => Err(e)
+    }
+    match fetched {
+      Ok(_) => ()
+      Err(BrokerError(code, _)) if error_retriable(code) => {
+        if deadline.expired() {
+          raise BrokerError(
+            code,
+            "topic \{topic} not ready after \{timeout_ms} ms",
+          )
+        }
+        @async.sleep(backoff.next_ms())
+        continue
+      }
+      Err(e) => raise e
+    }
+    match self.topic(topic) {
+      Some(t) if !t.partitions.is_empty() => return t
+      _ => {
+        if deadline.expired() {
+          raise ProtocolError::ProtocolError(
+            "topic \{topic} has no partitions with a leader",
+          )
+        }
+        @async.sleep(backoff.next_ms())
+      }
+    }
+  }
+}
+
+///|
 /// Opportunistic refresh when the cached snapshot aged out. Refresh
 /// failures are swallowed — staleness surfaces on use, where callers run
 /// their own recovery; Java's background refresher lands with the sender

@@ -28,16 +28,18 @@ fn print_help() -> Unit {
       $|moonkafka - a simple Kafka 4.x client
       $|
       $|Usage:
-      $|  main consume [topic] [host] [port]                consume a topic
+      $|  main consume [topic] [host] [port] [start-from]    consume a topic
       $|  main produce <topic> <value> [key] [host] [port]  produce one message
       $|  main -h | --help                                  show this help
       $|
       $|Consume mode:
-      $|  Consumes all partitions of <topic> from the latest offset and prints
-      $|  records until interrupted (Ctrl-C).
-      $|    topic   topic name (default "events")
-      $|    host    bootstrap broker host (default 127.0.0.1)
-      $|    port    bootstrap broker port (default 9092)
+      $|  Consumes all partitions of <topic> and prints records until interrupted
+      $|  (Ctrl-C). By default it starts at the latest offset (tail); pass
+      $|  "earliest" to replay the whole topic.
+      $|    topic       topic name (default "events")
+      $|    host        bootstrap broker host (default 127.0.0.1)
+      $|    port        bootstrap broker port (default 9092)
+      $|    start-from  "earliest" or "latest" (default "latest")
       $|
       $|Produce mode:
       $|  Sends one message to <topic> and prints the assigned offset.
@@ -174,6 +176,14 @@ async fn consume(args : Array[String]) -> Unit {
       }
     None => 9092
   }
+  let start_from = match args.get(5) {
+    Some("earliest") => @lib.StartFrom::Earliest
+    Some("latest") | None => @lib.StartFrom::Latest
+    Some(other) => {
+      println("invalid start-from: \{other} (expected earliest|latest)")
+      abort("")
+    }
+  }
   // The consumer's autocommit loop lives in a task group scoped to the
   // consume call.
   @async.with_task_group(fn(group) {
@@ -182,7 +192,7 @@ async fn consume(args : Array[String]) -> Unit {
       host~,
       port~,
       topic~,
-      start_from=Latest,
+      start_from~,
     ) catch {
       @lib.ProtocolError(msg) => {
         println("failed to connect: \{msg}")

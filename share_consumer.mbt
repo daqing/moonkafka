@@ -227,11 +227,10 @@ pub async fn ShareConsumer::connect_with_config(
 
 ///|
 async fn ShareConsumer::refresh_metadata(self : ShareConsumer) -> Unit {
-  self.cluster.refresh_metadata(Some([self.topic]))
-  let topic_meta = match self.cluster.topic(self.topic) {
-    Some(t) => t
-    None => raise ProtocolError::ProtocolError("topic \{self.topic} not found")
-  }
+  let topic_meta = self.cluster.wait_for_topic(
+    self.topic,
+    timeout_ms=self.request_timeout_ms,
+  )
   self.topic_id = topic_meta.topic_id
   self.partitions = topic_meta.partitions
   self.share_sessions = Map([])

@@ -27,6 +27,7 @@ pub fn Decoder::read_i16(Self) -> Int raise DecodeError
 pub fn Decoder::read_i32(Self) -> Int raise DecodeError
 pub fn Decoder::read_i64(Self) -> Int64 raise DecodeError
 pub fn Decoder::read_i8(Self) -> Int raise DecodeError
+pub fn Decoder::read_nullable_string(Self) -> String? raise DecodeError
 pub fn Decoder::read_uvarint(Self) -> Int raise DecodeError
 pub fn Decoder::read_varint(Self) -> Int raise DecodeError
 pub fn Decoder::read_varlong(Self) -> Int64 raise DecodeError

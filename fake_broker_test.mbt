@@ -107,7 +107,7 @@ fn fake_sasl_auth_bytes(rest : Bytes) -> Bytes raise {
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
   ignore(d.read_i32()) // correlation id
-  ignore(d.read_compact_string()) // client id
+  ignore(d.read_nullable_string()) // client id
   d.skip_tag_buffer()
   let n = d.read_compact_len()
   d.read_bytes(n)
@@ -245,7 +245,7 @@ fn fake_find_coordinator_request_keys(rest : Bytes) -> Array[String] raise {
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
   ignore(d.read_i32()) // correlation id
-  ignore(d.read_compact_string()) // client id
+  ignore(d.read_nullable_string()) // client id
   d.skip_tag_buffer()
   ignore(d.read_i8()) // key type
   let n = d.read_compact_len()
@@ -284,7 +284,7 @@ fn fake_init_producer_id_request(rest : Bytes) -> (String?, Int64, Int) raise {
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
   ignore(d.read_i32()) // correlation id
-  ignore(d.read_compact_string()) // client id
+  ignore(d.read_nullable_string()) // client id
   d.skip_tag_buffer()
   let transactional_id = d.read_compact_nullable_string()
   ignore(d.read_i32()) // transaction timeout
@@ -371,7 +371,7 @@ fn fake_produce_request_info(
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
   ignore(d.read_i32()) // correlation id
-  ignore(d.read_compact_string()) // client id
+  ignore(d.read_nullable_string()) // client id
   d.skip_tag_buffer()
   ignore(d.read_compact_nullable_string()) // transactional id
   ignore(d.read_i16()) // acks
@@ -469,7 +469,7 @@ fn fake_fetch_request_session_epoch(rest : Bytes) -> Int raise {
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
   ignore(d.read_i32()) // correlation id
-  ignore(d.read_compact_string()) // client id
+  ignore(d.read_nullable_string()) // client id
   d.skip_tag_buffer()
   ignore(d.read_i32()) // max_wait_ms
   ignore(d.read_i32()) // min_bytes
@@ -529,7 +529,7 @@ fn fake_join_group_request(
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
   ignore(d.read_i32()) // correlation id
-  ignore(d.read_compact_string()) // client id
+  ignore(d.read_nullable_string()) // client id
   d.skip_tag_buffer()
   let group_id = d.read_compact_string()
   ignore(d.read_i32()) // session timeout
@@ -590,7 +590,7 @@ fn fake_sync_group_request(
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
   ignore(d.read_i32()) // correlation id
-  ignore(d.read_compact_string()) // client id
+  ignore(d.read_nullable_string()) // client id
   d.skip_tag_buffer()
   ignore(d.read_compact_string()) // group
   let generation = d.read_i32()
@@ -631,7 +631,7 @@ fn fake_classic_heartbeat_request(rest : Bytes) -> (String, Int) raise {
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
   ignore(d.read_i32()) // correlation id
-  ignore(d.read_compact_string()) // client id
+  ignore(d.read_nullable_string()) // client id
   d.skip_tag_buffer()
   ignore(d.read_compact_string()) // group
   let generation = d.read_i32()
@@ -656,7 +656,7 @@ fn fake_leave_group_request(rest : Bytes) -> String raise {
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
   ignore(d.read_i32()) // correlation id
-  ignore(d.read_compact_string()) // client id
+  ignore(d.read_nullable_string()) // client id
   d.skip_tag_buffer()
   ignore(d.read_compact_string()) // group
   let n = d.read_compact_len()
@@ -773,7 +773,7 @@ fn fake_create_topics_request(
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
   ignore(d.read_i32()) // correlation id
-  ignore(d.read_compact_string()) // client id
+  ignore(d.read_nullable_string()) // client id
   d.skip_tag_buffer()
   let n = d.read_compact_len()
   let topics : Array[(String, Int, Int)] = []
@@ -835,7 +835,7 @@ fn fake_delete_topics_request(
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
   ignore(d.read_i32()) // correlation id
-  ignore(d.read_compact_string()) // client id
+  ignore(d.read_nullable_string()) // client id
   d.skip_tag_buffer()
   let n = d.read_compact_len()
   let names : Array[String] = []
@@ -890,7 +890,7 @@ fn fake_delete_records_request(
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
   ignore(d.read_i32()) // correlation id
-  ignore(d.read_compact_string()) // client id
+  ignore(d.read_nullable_string()) // client id
   d.skip_tag_buffer()
   let n = d.read_compact_len()
   let topics : Array[(String, Array[(Int, Int64)])] = []
@@ -940,7 +940,7 @@ fn fake_create_partitions_request(
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
   ignore(d.read_i32()) // correlation id
-  ignore(d.read_compact_string()) // client id
+  ignore(d.read_nullable_string()) // client id
   d.skip_tag_buffer()
   let n = d.read_compact_len()
   let topics : Array[(String, Int, Int)] = []
@@ -1121,7 +1121,7 @@ fn fake_skip_flexible_header(d : @buf.Decoder) -> Unit raise {
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
   ignore(d.read_i32()) // correlation id
-  ignore(d.read_compact_string()) // client id
+  ignore(d.read_nullable_string()) // client id
   d.skip_tag_buffer()
 }
 
@@ -1957,7 +1957,7 @@ fn fake_skip_quotas_header(d : @buf.Decoder, version : Int) -> Unit raise {
   ignore(d.read_i16()) // api version
   ignore(d.read_i32()) // correlation id
   if version >= 1 {
-    ignore(d.read_compact_string()) // client id
+    ignore(d.read_nullable_string()) // client id
     d.skip_tag_buffer()
   } else {
     let client_len = d.read_i16()
@@ -2611,7 +2611,7 @@ fn fake_consumer_group_heartbeat_request(
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
   ignore(d.read_i32()) // correlation id
-  ignore(d.read_compact_string()) // client id
+  ignore(d.read_nullable_string()) // client id
   d.skip_tag_buffer()
   let group_id = d.read_compact_string()
   let member_id = d.read_compact_string()
@@ -2670,7 +2670,7 @@ fn fake_fetch_request_isolation(rest : Bytes) -> Int raise {
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
   ignore(d.read_i32()) // correlation id
-  ignore(d.read_compact_string()) // client id
+  ignore(d.read_nullable_string()) // client id
   d.skip_tag_buffer()
   ignore(d.read_i32()) // max_wait_ms
   ignore(d.read_i32()) // min_bytes
@@ -2748,7 +2748,7 @@ fn fake_fetch_request_first_partition(rest : Bytes) -> Int raise {
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
   ignore(d.read_i32()) // correlation id
-  ignore(d.read_compact_string()) // client id
+  ignore(d.read_nullable_string()) // client id
   d.skip_tag_buffer()
   ignore(d.read_i32()) // max_wait_ms
   ignore(d.read_i32()) // min_bytes
@@ -2770,7 +2770,7 @@ fn fake_fetch_request_first_offset(rest : Bytes) -> Int64 raise {
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
   ignore(d.read_i32()) // correlation id
-  ignore(d.read_compact_string()) // client id
+  ignore(d.read_nullable_string()) // client id
   d.skip_tag_buffer()
   ignore(d.read_i32()) // max_wait_ms
   ignore(d.read_i32()) // min_bytes
@@ -2854,7 +2854,7 @@ fn fake_dtp_request_cursor(rest : Bytes) -> TopicPartitionCursor? raise {
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
   ignore(d.read_i32()) // correlation id
-  ignore(d.read_compact_string()) // client id
+  ignore(d.read_nullable_string()) // client id
   d.skip_tag_buffer()
   let topic_count = d.read_compact_len()
   for _ in 0..<topic_count {
@@ -2926,7 +2926,7 @@ fn fake_add_partitions_to_txn_request(
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
   ignore(d.read_i32()) // correlation id
-  ignore(d.read_compact_string()) // client id
+  ignore(d.read_nullable_string()) // client id
   d.skip_tag_buffer()
   let transactional_id = d.read_compact_string()
   let producer_id = d.read_i64()
@@ -2981,7 +2981,7 @@ fn fake_add_offsets_to_txn_request(
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
   ignore(d.read_i32()) // correlation id
-  ignore(d.read_compact_string()) // client id
+  ignore(d.read_nullable_string()) // client id
   d.skip_tag_buffer()
   let transactional_id = d.read_compact_string()
   let producer_id = d.read_i64()
@@ -3010,7 +3010,7 @@ fn fake_txn_offset_commit_request(
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
   ignore(d.read_i32()) // correlation id
-  ignore(d.read_compact_string()) // client id
+  ignore(d.read_nullable_string()) // client id
   d.skip_tag_buffer()
   let transactional_id = d.read_compact_string()
   let group_id = d.read_compact_string()
@@ -3067,7 +3067,7 @@ fn fake_end_txn_request(rest : Bytes) -> (String, Int64, Int, Bool) raise {
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
   ignore(d.read_i32()) // correlation id
-  ignore(d.read_compact_string()) // client id
+  ignore(d.read_nullable_string()) // client id
   d.skip_tag_buffer()
   let transactional_id = d.read_compact_string()
   let producer_id = d.read_i64()
@@ -3104,7 +3104,7 @@ fn fake_offset_commit_request(
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
   ignore(d.read_i32()) // correlation id
-  ignore(d.read_compact_string()) // client id
+  ignore(d.read_nullable_string()) // client id
   d.skip_tag_buffer()
   let group_id = d.read_compact_string()
   let generation = d.read_i32()
@@ -3158,7 +3158,7 @@ fn fake_offset_fetch_request(rest : Bytes) -> (String, Array[Int]) raise {
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
   ignore(d.read_i32()) // correlation id
-  ignore(d.read_compact_string()) // client id
+  ignore(d.read_nullable_string()) // client id
   d.skip_tag_buffer()
   ignore(d.read_compact_len()) // groups
   let group_id = d.read_compact_string()
