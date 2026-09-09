@@ -3,6 +3,15 @@
 // decoded through moonkafka's codecs and whole-batch pipeline.
 
 ///|
+test "golden gzip headers are independent of the generating platform" {
+  // No timestamp or optional fields, level 9, OS=255 (unknown).
+  let header : BytesView = b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x02\xff"
+  assert_eq(golden_gzip[:10], header)
+  // RecordBatch v2's compressed records region starts at byte 61.
+  assert_eq(golden_batch_gzip[61:71], header)
+}
+
+///|
 test "golden streams decode to the exact payload" {
   assert_eq(@compression.gzip_decompress(golden_gzip), golden_payload)
   assert_eq(@compression.snappy_decompress(golden_snappy), golden_payload)
