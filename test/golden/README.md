@@ -23,8 +23,10 @@ Run from the repo root (needs Python 3 + `pip install cramjam`):
 python3 test/golden/generate.py && moon fmt   # or simply: make generate-golden
 ```
 
-- The generator is **deterministic** (gzip is written with `mtime=0`), so
-  re-running it produces identical bytes — CI relies on this.
+- Gzip uses compression level 9, `mtime=0`, and a normalized OS byte of 255
+  (unknown). Python 3.11/3.12's [`gzip.compress`](https://docs.python.org/3/library/gzip.html#gzip.compress)
+  otherwise writes a platform-specific OS byte even with `mtime=0`, making
+  macOS and Linux fixtures (and the enclosing batch CRC32C) differ.
 - The spliced-batch fixtures also overwrite `golden_test_data_test.mbt`, so
   the emitted module is re-run through `moon fmt` (block style) before
   committing.

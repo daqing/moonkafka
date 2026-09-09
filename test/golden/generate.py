@@ -24,6 +24,14 @@ PAYLOAD = (b"moonkafka compression golden payload. "
            b"The quick brown fox jumps over the lazy dog 0123456789. " * 120)[:8192]
 
 
+def gzip_compress(data):
+    """Use a fixed timestamp and OS byte for reproducible gzip fixtures."""
+    stream = gzip_mod.compress(data, compresslevel=9, mtime=0)
+    # Python 3.11/3.12 delegate mtime=0 to zlib, which writes a platform-
+    # specific OS byte. Normalize it to 255 (unknown), as Python 3.13+ does.
+    return stream[:9] + b"\xff" + stream[10:]
+
+
 def xerial_wrap(data):
     """Kafka's snappy framing (snappy-java xerial): 0x82 'SNAPPY', int32
     version, int32 compat, then per-chunk int32 BE length + raw block."""
@@ -85,7 +93,7 @@ def records_region():
 
 
 CODECS = {
-    1: lambda region: gzip_mod.compress(region, mtime=0),
+    1: gzip_compress,
     2: lambda region: xerial_wrap(region),
     3: lambda region: lz4_frame_wrap_data(region),
     4: lambda region: bytes(cramjam.zstd.compress(region)),
@@ -161,7 +169,7 @@ def main():
     with open(os.path.join(HERE, "payload.bin"), "wb") as f:
         f.write(PAYLOAD)
 
-    gzip_stream = gzip_mod.compress(PAYLOAD, mtime=0)
+    gzip_stream = gzip_compress(PAYLOAD)
     snappy_stream = xerial_wrap(PAYLOAD)
     lz4_stream = lz4_frame_wrap_data(PAYLOAD)
     zstd_stream = bytes(cramjam.zstd.compress(PAYLOAD))
