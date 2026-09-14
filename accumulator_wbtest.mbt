@@ -31,7 +31,7 @@ async test "append coalesces records while they fit batch_size" {
   assert_true(!r1)
   assert_eq(i1, 0)
   let (b2, i2, r2) = a.append(1L, 0, 1L, None, Some(b"two"), [])
-  assert_true(b2.id == b1.id)
+  assert_true(physical_equal(b2, b1))
   assert_eq(i2, 1)
   assert_true(!r2)
   // the bytes decode back to both records
@@ -55,12 +55,12 @@ async test "append rotates to a fresh batch when the record does not fit" {
   assert_true(!r1)
   let (b2, _, r2) = a.append(1L, 0, 1L, None, Some(b"A"), [])
   assert_true(r2)
-  assert_true(b2.id != b1.id)
+  assert_true(!physical_equal(b2, b1))
   assert_true(b1.closed)
   assert_true(!b2.closed)
   // a third record lands in the newest open batch
   let (b3, _, r3) = a.append(2L, 0, 2L, None, Some(b"A"), [])
-  assert_true(b3.id == b2.id)
+  assert_true(physical_equal(b3, b2))
   assert_true(!r3)
 }
 
@@ -98,23 +98,23 @@ async test "drain_ready hands out closed batches one per partition in order" {
   let (b1, _, _) = a.append(0L, 0, 0L, None, Some(b"x"), [])
   let (b2, _, _) = a.append(1L, 0, 1L, None, Some(b"y"), [])
   let (b3, _, _) = a.append(2L, 0, 2L, None, Some(b"z"), [])
-  assert_true(b2.id == b1.id)
-  assert_true(b3.id == b1.id)
+  assert_true(physical_equal(b2, b1))
+  assert_true(physical_equal(b3, b1))
   // nothing is ready while the batch is open and linger has not passed
   assert_true(a.drain_ready(5_000L).is_empty())
   // past the linger deadline the open batch becomes ready...
   let ready = a.drain_ready(10_500L)
   assert_eq(ready.length(), 1)
-  assert_eq(ready[0].id, b1.id)
+  assert_true(physical_equal(ready[0], b1))
   // ...and the next record after the old batch left opens a fresh open
   // batch (nothing to rotate), which force-close then makes ready
   let (b4, _, rotated) = a.append(10_600L, 0, 10_600L, None, Some(b"w"), [])
   assert_true(!rotated)
-  assert_true(b4.id != b1.id)
+  assert_true(!physical_equal(b4, b1))
   a.force_close_all()
   let next = a.drain_ready(10_600L)
   assert_eq(next.length(), 1)
-  assert_eq(next[0].id, b4.id)
+  assert_true(physical_equal(next[0], b4))
   assert_true(a.drain_ready(10_600L).is_empty())
 }
 
@@ -134,8 +134,8 @@ async test "requeue moves a failed batch back to the front" {
   let (b2, _, _) = a.append(1L, 0, 1L, None, Some(b"AAAA"), [])
   a.requeue(b2)
   let q = a.batches.get(0).unwrap()
-  assert_eq(q[0].id, b2.id)
-  assert_eq(q[1].id, b1.id)
+  assert_true(physical_equal(q[0], b2))
+  assert_true(physical_equal(q[1], b1))
 }
 
 ///|

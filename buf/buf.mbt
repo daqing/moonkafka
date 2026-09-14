@@ -27,7 +27,7 @@ pub fn Encoder::new() -> Encoder {
 /// `n` < 0 inserts a default growable capacity (16 bytes).
 pub fn Encoder::with_capacity(n : Int) -> Encoder {
   let capacity = if n < 0 { 16 } else { n }
-  { buf: Array::new(capacity~), }
+  { buf: Array(capacity~), }
 }
 
 ///|

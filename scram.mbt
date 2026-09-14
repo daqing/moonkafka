@@ -46,7 +46,7 @@ pub fn[H : @crypto.CryptoHasher] scram_pbkdf2_hmac(
 
 ///|
 fn scram_fixed_to_bytes(fa : FixedArray[Byte]) -> Bytes {
-  let out = Array::new(capacity=fa.length())
+  let out = Array(capacity=fa.length())
   for i in 0..<fa.length() {
     out.push(fa[i])
   }

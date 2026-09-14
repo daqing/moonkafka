@@ -4,8 +4,7 @@
 ///|
 /// Inflate gzip data into dest. Returns bytes written, -2 when dest is
 /// too small, -1 on malformed input.
-#borrow(src)
-#borrow(dest)
+#borrow(src, dest)
 extern "c" fn gzip_decompress_into(
   src : Bytes,
   src_len : Int,
@@ -15,8 +14,7 @@ extern "c" fn gzip_decompress_into(
 
 ///|
 /// Deflate into a gzip member. Same return conventions.
-#borrow(src)
-#borrow(dest)
+#borrow(src, dest)
 extern "c" fn gzip_compress_into(
   src : Bytes,
   src_len : Int,
@@ -29,8 +27,7 @@ extern "c" fn gzip_compress_into(
 extern "c" fn gzip_compress_bound(src_len : Int) -> Int = "moonkafka_gzip_compress_bound"
 
 ///|
-#borrow(src)
-#borrow(dest)
+#borrow(src, dest)
 extern "c" fn zstd_decompress_into(
   src : Bytes,
   src_len : Int,

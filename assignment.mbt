@@ -44,8 +44,8 @@ pub fn compute_assignment(
   owned? : Map[String, Array[(String, Int)]] = Map([]),
 ) -> Map[String, Array[(String, Int)]] {
   let out : Map[String, Array[(String, Int)]] = Map([])
-  for member in members {
-    out[member.member_id] = []
+  for assignee in members {
+    out[assignee.member_id] = []
   }
   match assignor {
     RangeAssignor => assign_range(members, topic_partitions, out)
@@ -73,9 +73,9 @@ fn assign_range(
     let count = topic_partitions.get(topic).unwrap_or(0)
     // Members subscribed to this topic, sorted by id.
     let subscribed : Array[String] = []
-    for member in members {
-      if member.topics.contains(topic) {
-        subscribed.push(member.member_id)
+    for assignee in members {
+      if assignee.topics.contains(topic) {
+        subscribed.push(assignee.member_id)
       }
     }
     subscribed.sort()
@@ -116,13 +116,13 @@ fn assign_round_robin(
     }
   }
   let ordered : Array[String] = []
-  for member in members {
-    ordered.push(member.member_id)
+  for assignee in members {
+    ordered.push(assignee.member_id)
   }
   ordered.sort()
   let subscribed = fn(member_id : String, topic : String) -> Bool {
-    for member in members {
-      if member.member_id == member_id && member.topics.contains(topic) {
+    for assignee in members {
+      if assignee.member_id == member_id && assignee.topics.contains(topic) {
         return true
       }
     }
@@ -156,13 +156,13 @@ fn assign_sticky(
   owned : Map[String, Array[(String, Int)]],
   out : Map[String, Array[(String, Int)]],
 ) -> Unit {
-  for member in members {
-    match owned.get(member.member_id) {
+  for assignee in members {
+    match owned.get(assignee.member_id) {
       Some(pairs) =>
         for pair in pairs {
           let (topic, partition) = pair
           let exists = topic_partitions.get(topic).unwrap_or(0) > partition
-          let subscribed = member.topics.contains(topic)
+          let subscribed = assignee.topics.contains(topic)
           // Keep the partition only when nobody claimed it yet.
           let mut claimed = false
           for _, mine in out {
@@ -173,7 +173,7 @@ fn assign_sticky(
             }
           }
           if exists && subscribed && !claimed {
-            out[member.member_id].push(pair)
+            out[assignee.member_id].push(pair)
           }
         }
       None => ()
@@ -190,13 +190,13 @@ fn assign_sticky(
     let count = topic_partitions.get(topic).unwrap_or(0)
     for partition in 0..<count {
       let mut taker : String? = None
-      for member in members {
-        if !member.topics.contains(topic) {
+      for assignee in members {
+        if !assignee.topics.contains(topic) {
           continue
         }
-        let has = any_pair(out[member.member_id], topic, partition)
+        let has = any_pair(out[assignee.member_id], topic, partition)
         if has {
-          taker = Some(member.member_id)
+          taker = Some(assignee.member_id)
           break
         }
       }
@@ -206,20 +206,20 @@ fn assign_sticky(
           // Least-loaded subscribed member, id-ordered tie-break.
           let mut best : String? = None
           let mut best_load = 0
-          for member in members {
-            if !member.topics.contains(topic) {
+          for assignee in members {
+            if !assignee.topics.contains(topic) {
               continue
             }
-            let load = out[member.member_id].length()
+            let load = out[assignee.member_id].length()
             match best {
               Some(_) =>
                 if load < best_load ||
-                  (load == best_load && member.member_id < best.unwrap_or("")) {
-                  best = Some(member.member_id)
+                  (load == best_load && assignee.member_id < best.unwrap_or("")) {
+                  best = Some(assignee.member_id)
                   best_load = load
                 }
               None => {
-                best = Some(member.member_id)
+                best = Some(assignee.member_id)
                 best_load = load
               }
             }
@@ -232,7 +232,7 @@ fn assign_sticky(
       }
     }
   }
-  balance_sticky(members, topic_partitions, out)
+  balance_sticky(members, out)
 }
 
 ///|
@@ -241,7 +241,6 @@ fn assign_sticky(
 /// balances first; our pass runs after the keep+fill instead).
 fn balance_sticky(
   members : Array[Assignee],
-  topic_partitions : Map[String, Int],
   out : Map[String, Array[(String, Int)]],
 ) -> Unit {
   let total : Int = {
@@ -255,24 +254,21 @@ fn balance_sticky(
   if count < 2 || total == 0 {
     return
   }
-  if count < 2 || total == 0 {
-    return
-  }
   for ;; {
     // Most-loaded member (id-ordered tie-break).
     let mut heaviest : String? = None
     let mut heavy_load = 0
-    for member in members {
-      let load = out[member.member_id].length()
+    for assignee in members {
+      let load = out[assignee.member_id].length()
       match heaviest {
         Some(_) =>
           if load > heavy_load ||
-            (load == heavy_load && member.member_id < heaviest.unwrap_or("")) {
-            heaviest = Some(member.member_id)
+            (load == heavy_load && assignee.member_id < heaviest.unwrap_or("")) {
+            heaviest = Some(assignee.member_id)
             heavy_load = load
           }
         None => {
-          heaviest = Some(member.member_id)
+          heaviest = Some(assignee.member_id)
           heavy_load = load
         }
       }
@@ -280,8 +276,8 @@ fn balance_sticky(
     guard heaviest is Some(from) else { break }
     // The lightest member overall: stop once the spread is minimal.
     let mut lightest = heavy_load
-    for member in members {
-      let load = out[member.member_id].length()
+    for assignee in members {
+      let load = out[assignee.member_id].length()
       if load < lightest {
         lightest = load
       }
@@ -306,20 +302,20 @@ fn balance_sticky(
       // Lightest member subscribed to this topic (excluding taker).
       let mut best : String? = None
       let mut best_load = 0
-      for member in members {
-        if member.member_id == from || !member.topics.contains(pair.0) {
+      for assignee in members {
+        if assignee.member_id == from || !assignee.topics.contains(pair.0) {
           continue
         }
-        let load = out[member.member_id].length()
+        let load = out[assignee.member_id].length()
         match best {
           Some(_) =>
             if load < best_load ||
-              (load == best_load && member.member_id < best.unwrap_or("")) {
-              best = Some(member.member_id)
+              (load == best_load && assignee.member_id < best.unwrap_or("")) {
+              best = Some(assignee.member_id)
               best_load = load
             }
           None => {
-            best = Some(member.member_id)
+            best = Some(assignee.member_id)
             best_load = load
           }
         }

@@ -639,7 +639,7 @@ pub fn Consumer::pause(self : Consumer, partitions? : Array[Int]) -> Unit {
 
 ///|
 /// Resume fetching from the given partitions (default: all).
-pub fn Consumer::resume(self : Consumer, partitions? : Array[Int]) -> Unit {
+pub fn Consumer::unpause(self : Consumer, partitions? : Array[Int]) -> Unit {
   for p in self.partitions {
     if self.pause_wanted(partitions, p.info.index) {
       p.paused = false
@@ -661,7 +661,7 @@ pub fn Consumer::paused(self : Consumer) -> Array[Int] {
 
 ///|
 fn Consumer::pause_wanted(
-  self : Consumer,
+  _self : Consumer,
   partitions : Array[Int]?,
   index : Int,
 ) -> Bool {

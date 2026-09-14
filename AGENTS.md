@@ -29,7 +29,51 @@ You can browse and install extra skills here:
 - Keep the subject short. If a body is needed, write a simple paragraph
   describing the change; do not list implementation details.
 
+## Versioning
+
+- Every change that touches a version number gets a commit of its own. Bumping
+  `VERSION`, `moon.mod`, or the `CHANGELOG.md` release header is never mixed
+  into a commit made for something else.
+
+- This holds even when the other commit is still local and unpushed: amend is
+  not an exception. Cut a new commit for the version bump.
+
+## Pushing
+
+- `git push` is a serious, outward-facing operation. Only ever run it after an
+  explicit instruction from the user, and never push more often than the
+  threshold below allows.
+
+- Right after committing, count how many commits the remote does not yet have:
+
+  ```
+  git rev-list --count origin/main..HEAD
+  ```
+
+  (A branch with an upstream configured can use `@{upstream}..HEAD` instead, but
+  this repo's feature branches generally have none — `git rev-parse @{upstream}`
+  just fails there — so the explicit `origin/main` is the reliable form.)
+
+  - **10 or fewer** — stop. Do not push, and do not ask whether to push.
+  - **More than 10** — ask the user whether to push, and wait for their
+    confirmation before running it.
+
+- The count is of unpushed commits, not of the branch's total history. A commit
+  made on a branch that is already in sync is 1, which is never a reason to ask.
+
 ## Tooling
+
+- `moon build` does not work at the module level — use `moon check` to
+  type-check the whole library (the Makefile's `build` target is exactly that).
+  The root package and `compression` are libraries that declare
+  `options(link: "-lz")` for their test binaries, and `moon build` tries to link
+  both as executables (`moonkafka.exe`, `compression.exe`), dying on the missing
+  `_main`. Do not "fix" this by dropping the option: `moon test` then fails to
+  link against zlib. The actual executables (`cmd/main`, `docs/demo`) carry
+  their own `-lz` and do build on their own.
+
+- The module is native-only, so `moon check --target all` fails too, reporting
+  unbound identifiers in `compression`, whose FFI is gated to native.
 
 - `moon fmt` is used to format your code properly.
 

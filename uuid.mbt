@@ -85,7 +85,7 @@ pub fn Uuid::parse(s : String) -> Uuid raise @buf.DecodeError {
   if s.length() != 22 {
     raise @buf.Malformed("uuid string must be 22 chars, got \{s.length()}")
   }
-  let out : Array[Byte] = Array::new(capacity=16)
+  let out : Array[Byte] = Array(capacity=16)
   let mut acc : Int = 0
   let mut bits : Int = 0
   for c in s {
