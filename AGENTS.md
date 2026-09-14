@@ -100,3 +100,17 @@ You can browse and install extra skills here:
   scientific computations), prefer assertion tests. You can use
   `moon coverage analyze > uncovered.log` to see which parts of your code are
   not covered by tests.
+
+- `sed -i` is a portability trap on macOS. `/usr/bin/sed` is BSD sed, whose
+  `-i` takes an explicit extension argument, making the BSD idiom
+  `sed -i '' 's/a/b/' f`. GNU sed instead reads that empty argument as the
+  *script* and dies with `can't read s/a/b/`. Homebrew's `gnu-sed` provides
+  `gsed`, which is always GNU sed; it also installs a `gnubin/sed`, and where
+  that directory precedes `/usr/bin` on `PATH` the plain `sed` is GNU too — on
+  this machine it is, so the BSD idiom above is the one that fails here. Check
+  `sed --version` ("GNU sed" versus an illegal-option usage error) when the
+  dialect matters, or write `gsed` to be sure of GNU semantics.
+
+- Do not `sed -i` a file you are about to commit. Use the editor's exact-match
+  edit instead: a mis-parsed script fails loudly, but a subtly wrong pattern
+  rewrites the file and the commit goes through unnoticed.
