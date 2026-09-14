@@ -29,6 +29,14 @@ You can browse and install extra skills here:
 - Keep the subject short. If a body is needed, write a simple paragraph
   describing the change; do not list implementation details.
 
+- Never add AI-agent attribution to a commit or a tag. No `Co-Authored-By:
+  Claude` trailer, no "Generated with Claude Code" line, no agent name in the
+  message or in an annotated tag's text — not even when a tool suggests one by
+  default. A commit is authored by the person named on it, so anything that
+  credits an agent is noise at best and a false claim about who wrote the
+  change at worst. Strip such a trailer before committing rather than leaving
+  it for a later amend.
+
 ## Versioning
 
 - Every change that touches a version number gets a commit of its own. Bumping
