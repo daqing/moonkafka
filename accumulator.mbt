@@ -20,8 +20,6 @@ priv enum BatchResult {
 
 ///|
 priv struct ProducerBatch {
-  /// Unique within its accumulator; identity for queue-order comparisons.
-  id : Int
   partition : Int
   builder : RecordBatchBuilder
   created_ms : Int64
@@ -56,7 +54,6 @@ priv struct RecordAccumulator {
   batches : Map[Int, Array[ProducerBatch]]
   /// Sum of queued batches' size estimates, capped by buffer_memory.
   mut pool_bytes : Int
-  mut next_id : Int
   /// Batches popped for sending and not yet resolved.
   mut in_flight : Int
   /// Delivery counters, maintained by resolve_locked.
@@ -79,7 +76,6 @@ fn RecordAccumulator::new(
     lock: @async.Mutex(),
     batches: Map([]),
     pool_bytes: 0,
-    next_id: 0,
     in_flight: 0,
     records_sent: 0,
     records_failed: 0,
@@ -160,10 +156,7 @@ async fn RecordAccumulator::append(
       "buffer_memory \{self.buffer_memory} exhausted (\{self.pool_bytes} bytes queued, \{fresh} more needed for partition \{partition})",
     )
   }
-  self.next_id += 1
-  let id = self.next_id
   let batch : ProducerBatch = {
-    id,
     partition,
     builder: RecordBatchBuilder::new(),
     created_ms: now_ms,

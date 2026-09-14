@@ -89,7 +89,7 @@ pub fn lz4_decode_block(
 ) -> Bytes raise @buf.DecodeError {
   let n = data.length()
   let cap = if expected < 0 { 64 } else { expected }
-  let out : Array[Byte] = Array::new(capacity=cap)
+  let out : Array[Byte] = Array(capacity=cap)
   let mut p = 0
   while p < n {
     lz4_expect(data, p, 1)
@@ -344,7 +344,7 @@ pub fn lz4_compress(data : Bytes) -> Bytes {
     } else {
       chunk
     }
-    let slice : Array[Byte] = Array::new(capacity=take)
+    let slice : Array[Byte] = Array(capacity=take)
     for i in 0..<take {
       slice.push(data[pos + i])
     }

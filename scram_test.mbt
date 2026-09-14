@@ -10,20 +10,20 @@ fn hex_to_bytes(hex : String) -> Bytes {
   for c in hex {
     chars.push(c)
   }
-  fn nibble(c : Char) -> Int raise {
+  fn nibble(c : Char) -> Int? {
     let v = c.to_int()
     if v >= 48 && v <= 57 {
-      v - 48
+      Some(v - 48)
     } else if v >= 97 && v <= 102 {
-      v - 87
+      Some(v - 87)
     } else {
-      abort("bad hex")
+      None
     }
   }
 
   for i in 0..<(chars.length() / 2) {
-    let hi = nibble(chars[i * 2]) catch { _ => 0 }
-    let lo = nibble(chars[i * 2 + 1]) catch { _ => 0 }
+    let hi = nibble(chars[i * 2]).unwrap_or(0)
+    let lo = nibble(chars[i * 2 + 1]).unwrap_or(0)
     out.push(((hi << 4) | lo).to_byte())
   }
   Bytes::from_array(out)

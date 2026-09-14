@@ -43,7 +43,7 @@ pub fn snappy_decode_block(data : Bytes) -> Bytes raise @buf.DecodeError {
   if expected < 0 {
     raise @buf.Malformed("snappy negative output length")
   }
-  let out : Array[Byte] = Array::new(capacity=expected)
+  let out : Array[Byte] = Array(capacity=expected)
   while d.remaining() > 0 {
     let tag = d.read_byte().to_int()
     match tag & 0x03 {
@@ -277,7 +277,7 @@ pub fn snappy_compress(data : Bytes) -> Bytes {
     } else {
       chunk_size
     }
-    let slice : Array[Byte] = Array::new(capacity=take)
+    let slice : Array[Byte] = Array(capacity=take)
     for i in 0..<take {
       slice.push(data[pos + i])
     }

@@ -569,8 +569,8 @@ fn fake_join_group_response(
   e.write_bool(false) // skip assignment
   e.write_compact_string(member_id)
   e.write_compact_len(members.length())
-  for member in members {
-    let (id, metadata) = member
+  for m in members {
+    let (id, metadata) = m
     e.write_compact_string(id)
     e.write_compact_nullable_string(None)
     e.write_compact_len(metadata.length())
@@ -3340,14 +3340,14 @@ async fn fake_serve_conn(
       11 => {
         // Classic JoinGroup through the mini coordinator.
         let coord = coordinator.unwrap_or(FakeCoordinator::new())
-        let (_, member, _, protocols) = fake_join_group_request(rest)
-        fake_classic_join(coord, member, protocols)
+        let (_, m, _, protocols) = fake_join_group_request(rest)
+        fake_classic_join(coord, m, protocols)
       }
       12 => {
         let coord = coordinator.unwrap_or(FakeCoordinator::new())
-        let (member, _) = fake_classic_heartbeat_request(rest)
+        let (m, _) = fake_classic_heartbeat_request(rest)
         // Rebalance signal: members below the current round rejoin.
-        let code = if coord.arrived.get(member) == Some(coord.round) {
+        let code = if coord.arrived.get(m) == Some(coord.round) {
           0
         } else {
           27
@@ -3356,18 +3356,18 @@ async fn fake_serve_conn(
       }
       13 => {
         let coord = coordinator.unwrap_or(FakeCoordinator::new())
-        let member = fake_leave_group_request(rest)
-        let _ = coord.members.remove(member)
-        let _ = coord.arrived.remove(member)
-        coord.leaves.push(member)
+        let m = fake_leave_group_request(rest)
+        let _ = coord.members.remove(m)
+        let _ = coord.arrived.remove(m)
+        coord.leaves.push(m)
         coord.round += 1
         coord.arrived.clear()
-        fake_leave_group_response(member)
+        fake_leave_group_response(m)
       }
       14 => {
         let coord = coordinator.unwrap_or(FakeCoordinator::new())
-        let (member, generation, assigns) = fake_sync_group_request(rest)
-        coord.syncs.push((member, generation))
+        let (m, generation, assigns) = fake_sync_group_request(rest)
+        coord.syncs.push((m, generation))
         // The leader's sync registers everyone's assignment (tagged
         // with the generation); a member waits for its generation to
         // be registered before reading its assignment back.
@@ -3378,12 +3378,12 @@ async fn fake_serve_conn(
         }
         if !assigns.is_empty() {
           fake_sync_group_response(
-            coord.assignments.get(member).unwrap_or(Bytes::make(0, 0)),
+            coord.assignments.get(m).unwrap_or(Bytes::make(0, 0)),
           )
         } else {
           let deadline = @async.now() + 3000L
           for ;; {
-            if coord.sync_generations.get(member) == Some(generation) {
+            if coord.sync_generations.get(m) == Some(generation) {
               break
             }
             if @async.now() > deadline {
@@ -3392,7 +3392,7 @@ async fn fake_serve_conn(
             @async.sleep(2)
           }
           fake_sync_group_response(
-            coord.assignments.get(member).unwrap_or(Bytes::make(0, 0)),
+            coord.assignments.get(m).unwrap_or(Bytes::make(0, 0)),
           )
         }
       }
@@ -3456,22 +3456,22 @@ async fn fake_serve_conn(
         fake_offset_delete_response(results)
       }
       68 => {
-        let (group, member, epoch, instance, regex) = fake_consumer_group_heartbeat_request(
+        let (group, m, epoch, instance, regex) = fake_consumer_group_heartbeat_request(
           rest,
         )
-        heartbeat_requests.push((group, member, epoch, instance))
+        heartbeat_requests.push((group, m, epoch, instance))
         heartbeat_regexes.push(regex)
         if heartbeat_requests.length() <= heartbeat_errors.length() {
           fake_consumer_group_heartbeat_response(
             heartbeat_errors[heartbeat_requests.length() - 1],
-            member,
+            m,
             epoch,
             [],
           )
         } else {
           let next_epoch = if epoch >= 0 { epoch + 1 } else { epoch }
           fake_consumer_group_heartbeat_response(
-            0, member, next_epoch, heartbeat_partitions,
+            0, m, next_epoch, heartbeat_partitions,
           )
         }
       }
@@ -3850,6 +3850,13 @@ async fn fake_serve_conn(
 
 ///|
 /// Accept connections forever, serving each one concurrently.
+///
+/// `wrap_tls` stands up a real TLS server via `@tls.Tls::server_from_pair`,
+/// which async marks `#internal` ("for internal testing only") and exposes
+/// no public equivalent. Using it here is deliberate: it is the only way
+/// to exercise the client against an actual TLS handshake, so the alert is
+/// silenced for this one function rather than left firing on every build.
+#warnings("-alert_internal")
 async fn fake_broker(
   server : @socket.TcpServer,
   root : @async.TaskGroup[Unit],
@@ -4293,7 +4300,7 @@ async test "sender writes acks=0 produce without reading a response" {
 ///|
 /// True when awaiting the handle raises (cancellation surfaces as an error).
 async fn await_raises(handle : @moonkafka.SendHandle) -> Bool {
-  let _ = handle.await() catch {
+  let _ = handle.wait() catch {
     @moonkafka.ProtocolError(_) => return true
     e => raise e
   }
@@ -4329,7 +4336,7 @@ async test "send handles await, batch, cancel, and call back" {
     assert_eq(handles.length(), 3)
     let offsets : Array[Int64] = []
     for handle in handles {
-      offsets.push(handle.await())
+      offsets.push(handle.wait())
     }
     offsets.sort()
     assert_eq(offsets, [42L, 43L, 44L])
@@ -4886,7 +4893,7 @@ async test "pause skips partitions until resume" {
     assert_eq(empty.length(), 0)
     assert_eq(fetch_offsets.length(), 0)
     // Resume puts the partition back on the wire at its kept position.
-    consumer.resume()
+    consumer.unpause()
     assert_eq(consumer.paused().length(), 0)
     let records = consumer.poll(max_wait_ms=50)
     assert_eq(records.length(), 2)
@@ -5706,7 +5713,7 @@ async test "group_protocol classic routes subscribe through JoinGroup" {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     let accepted : Array[@socket.Tcp] = []
     let coord = FakeCoordinator::new()
-    let assigned : Array[(String, Int)] = []
+    let _assigned : Array[(String, Int)] = []
     root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
       fake_broker(server, root, "events", accepted, coordinator=Some(coord))
     }
@@ -5745,7 +5752,7 @@ async test "fallback prefers consumer and degrades to classic" {
     let accepted : Array[@socket.Tcp] = []
     let coord = FakeCoordinator::new()
     let heartbeat_requests : Array[(String, String, Int, String?)] = []
-    let assigned : Array[(String, Int)] = []
+    let _assigned : Array[(String, Int)] = []
     root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
       fake_broker(server, root, "events", accepted, coordinator=Some(coord), hide_apis=[
         68,
@@ -5787,7 +5794,7 @@ async test "fallback prefers consumer over an advertising broker" {
     let accepted : Array[@socket.Tcp] = []
     let coord = FakeCoordinator::new()
     let heartbeat_requests : Array[(String, String, Int, String?)] = []
-    let assigned : Array[(String, Int)] = []
+    let _assigned : Array[(String, Int)] = []
     root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
       fake_broker(
         server,
@@ -5863,7 +5870,6 @@ async test "admin describes topics and retries retriable results" {
       fake_broker(server, root, "events", accepted)
     }
     let admin = @moonkafka.Admin::connect(
-      group=root,
       host="127.0.0.1",
       port=server.addr.port(),
     )
@@ -5895,7 +5901,6 @@ async test "admin retries retriable topic errors under the policy" {
       )
     }
     let admin = @moonkafka.Admin::connect(
-      group=root,
       host="127.0.0.1",
       port=server.addr.port(),
     )
@@ -5934,7 +5939,6 @@ async test "admin topic lifecycle: create, grow, truncate, delete offsets, delet
       )
     }
     let admin = @moonkafka.Admin::connect(
-      group=root,
       host="127.0.0.1",
       port=server.addr.port(),
     )
@@ -5997,7 +6001,6 @@ async test "admin describes the cluster and its brokers" {
       fake_broker(server, root, "events", accepted, cluster_ops=ops)
     }
     let admin = @moonkafka.Admin::connect(
-      group=root,
       host="127.0.0.1",
       port=server.addr.port(),
     )
@@ -6033,7 +6036,6 @@ async test "admin describes and alters configs" {
       fake_broker(server, root, "events", accepted, cluster_ops=ops)
     }
     let admin = @moonkafka.Admin::connect(
-      group=root,
       host="127.0.0.1",
       port=server.addr.port(),
     )
@@ -6140,7 +6142,6 @@ async test "admin describes log dirs, elects leaders, and reassigns" {
       fake_broker(server, root, "events", accepted, cluster_ops=ops)
     }
     let admin = @moonkafka.Admin::connect(
-      group=root,
       host="127.0.0.1",
       port=server.addr.port(),
     )
@@ -6221,7 +6222,6 @@ async test "admin reads the quorum, updates features, unregisters brokers" {
       fake_broker(server, root, "events", accepted, cluster_ops=ops)
     }
     let admin = @moonkafka.Admin::connect(
-      group=root,
       host="127.0.0.1",
       port=server.addr.port(),
     )
@@ -6283,7 +6283,6 @@ async test "admin creates, describes, and deletes ACLs" {
       fake_broker(server, root, "events", accepted, cluster_ops=ops)
     }
     let admin = @moonkafka.Admin::connect(
-      group=root,
       host="127.0.0.1",
       port=server.addr.port(),
     )
@@ -6394,7 +6393,6 @@ async test "admin describes and alters client quotas and scram credentials" {
       fake_broker(server, root, "events", accepted, cluster_ops=ops)
     }
     let admin = @moonkafka.Admin::connect(
-      group=root,
       host="127.0.0.1",
       port=server.addr.port(),
     )
@@ -6510,7 +6508,6 @@ async test "admin describes classic groups and KIP-848 consumer groups" {
       fake_broker(server, root, "events", accepted, cluster_ops=ops)
     }
     let admin = @moonkafka.Admin::connect(
-      group=root,
       host="127.0.0.1",
       port=server.addr.port(),
     )
@@ -6530,15 +6527,15 @@ async test "admin describes classic groups and KIP-848 consumer groups" {
     assert_eq(classic.protocol_data, "range")
     assert_eq(classic.authorized_operations, Some(4094))
     assert_eq(classic.members.length(), 1)
-    let member = classic.members[0]
-    assert_eq(member.member_id, "classic-member-1")
-    assert_eq(member.group_instance_id, Some("classic-instance-1"))
-    assert_eq(member.client_id, "client-1")
-    assert_eq(member.client_host, "/127.0.0.1")
+    let m = classic.members[0]
+    assert_eq(m.member_id, "classic-member-1")
+    assert_eq(m.group_instance_id, Some("classic-instance-1"))
+    assert_eq(m.client_id, "client-1")
+    assert_eq(m.client_host, "/127.0.0.1")
     // The broker's opaque classic payloads decode back through this
     // driver's own consumer-protocol codecs.
-    assert_eq(member.subscribed_topics(), ["classic-topic"])
-    assert_eq(member.assigned_partitions(), [("classic-topic", [0, 1])])
+    assert_eq(m.subscribed_topics(), ["classic-topic"])
+    assert_eq(m.assigned_partitions(), [("classic-topic", [0, 1])])
     // The new-protocol group is not a classic group: v6 reports
     // GROUP_ID_NOT_FOUND, state Dead, no members, and a message.
     let dead = groups[1]
@@ -6618,7 +6615,6 @@ async test "admin lists groups with state and type filters" {
       fake_broker(server, root, "events", accepted, cluster_ops=ops)
     }
     let admin = @moonkafka.Admin::connect(
-      group=root,
       host="127.0.0.1",
       port=server.addr.port(),
     )
@@ -6671,7 +6667,6 @@ async test "admin deletes groups with per-group error codes" {
       fake_broker(server, root, "events", accepted, cluster_ops=ops)
     }
     let admin = @moonkafka.Admin::connect(
-      group=root,
       host="127.0.0.1",
       port=server.addr.port(),
     )
@@ -6698,7 +6693,6 @@ async test "admin describes active producers per partition" {
       fake_broker(server, root, "events", accepted, cluster_ops=ops)
     }
     let admin = @moonkafka.Admin::connect(
-      group=root,
       host="127.0.0.1",
       port=server.addr.port(),
     )
@@ -6738,7 +6732,6 @@ async test "admin describes transactions by id" {
       fake_broker(server, root, "events", accepted, cluster_ops=ops)
     }
     let admin = @moonkafka.Admin::connect(
-      group=root,
       host="127.0.0.1",
       port=server.addr.port(),
     )
@@ -6770,7 +6763,6 @@ async test "admin lists transactions with filters" {
       fake_broker(server, root, "events", accepted, cluster_ops=ops)
     }
     let admin = @moonkafka.Admin::connect(
-      group=root,
       host="127.0.0.1",
       port=server.addr.port(),
     )

@@ -58,7 +58,6 @@ pub struct TelemetryClient {
   metrics_provider : MetricsProvider
   priv mut subscription_id : Int
   priv mut active : Bool
-  priv mut spawned : Bool
   priv mut closed : Bool
   priv mut push_interval_ms : Int
   priv mut telemetry_max_bytes : Int
@@ -98,7 +97,6 @@ pub async fn TelemetryClient::connect_with_config(
     push_interval_ms: 0,
     telemetry_max_bytes: 0,
     active: false,
-    spawned: false,
     closed: false,
   }
   client
@@ -107,8 +105,7 @@ pub async fn TelemetryClient::connect_with_config(
 ///|
 /// Start pushing metrics: fetch the subscription (best effort) and run
 /// the push loop in `group`.
-pub async fn TelemetryClient::run(self : TelemetryClient) -> Unit {
-  self.spawned = true
+pub fn TelemetryClient::run(self : TelemetryClient) -> Unit {
   self.active = true
   let client = self
   self.group.spawn_bg(no_wait=false, allow_failure=true, () => {

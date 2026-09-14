@@ -656,8 +656,8 @@ pub async fn Admin::alter_partition_reassignments(Self, Array[ReassignableTopic]
 pub async fn Admin::alter_share_group_offsets(Self, String, Array[ShareOffsetAlterTopic]) -> ShareOffsetAlterResult
 pub async fn Admin::alter_user_scram(Self, Array[ScramCredentialDeletion], Array[ScramCredentialUpsertion]) -> Array[AlterUserScramResult]
 pub fn Admin::close(Self) -> Unit
-pub async fn Admin::connect(group~ : @async.TaskGroup[Unit], host~ : String, port~ : Int) -> Self
-pub async fn Admin::connect_with_config(group~ : @async.TaskGroup[Unit], AdminConfig) -> Self
+pub async fn Admin::connect(host~ : String, port~ : Int) -> Self
+pub async fn Admin::connect_with_config(AdminConfig) -> Self
 pub async fn Admin::create_acls(Self, Array[AclCreation]) -> Array[CreateAclsResult]
 pub async fn Admin::create_partitions(Self, Array[CreatePartitionsSpec], validate_only? : Bool) -> Array[CreatePartitionsResult]
 pub async fn Admin::create_topics(Self, Array[CreatableTopic], validate_only? : Bool) -> Array[CreateTopicsResult]
@@ -1221,7 +1221,6 @@ pub fn Consumer::pause(Self, partitions? : Array[Int]) -> Unit
 pub fn Consumer::paused(Self) -> Array[Int]
 pub async fn Consumer::poll(Self, max_wait_ms? : Int, max_bytes? : Int) -> Array[Record]
 pub fn Consumer::position(Self, Int) -> Int64?
-pub fn Consumer::resume(Self, partitions? : Array[Int]) -> Unit
 pub fn Consumer::seek(Self, Int, Int64) -> Unit raise
 pub async fn Consumer::seek_by_timestamp(Self, Int, Int64) -> Unit
 pub async fn Consumer::seek_to_beginning(Self, partitions? : Array[Int]?) -> Unit
@@ -1230,6 +1229,7 @@ pub fn Consumer::subscribe(Self, Array[String], listener? : RebalanceListener?) 
 pub fn Consumer::subscribe_classic(Self, Array[String], assignors? : Array[Assignor], listener? : RebalanceListener?) -> Unit raise
 pub async fn Consumer::subscribe_regex(Self, String, listener? : RebalanceListener?) -> Unit
 pub fn Consumer::unassign(Self) -> Unit
+pub fn Consumer::unpause(Self, partitions? : Array[Int]) -> Unit
 pub async fn Consumer::unsubscribe(Self) -> Unit
 
 pub struct ConsumerConfig {
@@ -1838,9 +1838,9 @@ pub(all) enum SecurityProtocol {
 pub struct SendHandle {
   // private fields
 }
-pub async fn SendHandle::await(Self) -> Int64
 pub fn SendHandle::cancel(Self) -> Unit
 pub fn SendHandle::on_complete(Self, async (SendResult) -> Unit) -> Unit
+pub async fn SendHandle::wait(Self) -> Int64
 
 pub(all) struct SendRecord {
   key : Bytes?
@@ -1873,7 +1873,7 @@ pub(all) struct ShareAckBatch {
   acknowledge_types : Array[Int]
 } derive(@debug.Debug)
 
-pub enum ShareAckType {
+pub(all) enum ShareAckType {
   ShareAccept
   ShareRelease
   ShareReject
@@ -1929,7 +1929,7 @@ pub async fn ShareConsumer::connect_with_config(group~ : @async.TaskGroup[Unit],
 pub fn ShareConsumer::member_identity(Self) -> String
 pub fn ShareConsumer::membership_error(Self) -> String?
 pub async fn ShareConsumer::poll(Self, max_wait_ms? : Int, max_records? : Int) -> Array[ShareRecord]
-pub fn ShareConsumer::subscribe(Self) -> Unit raise
+pub fn ShareConsumer::subscribe(Self) -> Unit
 
 pub struct ShareConsumerConfig {
   common : CommonConfig
@@ -2109,7 +2109,7 @@ pub struct TelemetryClient {
 }
 pub fn TelemetryClient::close(Self) -> Unit
 pub async fn TelemetryClient::connect_with_config(group~ : @async.TaskGroup[Unit], TelemetryClientConfig) -> Self
-pub async fn TelemetryClient::run(Self) -> Unit
+pub fn TelemetryClient::run(Self) -> Unit
 
 pub struct TelemetryClientConfig {
   common : CommonConfig

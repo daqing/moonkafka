@@ -464,12 +464,17 @@ test "alter user scram request parses back through the fake broker" {
 
 ///|
 test "scram credential upsertion rejects unknown mechanisms" {
-  let outcome = try? @moonkafka.ScramCredentialUpsertion::from_password(
-    "bob",
-    3,
-    @utf8.encode("s3cret"),
-  )
-  assert_true(outcome is Err(_))
+  try
+    @moonkafka.ScramCredentialUpsertion::from_password(
+      "bob",
+      3,
+      @utf8.encode("s3cret"),
+    )
+  catch {
+    _ => ()
+  } noraise {
+    _ => fail("expected from_password to reject an unknown mechanism")
+  }
 }
 
 ///|
@@ -808,12 +813,12 @@ test "describe groups v6 decodes the classic member payloads" {
   assert_eq(group.protocol_type, "consumer")
   assert_eq(group.protocol_data, "range")
   assert_eq(group.authorized_operations, Some(4094))
-  let member = group.members[0]
-  assert_eq(member.member_id, "g-member-1")
-  assert_eq(member.group_instance_id, Some("g-instance-1"))
+  let m = group.members[0]
+  assert_eq(m.member_id, "g-member-1")
+  assert_eq(m.group_instance_id, Some("g-instance-1"))
   // The opaque classic payloads decode through the consumer protocol.
-  assert_eq(member.subscribed_topics(), ["g-topic"])
-  assert_eq(member.assigned_partitions(), [("g-topic", [0, 1])])
+  assert_eq(m.subscribed_topics(), ["g-topic"])
+  assert_eq(m.assigned_partitions(), [("g-topic", [0, 1])])
 }
 
 ///|
@@ -904,10 +909,10 @@ test "consumer group describe v1 decodes empty assignments" {
   let d = @buf.Decoder::new(e.to_bytes())
   let (groups, _) = @moonkafka.decode_consumer_group_describe_response(d)
   assert_eq(d.remaining(), 0)
-  let member = groups[0].members[0]
-  assert_eq(member.member_type, @moonkafka.GROUP_MEMBER_TYPE_UNKNOWN)
-  assert_eq(member.assignment.length(), 0)
-  assert_eq(member.target_assignment.length(), 0)
+  let m = groups[0].members[0]
+  assert_eq(m.member_type, @moonkafka.GROUP_MEMBER_TYPE_UNKNOWN)
+  assert_eq(m.assignment.length(), 0)
+  assert_eq(m.target_assignment.length(), 0)
   assert_eq(groups[0].authorized_operations, None)
 }
 
@@ -941,11 +946,11 @@ test "foreign member metadata decodes to no topics" {
   let d = @buf.Decoder::new(e.to_bytes())
   let (groups, _) = @moonkafka.decode_describe_groups_response(d)
   assert_eq(d.remaining(), 0)
-  let member = groups[0].members[0]
-  assert_eq(member.subscribed_topics(), [])
-  assert_eq(member.assigned_partitions(), [])
-  assert_eq(member.member_metadata, foreign)
-  assert_eq(member.member_assignment, Bytes::make(0, b'\x00'))
+  let m = groups[0].members[0]
+  assert_eq(m.subscribed_topics(), [])
+  assert_eq(m.assigned_partitions(), [])
+  assert_eq(m.member_metadata, foreign)
+  assert_eq(m.member_assignment, Bytes::make(0, b'\x00'))
 }
 
 ///|

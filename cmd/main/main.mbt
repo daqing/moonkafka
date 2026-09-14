@@ -77,7 +77,7 @@ async fn produce(args : Array[String]) -> Unit {
   }
   // The producer's sender drain loop lives in a task group scoped to the
   // produce call.
-  @async.with_task_group(fn(_group) {
+  @async.with_task_group(async fn(_group) {
     let producer = @lib.Producer::connect(group=_group, host~, port~, topic~) catch {
       @lib.BrokerError(code, msg) => {
         println("broker refused: \{@lib.error_name(code)}: \{msg}")
@@ -130,7 +130,7 @@ async fn bench_produce(args : Array[String]) -> Unit {
       }
     None => 9092
   }
-  @async.with_task_group(fn(_group) {
+  @async.with_task_group(async fn(_group) {
     let config = @lib.ProducerConfig::new(
       ["\{host}:\{port}"],
       topic,
@@ -186,7 +186,7 @@ async fn consume(args : Array[String]) -> Unit {
   }
   // The consumer's autocommit loop lives in a task group scoped to the
   // consume call.
-  @async.with_task_group(fn(group) {
+  @async.with_task_group(async fn(group) {
     let consumer = @lib.Consumer::connect(
       group~,
       host~,

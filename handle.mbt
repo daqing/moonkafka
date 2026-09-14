@@ -29,7 +29,7 @@ pub(all) enum SendResult {
 ///|
 /// Wait for the sender task to resolve the record. Raises when the
 /// handle was cancelled before completion, or with the batch's error.
-pub async fn SendHandle::await(self : SendHandle) -> Int64 {
+pub async fn SendHandle::wait(self : SendHandle) -> Int64 {
   if self.cancelled {
     raise ProtocolError::ProtocolError("send cancelled")
   }
@@ -78,7 +78,7 @@ pub fn SendHandle::on_complete(
   callback : async (SendResult) -> Unit,
 ) -> Unit {
   self.producer.group.spawn_bg(no_wait=true, allow_failure=true, () => {
-    let offset = self.await() catch {
+    let offset = self.wait() catch {
       e => {
         callback(Failed("\{e}"))
         return
@@ -125,7 +125,7 @@ pub async fn Producer::send(
     waiter: None,
     cancelled: false,
   }
-  handle.await()
+  handle.wait()
 }
 
 ///|

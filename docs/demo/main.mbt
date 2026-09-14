@@ -63,7 +63,7 @@ async fn produce(args : Array[String]) -> Unit {
   let host = args.get(4).unwrap_or("127.0.0.1")
   let port = parse_port(args, 5)
 
-  @async.with_task_group(fn(group) {
+  @async.with_task_group(async fn(group) {
     let producer = @lib.Producer::connect(group~, host~, port~, topic~, acks=-1) catch {
       e => {
         println("producer connection failed: \{e}")
@@ -91,7 +91,7 @@ async fn consume(args : Array[String]) -> Unit {
   let host = args.get(3).unwrap_or("127.0.0.1")
   let port = parse_port(args, 4)
 
-  @async.with_task_group(fn(group) {
+  @async.with_task_group(async fn(group) {
     let consumer = @lib.Consumer::connect(
       group~,
       host~,
@@ -119,7 +119,7 @@ async fn consume_group(args : Array[String]) -> Unit {
   let host = args.get(4).unwrap_or("127.0.0.1")
   let port = parse_port(args, 5)
 
-  @async.with_task_group(fn(group) {
+  @async.with_task_group(async fn(group) {
     let config = @lib.ConsumerConfig::new(
       ["\{host}:\{port}"],
       topic,

@@ -202,7 +202,7 @@ fn Consumer::guard_group_subscription(self : Consumer) -> Unit raise {
 }
 
 ///|
-fn Consumer::start_membership(self : Consumer) -> Unit raise {
+fn Consumer::start_membership(self : Consumer) -> Unit {
   if self.member_active {
     // The loop picks the new subscription up on its next heartbeat.
     return
@@ -281,7 +281,8 @@ async fn Consumer::member_loop(self : Consumer) -> Unit {
       let _ = self.cluster.refresh_metadata(None) catch { _ => () }
     }
     let names = self.expanded_subscription()
-    let heartbeat = try? self
+    let heartbeat : Result[ConsumerGroupHeartbeatResult, Error] = try
+      self
       .group_coordinator_conn()
       .consumer_group_heartbeat(
         self.group_id.unwrap_or(""),
@@ -293,6 +294,10 @@ async fn Consumer::member_loop(self : Consumer) -> Unit {
         subscribed_topic_regex=self.subscribed_regex,
         timeout_ms=self.request_timeout_ms,
       )
+      |> Ok
+    catch {
+      e => Err(e)
+    }
     let result : ConsumerGroupHeartbeatResult = match heartbeat {
       Ok(result) => result
       Err(_) => {

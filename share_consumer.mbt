@@ -22,7 +22,7 @@
 ///|
 /// The acknowledgement a member makes over an offset range.
 /// 0 Gap, 1 Accept, 2 Release, 3 Reject, 4 Renew.
-pub enum ShareAckType {
+pub(all) enum ShareAckType {
   ShareAccept
   ShareRelease
   ShareReject
@@ -158,7 +158,6 @@ pub struct ShareConsumer {
   priv mut member_epoch : Int
   priv mut member_active : Bool
   priv mut member_spawned : Bool
-  priv mut member_left : Bool
   priv mut member_error : String?
   priv mut heartbeat_interval_ms : Int
   priv mut share_coordinator : Int?
@@ -213,7 +212,6 @@ pub async fn ShareConsumer::connect_with_config(
     member_epoch: 0,
     member_active: false,
     member_spawned: false,
-    member_left: false,
     member_error: None,
     heartbeat_interval_ms: 0,
     share_coordinator: None,
@@ -238,7 +236,7 @@ async fn ShareConsumer::refresh_metadata(self : ShareConsumer) -> Unit {
 
 ///|
 /// Subscribe to the share group and start the membership loop.
-pub fn ShareConsumer::subscribe(self : ShareConsumer) -> Unit raise {
+pub fn ShareConsumer::subscribe(self : ShareConsumer) -> Unit {
   if self.member_active {
     return
   }
@@ -269,7 +267,7 @@ async fn ShareConsumer::coordinator_conn(
         max_ms=self.retry_backoff_max_ms,
       )
       let mut found = -1
-      for attempt in 0..<=self.retries {
+      for _ in 0..<=self.retries {
         let infos = self.cluster.coordinator([self.group_id], Share)
         match infos.get(self.group_id) {
           Some(info) => if info.error_code == 0 { found = info.node_id }
@@ -305,7 +303,8 @@ async fn ShareConsumer::member_loop(self : ShareConsumer) -> Unit {
     if self.closed || !self.member_active {
       break
     }
-    let heartbeat = try? self
+    let heartbeat : Result[ShareGroupHeartbeatResult, Error] = try
+      self
       .coordinator_conn()
       .share_group_heartbeat(
         self.group_id,
@@ -314,6 +313,10 @@ async fn ShareConsumer::member_loop(self : ShareConsumer) -> Unit {
         subscribed_topic_names=Some([self.topic]),
         timeout_ms=self.request_timeout_ms,
       )
+      |> Ok
+    catch {
+      e => Err(e)
+    }
     let result : ShareGroupHeartbeatResult = match heartbeat {
       Ok(result) => result
       Err(_) => {
@@ -393,7 +396,6 @@ async fn ShareConsumer::leave_group(self : ShareConsumer) -> Unit {
   }
   self.assignment = []
   self.member_epoch = 0
-  self.member_left = true
 }
 
 ///|

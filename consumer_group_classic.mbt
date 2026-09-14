@@ -153,7 +153,8 @@ async fn Consumer::classic_loop(self : Consumer) -> Unit {
             leave_now = true
             break
           }
-          let code = try? self
+          let code : Result[Int, Error] = try
+            self
             .group_coordinator_conn()
             .group_heartbeat(
               self.group_id.unwrap_or(""),
@@ -162,6 +163,10 @@ async fn Consumer::classic_loop(self : Consumer) -> Unit {
               group_instance_id=self.group_instance_id,
               timeout_ms=self.request_timeout_ms,
             )
+            |> Ok
+          catch {
+            e => Err(e)
+          }
           match code {
             Ok(0) => continue
             Ok(27) => break // rebalance in progress: rejoin
@@ -262,12 +267,10 @@ async fn Consumer::classic_join_round(self : Consumer) -> ClassicRound {
     let members : Array[Assignee] = []
     let owned : Map[String, Array[(String, Int)]] = Map([])
     let topics : Array[String] = []
-    for member in join.members {
-      let (subscribed, member_owned) = decode_subscription_metadata(
-        member.metadata,
-      )
-      members.push({ member_id: member.member_id, topics: subscribed, })
-      owned[member.member_id] = flatten_pairs(member_owned)
+    for m in join.members {
+      let (subscribed, member_owned) = decode_subscription_metadata(m.metadata)
+      members.push({ member_id: m.member_id, topics: subscribed, })
+      owned[m.member_id] = flatten_pairs(member_owned)
       for topic in subscribed {
         let mut known = false
         for t in topics {
@@ -294,9 +297,9 @@ async fn Consumer::classic_join_round(self : Consumer) -> ClassicRound {
     // The cooperative two-round: revocations first, additions next.
     let mut revocations = false
     if cooperative {
-      for member in members {
-        let owned_pairs = owned.get(member.member_id).unwrap_or([])
-        let target_pairs = target.get(member.member_id).unwrap_or([])
+      for m in members {
+        let owned_pairs = owned.get(m.member_id).unwrap_or([])
+        let target_pairs = target.get(m.member_id).unwrap_or([])
         for pair in owned_pairs {
           if !any_pair(target_pairs, pair.0, pair.1) {
             revocations = true
@@ -306,9 +309,9 @@ async fn Consumer::classic_join_round(self : Consumer) -> ClassicRound {
     }
     if cooperative && revocations {
       // Round 1: keep-sets only.
-      for member in members {
-        let owned_pairs = owned.get(member.member_id).unwrap_or([])
-        let target_pairs = target.get(member.member_id).unwrap_or([])
+      for m in members {
+        let owned_pairs = owned.get(m.member_id).unwrap_or([])
+        let target_pairs = target.get(m.member_id).unwrap_or([])
         let keep : Array[(String, Int)] = []
         for pair in owned_pairs {
           if any_pair(target_pairs, pair.0, pair.1) {
@@ -316,7 +319,7 @@ async fn Consumer::classic_join_round(self : Consumer) -> ClassicRound {
           }
         }
         assignments.push({
-          member_id: member.member_id,
+          member_id: m.member_id,
           assignment: encode_consumer_protocol_assignment(
             group_pairs_by_topic(keep),
           ),
@@ -324,11 +327,11 @@ async fn Consumer::classic_join_round(self : Consumer) -> ClassicRound {
       }
     } else {
       // Eager round (or cooperative with nothing to revoke): full target.
-      for member in members {
+      for m in members {
         assignments.push({
-          member_id: member.member_id,
+          member_id: m.member_id,
           assignment: encode_consumer_protocol_assignment(
-            group_pairs_by_topic(target.get(member.member_id).unwrap_or([])),
+            group_pairs_by_topic(target.get(m.member_id).unwrap_or([])),
           ),
         })
       }

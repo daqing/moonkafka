@@ -58,21 +58,15 @@ pub struct Admin {
 ///|
 /// Connect the admin client: one bootstrap negotiation, metadata cached
 /// like the other clients. Ops run on any broker or on the controller
-/// as each API requires.
-pub async fn Admin::connect(
-  group~ : @async.TaskGroup[Unit],
-  host~ : String,
-  port~ : Int,
-) -> Admin {
+/// as each API requires. Admin runs no background tasks of its own, so
+/// it takes no task group (unlike the producer/consumer clients).
+pub async fn Admin::connect(host~ : String, port~ : Int) -> Admin {
   let config = AdminConfig::new(["\{host}:\{port}"])
-  Admin::connect_with_config(group~, config)
+  Admin::connect_with_config(config)
 }
 
 ///|
-pub async fn Admin::connect_with_config(
-  group~ : @async.TaskGroup[Unit],
-  config : AdminConfig,
-) -> Admin {
+pub async fn Admin::connect_with_config(config : AdminConfig) -> Admin {
   // SASL credentials only apply on SASL security protocols.
   let sasl = match config.common.security_protocol {
     SaslPlaintext | SaslSsl => config.common.sasl
@@ -113,7 +107,7 @@ pub fn Admin::close(self : Admin) -> Unit {
 ///|
 /// A connection to any broker (the control connection): the default
 /// route — most admin APIs forward to the controller broker-side.
-async fn Admin::any_conn(self : Admin) -> BrokerConnection {
+fn Admin::any_conn(self : Admin) -> BrokerConnection {
   self.cluster.control_conn()
 }
 
@@ -144,7 +138,9 @@ async fn[T] Admin::with_retries(
     max_ms=self.retry_backoff_max_ms,
   )
   for attempt in 0..<=self.admin_retries {
-    let outcome = try? op()
+    let outcome : Result[T, Error] = try op() |> Ok catch {
+      e => Err(e)
+    }
     match outcome {
       Ok(result) => {
         if retriable(result) && attempt < self.admin_retries {
@@ -194,7 +190,7 @@ pub async fn Admin::describe_topic_partitions(
       }
       retry
     },
-    fn() { self.describe_topic_partitions_once(topics) },
+    async fn() { self.describe_topic_partitions_once(topics) },
   )
 }
 
