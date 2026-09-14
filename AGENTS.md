@@ -111,6 +111,10 @@ You can browse and install extra skills here:
   `sed --version` ("GNU sed" versus an illegal-option usage error) when the
   dialect matters, or write `gsed` to be sure of GNU semantics.
 
-- Do not `sed -i` a file you are about to commit. Use the editor's exact-match
-  edit instead: a mis-parsed script fails loudly, but a subtly wrong pattern
-  rewrites the file and the commit goes through unnoticed.
+- Do not `sed -i` a file you are about to commit. Use an exact-match edit
+  instead: an agent's file-edit/patch tool, or a short `python3` / `perl -pi`
+  rewrite when working from a shell script. Interactive editors (`$EDITOR`,
+  which is usually vim or an IDE window, not a programmatic interface) are not
+  a substitute — they block waiting on a human. Read `git diff` before
+  committing either way: a mis-parsed script fails loudly, but a subtly wrong
+  pattern rewrites the file and the commit goes through unnoticed.
