@@ -109,7 +109,9 @@ You can browse and install extra skills here:
   that directory precedes `/usr/bin` on `PATH` the plain `sed` is GNU too — on
   this machine it is, so the BSD idiom above is the one that fails here. Check
   `sed --version` ("GNU sed" versus an illegal-option usage error) when the
-  dialect matters, or write `gsed` to be sure of GNU semantics.
+  dialect matters, or write `gsed` to be sure of GNU semantics. `gsed` is a
+  macOS/Homebrew name for that package, so it exists only there — on Linux,
+  CI included, the plain `sed` is already GNU and there is no `gsed` to call.
 
 - Do not `sed -i` a file you are about to commit. Use an exact-match edit
   instead: an agent's file-edit/patch tool, or a short `python3` / `perl -pi`
