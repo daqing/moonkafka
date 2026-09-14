@@ -26,8 +26,14 @@ You can browse and install extra skills here:
 
 ## Commit messages
 
-- Keep the subject short. If a body is needed, write a simple paragraph
-  describing the change; do not list implementation details.
+- A message has at most two parts. The first line says briefly and concretely
+  what this commit is. A second paragraph, when one is needed, adds a little
+  supplementary context.
+
+- Neither part is the place for implementation details. Do not explain how the
+  change works or enumerate the files, functions, and edge cases it touches —
+  the diff already carries all of that, and a long second paragraph buries the
+  one line a reader actually needs.
 
 - Never add AI-agent attribution to a commit or a tag. No `Co-Authored-By:
   Claude` trailer, no "Generated with Claude Code" line, no agent name in the
