@@ -149,6 +149,37 @@ moon run cmd/main -- produce events "hello" [key] [host] [port]
 Note: the socket layer is native-backend only (`moonbitlang/async`), so the
 module targets `native`.
 
+## Demo project
+
+A standalone demo application lives in its own repository,
+[`daqing/moonkafka-demo`](https://github.com/daqing/moonkafka-demo). Clone it
+and run it:
+
+```sh
+git clone https://github.com/daqing/moonkafka-demo
+cd moonkafka-demo
+
+# start the bundled single-node Kafka 4.3 KRaft broker
+docker compose -f docker-compose.kafka.yml up -d
+
+# send one message, then read it back
+moon run --target native cmd/main -- produce events "Hello from MoonBit" demo-key
+moon run --target native cmd/main -- consume events
+```
+
+The project takes this library as an ordinary module dependency
+(`daqing/moonkafka@0.2.1`) and implements its own producer and consumer on top
+of the public `Producer` and `Consumer` APIs: its command-line layer parses
+arguments and renders results, while broker connection, metadata, the Kafka
+protocol, and message production and fetching all come from this library. Its
+README covers creating the `events` topic and the rest of the setup, and it
+carries a container-backed end-to-end integration test (`make itest`) that
+drives the real CLI against a real broker. Bilingual documentation:
+<https://daqing.github.io/moonkafka-demo/>.
+
+The in-repository example in [`docs/demo`](docs/demo/README.md) covers the same
+client patterns in a single package.
+
 ## Development
 
 ```sh

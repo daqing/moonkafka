@@ -9,6 +9,26 @@
 示例默认连接到 `127.0.0.1:9092` 上的 Kafka 4.x KRaft broker，并假设目标主题
 已经存在。也可以通过可选参数传入其他主机和端口。
 
+## 相关：独立 demo 项目
+
+本目录是随库仓库一起发布的示例。另有一个独立的 demo 项目位于
+[`daqing/moonkafka-demo`](https://github.com/daqing/moonkafka-demo)：它以
+`daqing/moonkafka@0.2.1` 作为模块依赖引用本库，并在公开的 `Producer`、
+`Consumer` API 之上独立实现了自己的 producer 和 consumer。其中的命令行代码只负责
+解析参数和展示结果，broker 连接、元数据处理、Kafka 协议、消息发送与拉取全部由本库
+完成。
+
+把该项目 clone 下来即可运行：
+
+```sh
+git clone https://github.com/daqing/moonkafka-demo
+cd moonkafka-demo
+```
+
+该项目是一个完整的独立工程：使用 `moon build --target native` 构建，自带基于容器
+的端到端集成测试（`make itest`）和单节点 Kafka 4.3 KRaft 配置，并提供中英双语文档：
+<https://daqing.github.io/moonkafka-demo/>。
+
 ## 前置条件
 
 你需要准备：

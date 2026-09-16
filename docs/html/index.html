@@ -19,7 +19,7 @@
   <a href="#design">Design decisions</a>
   <a href="#layout">Package layout</a>
   <a href="#protocol">Protocol surface</a>
-  <a href="#demo">Demo code &amp; guide</a>
+  <a href="#demo">Try the demo</a>
   <a href="#testing">Testing strategy</a>
   <a href="#risks">Risks &amp; open questions</a>
   <div class="lang-switch">
@@ -156,11 +156,26 @@ Selected highlights:</p>
 <code>retriable</code>, and fatality / metadata-refresh flags.</p>
 
 <h2 id="demo">Try the demo</h2>
-<p>Want to connect to Kafka quickly? The repository includes a runnable native
-MoonBit demo for publishing messages, consuming without a group, and joining a
-KIP-848 consumer group. Read the
-<a href="https://github.com/daqing/moonkafka/blob/main/docs/demo/README.md" target="_blank" rel="noopener">demo guide and source code</a>
-for setup instructions, commands, and an explanation of how the examples work.</p>
+<p>Want to connect to Kafka quickly? Clone the standalone demo project and run
+it:</p>
+
+<pre><code>git clone https://github.com/daqing/moonkafka-demo
+cd moonkafka-demo
+
+# start the bundled single-node Kafka 4.3 KRaft broker
+docker compose -f docker-compose.kafka.yml up -d
+
+# send one message, then read it back
+moon run --target native cmd/main -- produce events "Hello from MoonBit" demo-key
+moon run --target native cmd/main -- consume events</code></pre>
+
+<p>The project takes this library as a module dependency
+(<code>daqing/moonkafka@0.2.1</code>) and implements its own producer and
+consumer on top of the public <code>Producer</code> and <code>Consumer</code>
+APIs. Its README covers creating the <code>events</code> topic and the rest of
+the setup, and carries a container-backed end-to-end integration test
+(<code>make itest</code>). Bilingual documentation:
+<a href="https://daqing.github.io/moonkafka-demo/" target="_blank" rel="noopener">daqing.github.io/moonkafka-demo</a>.</p>
 
 <h2 id="testing">Testing strategy</h2>
 <ol>
@@ -182,7 +197,7 @@ for setup instructions, commands, and an explanation of how the examples work.</
   <li><strong>Kafka 4.3.x point releases</strong> — may bump max API versions; the negotiation matrix makes that a non-event, but golden files should be regenerated per minor release.</li>
 </ul>
 
-<footer>Generated from <code>PLAN.md</code> · moonkafka targets Apache Kafka 4.3.x, KRaft-only · MIT licensed</footer>
+<footer>moonkafka targets Apache Kafka 4.3.x, KRaft-only · MIT licensed</footer>
 </main>
 </div>
 </body>

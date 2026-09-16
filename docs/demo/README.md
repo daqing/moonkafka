@@ -11,6 +11,29 @@ The example assumes a Kafka 4.x KRaft broker is listening at
 `127.0.0.1:9092` and that the topic already exists. Pass a different host and
 port as the optional arguments.
 
+## Related: the standalone demo project
+
+This directory is the example that ships inside the library repository. A
+separate, standalone demo application lives at
+[`daqing/moonkafka-demo`](https://github.com/daqing/moonkafka-demo): it
+references this library as a module dependency (`daqing/moonkafka@0.2.1`) and
+implements its own producer and consumer on top of the public `Producer` and
+`Consumer` APIs. Its command-line layer only parses arguments and renders
+results; broker connection, metadata, the Kafka protocol, and message
+production and fetching are all handled by this library.
+
+Clone it and run it:
+
+```sh
+git clone https://github.com/daqing/moonkafka-demo
+cd moonkafka-demo
+```
+
+It is a complete standalone project: it builds with `moon build --target
+native`, carries a container-backed end-to-end integration test (`make itest`)
+and a single-node Kafka 4.3 KRaft compose file, and publishes bilingual
+documentation at <https://daqing.github.io/moonkafka-demo/>.
+
 ## Prerequisites
 
 You need:
