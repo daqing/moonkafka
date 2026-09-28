@@ -2849,7 +2849,9 @@ fn fake_fetch_response(
 ///|
 /// Cursor from a DescribeTopicPartitions request (flexible v0: header v2
 /// with its tag buffer, then topics array, response limit, cursor struct).
-fn fake_dtp_request_cursor(rest : Bytes) -> TopicPartitionCursor? raise {
+fn fake_dtp_request_cursor(
+  rest : Bytes,
+) -> @moonkafka.TopicPartitionCursor? raise {
   let d = @buf.Decoder::new(rest)
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
@@ -2878,7 +2880,7 @@ fn fake_dtp_request_cursor(rest : Bytes) -> TopicPartitionCursor? raise {
 fn fake_describe_topic_partitions_response(
   topic : String,
   partitions : Array[Int],
-  next_cursor : TopicPartitionCursor?,
+  next_cursor : @moonkafka.TopicPartitionCursor?,
   error_code? : Int = 0,
 ) -> Bytes {
   let e = @buf.Encoder::new()

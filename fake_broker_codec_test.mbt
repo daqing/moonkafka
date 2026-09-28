@@ -976,7 +976,7 @@ test "share group heartbeat request/response round trip v1" {
   e.write_i32(2500) // heartbeat interval
   e.write_i8(1) // assignment present
   e.write_compact_len(1) // topics
-  e.write_bytes(Uuid::zero().to_bytes())
+  e.write_bytes(@moonkafka.Uuid::zero().to_bytes())
   e.write_compact_len(1) // partitions
   e.write_i32(0)
   e.write_tag_buffer() // topic
@@ -991,7 +991,10 @@ test "share group heartbeat request/response round trip v1" {
   assert_eq(result.member_epoch, 1)
   assert_eq(result.heartbeat_interval_ms, 2500)
   assert_eq(result.assignment.length(), 1)
-  assert_eq(result.assignment[0].topic_id.to_bytes(), Uuid::zero().to_bytes())
+  assert_eq(
+    result.assignment[0].topic_id.to_bytes(),
+    @moonkafka.Uuid::zero().to_bytes(),
+  )
   assert_eq(result.assignment[0].partitions, [0])
   // The driver negotiates v1 for the 4.3 broker's advertised range.
   let versions = @moonkafka.decode_api_versions_response(
@@ -1015,7 +1018,7 @@ test "share fetch v2 negotiates and decodes acquired records" {
   e.write_compact_nullable_string(None)
   e.write_i32(0) // acquisition lock timeout
   e.write_compact_len(1) // responses
-  e.write_bytes(Uuid::zero().to_bytes())
+  e.write_bytes(@moonkafka.Uuid::zero().to_bytes())
   e.write_compact_len(1) // partitions
   e.write_i32(0) // partition index
   e.write_i16(0) // error code
@@ -1087,7 +1090,7 @@ test "describe alter delete share group offsets negotiate and decode" {
   e.write_compact_string("share-group")
   e.write_compact_len(1) // topics
   e.write_compact_string("events")
-  e.write_bytes(Uuid::zero().to_bytes())
+  e.write_bytes(@moonkafka.Uuid::zero().to_bytes())
   e.write_compact_len(1) // partitions
   e.write_i32(0)
   e.write_i64(5L)
@@ -1130,14 +1133,16 @@ test "telemetry subscription and push negotiate and round-trip v0" {
   assert_eq(versions.0.pick(@moonkafka.API_GET_TELEMETRY_SUBSCRIPTIONS), 0)
   assert_eq(versions.0.pick(@moonkafka.API_PUSH_TELEMETRY), 0)
   // GetTelemetrySubscriptions request carries a 16-byte instance id.
-  let req = @moonkafka.encode_get_telemetry_subscriptions_request(Uuid::zero())
+  let req = @moonkafka.encode_get_telemetry_subscriptions_request(
+    @moonkafka.Uuid::zero(),
+  )
   assert_eq(req.length(), 17) // uuid + tag buffer
   // Subscription response: throttle, error, instance id, subscription id,
   // accepted compression, push interval, max bytes, delta flag, metrics.
   let e = @buf.Encoder::new()
   e.write_i32(3) // throttle
   e.write_i16(0) // error
-  e.write_bytes(Uuid::zero().to_bytes())
+  e.write_bytes(@moonkafka.Uuid::zero().to_bytes())
   e.write_i32(7) // subscription id
   e.write_compact_len(1) // accepted compressions
   e.write_i8(0) // none
@@ -1161,7 +1166,7 @@ test "telemetry subscription and push negotiate and round-trip v0" {
   // PushTelemetry request body round-trips its fields.
   let payload = b"records_sent=42\n"
   let push = @moonkafka.encode_push_telemetry_request(
-    Uuid::zero(),
+    @moonkafka.Uuid::zero(),
     7,
     false,
     0,

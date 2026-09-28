@@ -2170,8 +2170,10 @@ pub struct Uuid {
   bytes : Bytes
 } derive(Compare, Eq, Hash, @debug.Debug)
 pub fn Uuid::from_bytes(Bytes) -> Self raise @buf.DecodeError
+pub fn Uuid::output(Self, &Logger) -> Unit
 pub fn Uuid::parse(String) -> Self raise @buf.DecodeError
 pub fn Uuid::to_bytes(Self) -> Bytes
+pub fn Uuid::to_string(Self) -> String
 pub fn Uuid::zero() -> Self
 pub impl Show for Uuid
 

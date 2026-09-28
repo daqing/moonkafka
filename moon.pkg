@@ -13,6 +13,14 @@ import {
 
 supported_targets = "+native"
 
+// E0079: deriving Eq/Compare/Hash/Debug promotes the trait methods to dot
+// syntax, a deprecated compatibility behaviour. Only `Uuid::to_string` is
+// actually called that way, and it is declared with an explicit `extend` in
+// uuid.mbt; the rest have no call site, so the warning is off here rather
+// than answered with an `extend` block for each of ~170 derived types.
+
+warnings = "-implicit_impl_as_method"
+
 options(
   link: { "native": { "cc-link-flags": "-lz" } },
 )
