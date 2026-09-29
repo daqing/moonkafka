@@ -25,12 +25,12 @@ jobs:
 
       - name: Build
         # The module root is a library; type-check the whole module with
-        # `moon check`, then link the executable packages. A bare `moon build`
+        # `moon check`, then link the executable package. A bare `moon build`
         # would try to link the library packages carrying a `link` option for
         # their test binaries, and those have no `main`.
         run: |
           moon check
-          moon build cmd/main docs/demo
+          moon build cmd/main
 
       - name: Run unit + mock-broker tests
         run: moon test

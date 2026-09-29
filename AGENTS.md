@@ -84,9 +84,8 @@ You can browse and install extra skills here:
   linked output", so a bare `moon build` tries to link both as executables
   (`moonkafka.exe`, `compression.exe`) and dies on the missing `_main`. Do not
   "fix" this by dropping the option: `moon test` then fails to link against
-  zlib. Name the executable packages instead — `moon build cmd/main docs/demo`
-  links them and their `-lz` correctly, which is what the Makefile's `build`
-  target and CI do.
+  zlib. Name the executable package instead — `moon build cmd/main` links it and
+  its `-lz` correctly, which is what the Makefile's `build` target and CI do.
 
 - The module is native-only, so `moon check --target all` fails too, reporting
   unbound identifiers in `compression`, whose FFI is gated to native.

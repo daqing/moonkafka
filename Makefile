@@ -31,12 +31,12 @@ help:
 	@echo "  ENGINE=docker|podman force the container engine (default: auto-detect)"
 
 ## build            : type-check the whole library, then link the executable
-##                    packages. A bare `moon build` would try to link the module
+##                    package. A bare `moon build` would try to link the module
 ##                    root and `compression` as executables; both are libraries
 ##                    carrying a `link` option for their test binaries.
 build:
 	$(MOON) check
-	$(MOON) build cmd/main docs/demo
+	$(MOON) build cmd/main
 
 ## test             : run unit + mock-broker (fake broker) tests
 test:
