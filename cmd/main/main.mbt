@@ -3,6 +3,10 @@
 ///   moon run --target native cmd/main -- consume <topic> [host] [port]
 /// Consumes all partitions of <topic> and prints records until interrupted.
 ///
+/// Consumer-group example:
+///   moon run --target native cmd/main -- consume-group <topic> <group-id> [host] [port]
+/// Joins a KIP-848 consumer group and consumes with automatic offset commits.
+///
 /// Simple producer example:
 ///   moon run --target native cmd/main -- produce <topic> <value> [key] [host] [port]
 /// Sends one message and prints the assigned partition offset.
@@ -12,6 +16,7 @@ async fn main {
     Some("-h") | Some("--help") => print_help()
     Some("produce") => produce(args)
     Some("consume") => consume(args)
+    Some("consume-group") => consume_group(args)
     Some("bench-produce") => bench_produce(args)
     _ => {
       println("unknown command: \{args.get(1).unwrap_or("<none>")}\n")
@@ -28,9 +33,10 @@ fn print_help() -> Unit {
       $|moonkafka - a simple Kafka 4.x client
       $|
       $|Usage:
-      $|  main consume [topic] [host] [port] [start-from]    consume a topic
-      $|  main produce <topic> <value> [key] [host] [port]  produce one message
-      $|  main -h | --help                                  show this help
+      $|  main consume [topic] [host] [port] [start-from]      consume a topic
+      $|  main consume-group <topic> <group-id> [host] [port]  consume in a group
+      $|  main produce <topic> <value> [key] [host] [port]     produce one message
+      $|  main -h | --help                                     show this help
       $|
       $|Consume mode:
       $|  Consumes all partitions of <topic> and prints records until interrupted
@@ -40,6 +46,14 @@ fn print_help() -> Unit {
       $|    host        bootstrap broker host (default 127.0.0.1)
       $|    port        bootstrap broker port (default 9092)
       $|    start-from  "earliest" or "latest" (default "latest")
+      $|
+      $|Consumer-group mode:
+      $|  Joins a KIP-848 consumer group and consumes <topic> from the earliest
+      $|  offset, committing offsets automatically.
+      $|    topic     topic name (required)
+      $|    group-id  consumer group id (required)
+      $|    host      bootstrap broker host (default 127.0.0.1)
+      $|    port      bootstrap broker port (default 9092)
       $|
       $|Produce mode:
       $|  Sends one message to <topic> and prints the assigned offset.
@@ -51,10 +65,25 @@ fn print_help() -> Unit {
       $|
       $|Examples:
       $|  moon run cmd/main -- consume events
+      $|  moon run cmd/main -- consume-group events payments
       $|  moon run cmd/main -- produce events "hello"
       $|  moon run cmd/main -- produce events "hello" my-key broker.example.com 9093
     ),
   )
+}
+
+///|
+fn parse_port(args : Array[String], index : Int) -> Int {
+  match args.get(index) {
+    Some(value) =>
+      @string.parse_int(value) catch {
+        _ => {
+          println("invalid port: \{value}")
+          abort("")
+        }
+      }
+    None => 9092
+  }
 }
 
 ///|
@@ -65,16 +94,7 @@ async fn produce(args : Array[String]) -> Unit {
   }
   let key = args.get(4).map(fn(s) { @utf8.encode(s) })
   let host = args.get(5).unwrap_or("127.0.0.1")
-  let port = match args.get(6) {
-    Some(s) =>
-      @string.parse_int(s) catch {
-        _ => {
-          println("invalid port: \{s}")
-          abort("")
-        }
-      }
-    None => 9092
-  }
+  let port = parse_port(args, 6)
   // The producer's sender drain loop lives in a task group scoped to the
   // produce call.
   @async.with_task_group(async fn(_group) {
@@ -120,16 +140,7 @@ async fn bench_produce(args : Array[String]) -> Unit {
   }
   let key = args.get(4).map(fn(s) { @utf8.encode(s) })
   let host = args.get(5).unwrap_or("127.0.0.1")
-  let port = match args.get(6) {
-    Some(s) =>
-      @string.parse_int(s) catch {
-        _ => {
-          println("invalid port: \{s}")
-          abort("")
-        }
-      }
-    None => 9092
-  }
+  let port = parse_port(args, 6)
   @async.with_task_group(async fn(_group) {
     let config = @lib.ProducerConfig::new(
       ["\{host}:\{port}"],
@@ -166,16 +177,7 @@ async fn bench_produce(args : Array[String]) -> Unit {
 async fn consume(args : Array[String]) -> Unit {
   let topic = args.get(2).unwrap_or("events")
   let host = args.get(3).unwrap_or("127.0.0.1")
-  let port = match args.get(4) {
-    Some(s) =>
-      @string.parse_int(s) catch {
-        _ => {
-          println("invalid port: \{s}")
-          abort("")
-        }
-      }
-    None => 9092
-  }
+  let port = parse_port(args, 4)
   let start_from = match args.get(5) {
     Some("earliest") => @lib.StartFrom::Earliest
     Some("latest") | None => @lib.StartFrom::Latest
@@ -219,28 +221,83 @@ async fn consume(args : Array[String]) -> Unit {
     println(
       "consuming topic \"\{topic}\" from \{host}:\{port} (Ctrl-C to stop)",
     )
-    for ;; {
-      let records = consumer.poll() catch {
-        e => {
-          println("poll error: \{e}; retrying")
-          @async.sleep(1000)
-          continue
-        }
-      }
-      for record in records {
-        let key = match record.key {
-          Some(k) => @utf8.decode_lossy(k[:])
-          None => "<null>"
-        }
-        let value = match record.value {
-          Some(v) => @utf8.decode_lossy(v[:])
-          None => "<tombstone>"
-        }
-        println("offset=\{record.offset} key=\{key} value=\{value}")
-      }
-      if records.is_empty() {
-        @async.sleep(500)
+    poll_forever(consumer)
+  })
+}
+
+///|
+/// Consume as a KIP-848 consumer-group member: the group coordinator assigns
+/// partitions and offsets are committed on the auto-commit interval.
+async fn consume_group(args : Array[String]) -> Unit {
+  guard args.get(2) is Some(topic) && args.get(3) is Some(group_id) else {
+    println("usage: consume-group <topic> <group-id> [host] [port]")
+    abort("")
+  }
+  let host = args.get(4).unwrap_or("127.0.0.1")
+  let port = parse_port(args, 5)
+  // The heartbeat and auto-commit loops live in a task group scoped to the
+  // consume-group call.
+  @async.with_task_group(async fn(group) {
+    let config = @lib.ConsumerConfig::new(
+      ["\{host}:\{port}"],
+      topic,
+      start_from=@lib.StartFrom::Earliest,
+      group_id=Some(group_id),
+      enable_auto_commit=true,
+      group_protocol=@lib.ConsumerProtocol,
+    ) catch {
+      e => {
+        println("invalid consumer configuration: \{e}")
+        abort("")
       }
     }
+    let consumer = @lib.Consumer::connect_with_config(group~, config) catch {
+      @lib.BrokerError(code, msg) => {
+        println("broker error: \{@lib.error_name(code)}: \{msg}")
+        abort("")
+      }
+      e => {
+        println("failed to join the group: \{e}")
+        abort("")
+      }
+    }
+    defer consumer.close()
+    consumer.subscribe([topic], listener=None) catch {
+      e => {
+        println("group subscription failed: \{e}")
+        abort("")
+      }
+    }
+    println(
+      "consuming topic \"\{topic}\" as group \"\{group_id}\" from \{host}:\{port} (Ctrl-C to stop)",
+    )
+    poll_forever(consumer)
   })
+}
+
+///|
+async fn poll_forever(consumer : @lib.Consumer) -> Unit {
+  for ;; {
+    let records = consumer.poll() catch {
+      e => {
+        println("poll error: \{e}; retrying")
+        @async.sleep(1000)
+        continue
+      }
+    }
+    for record in records {
+      let key = match record.key {
+        Some(k) => @utf8.decode_lossy(k[:])
+        None => "<null>"
+      }
+      let value = match record.value {
+        Some(v) => @utf8.decode_lossy(v[:])
+        None => "<tombstone>"
+      }
+      println("offset=\{record.offset} key=\{key} value=\{value}")
+    }
+    if records.is_empty() {
+      @async.sleep(500)
+    }
+  }
 }

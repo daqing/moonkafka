@@ -53,6 +53,11 @@ pub impl Show for Uuid with fn output(self, logger) {
 }
 
 ///|
+/// Keep `uuid.to_string()` working by dot syntax; the implicit promotion of
+/// `impl Show for Uuid` is deprecated.
+pub extend Uuid with Show::{to_string, output}
+
+///|
 let b64url_chars : Array[String] = [
   "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P",
   "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "a", "b", "c", "d", "e", "f",

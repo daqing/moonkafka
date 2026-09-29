@@ -207,8 +207,14 @@ fn Consumer::start_membership(self : Consumer) -> Unit {
     // The loop picks the new subscription up on its next heartbeat.
     return
   }
-  if self.member_id.is_empty() {
-    self.member_id = new_member_id()
+  match self.member_kind {
+    // KIP-394: the classic coordinator issues the member id, so the first
+    // join carries an empty one and the loop adopts the id it answers with.
+    ClassicMember => self.member_id = ""
+    Kip848Member =>
+      if self.member_id.is_empty() {
+        self.member_id = new_member_id()
+      }
   }
   self.member_active = true
   if !self.member_spawned {
@@ -340,17 +346,22 @@ async fn Consumer::member_loop(self : Consumer) -> Unit {
     if result.heartbeat_interval_ms > 0 {
       self.heartbeat_interval_ms = result.heartbeat_interval_ms
     }
-    let pairs : Array[(String, Int)] = []
-    for entry in result.assignment {
-      match self.cluster.topic_name(entry.topic_id) {
-        Some(name) =>
-          for partition in entry.partitions {
-            pairs.push((name, partition))
-          }
-        None => ()
+    // A heartbeat with no assignment means the coordinator has nothing new
+    // to say, so the member keeps what it has; only an assignment the
+    // coordinator actually sent is applied.
+    if result.assignment is Some(entries) {
+      let pairs : Array[(String, Int)] = []
+      for entry in entries {
+        match self.cluster.topic_name(entry.topic_id) {
+          Some(name) =>
+            for partition in entry.partitions {
+              pairs.push((name, partition))
+            }
+          None => ()
+        }
       }
+      self.set_assignment(pairs)
     }
-    self.set_assignment(pairs)
     // Sleep the server's interval in tick-sized steps so close()
     // lands promptly.
     let wait = Int::max(1, self.heartbeat_interval_ms / SENDER_TICK_MS)

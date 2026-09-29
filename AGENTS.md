@@ -78,13 +78,14 @@ You can browse and install extra skills here:
 ## Tooling
 
 - `moon build` does not work at the module level — use `moon check` to
-  type-check the whole library (the Makefile's `build` target is exactly that).
-  The root package and `compression` are libraries that declare
-  `options(link: "-lz")` for their test binaries, and `moon build` tries to link
-  both as executables (`moonkafka.exe`, `compression.exe`), dying on the missing
-  `_main`. Do not "fix" this by dropping the option: `moon test` then fails to
-  link against zlib. The actual executables (`cmd/main`, `docs/demo`) carry
-  their own `-lz` and do build on their own.
+  type-check the whole library. The root package and `compression` are libraries
+  that carry `link: { "native": { "cc-link-flags": "-lz" } }` for their test
+  binaries, and that option doubles as the marker for "this package produces
+  linked output", so a bare `moon build` tries to link both as executables
+  (`moonkafka.exe`, `compression.exe`) and dies on the missing `_main`. Do not
+  "fix" this by dropping the option: `moon test` then fails to link against
+  zlib. Name the executable package instead — `moon build cmd/main` links it and
+  its `-lz` correctly, which is what the Makefile's `build` target and CI do.
 
 - The module is native-only, so `moon check --target all` fails too, reporting
   unbound identifiers in `compression`, whose FFI is gated to native.

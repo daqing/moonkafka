@@ -30,10 +30,13 @@ help:
 	@echo "  make coverage        write per-line coverage to uncovered.log"
 	@echo "  ENGINE=docker|podman force the container engine (default: auto-detect)"
 
-## build            : type-check the whole library (no link; the module root
-##                    is a library, so `moon build` would try to link a main)
+## build            : type-check the whole library, then link the executable
+##                    package. A bare `moon build` would try to link the module
+##                    root and `compression` as executables; both are libraries
+##                    carrying a `link` option for their test binaries.
 build:
 	$(MOON) check
+	$(MOON) build cmd/main
 
 ## test             : run unit + mock-broker (fake broker) tests
 test:

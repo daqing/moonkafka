@@ -724,8 +724,13 @@ async fn fake_classic_join(
   }
   if !coord.round_complete() {
     // The round stalled: tell the member to retry rather than let it
-    // compute against a partial group.
-    coord.arrived[id] = -1
+    // compute against a partial group. Give up the registration too — a
+    // member that never arrives again would otherwise pin
+    // `round_complete` to false for every later round. The real
+    // coordinator expires such a member on its session timeout; the
+    // member rejoins at once either way.
+    let _ = coord.members.remove(id)
+    let _ = coord.arrived.remove(id)
     return fake_join_group_response(15, -1, "", "", id, [])
   }
   coord.joins.push((id, coord.round))
@@ -2625,7 +2630,17 @@ fn fake_consumer_group_heartbeat_request(
   }
   let regex = d.read_compact_nullable_string()
   ignore(d.read_compact_nullable_string()) // server assignor
-  ignore(d.read_i8()) // owned topic partitions: null
+  // Owned topic partitions: a nullable array of structs, so null is a
+  // compact length of -1 rather than a struct presence byte.
+  let owned = d.read_compact_len()
+  for _ in 0..<owned {
+    ignore(d.read_bytes(16)) // topic id
+    let partitions = d.read_compact_len()
+    for _ in 0..<partitions {
+      ignore(d.read_i32())
+    }
+    d.skip_tag_buffer()
+  }
   (group_id, member_id, member_epoch, instance_id, regex)
 }
 
@@ -2849,7 +2864,9 @@ fn fake_fetch_response(
 ///|
 /// Cursor from a DescribeTopicPartitions request (flexible v0: header v2
 /// with its tag buffer, then topics array, response limit, cursor struct).
-fn fake_dtp_request_cursor(rest : Bytes) -> TopicPartitionCursor? raise {
+fn fake_dtp_request_cursor(
+  rest : Bytes,
+) -> @moonkafka.TopicPartitionCursor? raise {
   let d = @buf.Decoder::new(rest)
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
@@ -2878,7 +2895,7 @@ fn fake_dtp_request_cursor(rest : Bytes) -> TopicPartitionCursor? raise {
 fn fake_describe_topic_partitions_response(
   topic : String,
   partitions : Array[Int],
-  next_cursor : TopicPartitionCursor?,
+  next_cursor : @moonkafka.TopicPartitionCursor?,
   error_code? : Int = 0,
 ) -> Bytes {
   let e = @buf.Encoder::new()

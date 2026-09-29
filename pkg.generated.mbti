@@ -1257,7 +1257,7 @@ pub struct ConsumerGroupHeartbeatResult {
   member_id : String
   member_epoch : Int
   heartbeat_interval_ms : Int
-  assignment : Array[HeartbeatTopicPartitions]
+  assignment : Array[HeartbeatTopicPartitions]?
 } derive(@debug.Debug)
 
 pub struct CoordinatorInfo {
@@ -1989,7 +1989,7 @@ pub struct ShareGroupHeartbeatResult {
   member_id : String
   member_epoch : Int
   heartbeat_interval_ms : Int
-  assignment : Array[ShareHeartbeatTopicPartitions]
+  assignment : Array[ShareHeartbeatTopicPartitions]?
 } derive(@debug.Debug)
 
 pub(all) struct ShareHeartbeatTopicPartitions {
@@ -2170,8 +2170,10 @@ pub struct Uuid {
   bytes : Bytes
 } derive(Compare, Eq, Hash, @debug.Debug)
 pub fn Uuid::from_bytes(Bytes) -> Self raise @buf.DecodeError
+pub fn Uuid::output(Self, &Logger) -> Unit
 pub fn Uuid::parse(String) -> Self raise @buf.DecodeError
 pub fn Uuid::to_bytes(Self) -> Bytes
+pub fn Uuid::to_string(Self) -> String
 pub fn Uuid::zero() -> Self
 pub impl Show for Uuid
 

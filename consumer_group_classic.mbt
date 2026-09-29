@@ -76,14 +76,14 @@ fn encode_cooperative_subscription(
 ) -> Bytes {
   let body = @buf.Encoder::new()
   body.write_i16(CONSUMER_PROTOCOL_SUBSCRIPTION_VERSION)
-  body.write_i16(topics.length())
+  body.write_i32(topics.length())
   for topic in topics {
     let bytes = @utf8.encode(topic)
     body.write_i16(bytes.length())
     body.write_bytes(bytes)
   }
   let user_data = encode_consumer_protocol_assignment(owned)
-  body.write_i16(user_data.length())
+  body.write_i32(user_data.length())
   body.write_bytes(user_data)
   body.to_bytes()
 }
@@ -96,19 +96,19 @@ fn decode_subscription_metadata(
 ) -> (Array[String], Array[(String, Array[Int])]) raise {
   let d = @buf.Decoder::new(metadata)
   let version = d.read_i16()
-  guard version == CONSUMER_PROTOCOL_SUBSCRIPTION_VERSION else {
+  guard 0 <= version && version <= CONSUMER_PROTOCOL_MAX_VERSION else {
     raise ProtocolError::ProtocolError(
       "unsupported ConsumerProtocolSubscription version \{version}",
     )
   }
-  let n = d.read_i16()
+  let n = d.read_i32()
   let topics : Array[String] = []
   for _ in 0..<n {
     let len = d.read_i16()
     topics.push(@utf8.decode_lossy(d.read_bytes(len)[:]))
   }
   let mut owned : Array[(String, Array[Int])] = []
-  let user_len = d.read_i16()
+  let user_len = d.read_i32()
   if user_len > 0 {
     owned = decode_consumer_protocol_assignment(d.read_bytes(user_len))
   }
@@ -234,6 +234,18 @@ async fn Consumer::classic_join_round(self : Consumer) -> ClassicRound {
   )
   match join.error_code {
     0 => ()
+    // KIP-394: the first join carries an empty member id, and the coordinator
+    // answers with the id it assigned for us instead of adding a member. Adopt
+    // it and rejoin; only an answer with no id at all is paced, since rejoining
+    // on it would spin.
+    79 => {
+      if join.member_id.is_empty() {
+        @async.sleep(self.retry_backoff_ms)
+        return ClassicRejoin
+      }
+      self.member_id = join.member_id
+      return ClassicRejoin
+    }
     25 => {
       // The coordinator forgot us: join fresh.
       self.member_id = ""

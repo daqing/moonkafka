@@ -976,7 +976,7 @@ test "share group heartbeat request/response round trip v1" {
   e.write_i32(2500) // heartbeat interval
   e.write_i8(1) // assignment present
   e.write_compact_len(1) // topics
-  e.write_bytes(Uuid::zero().to_bytes())
+  e.write_bytes(@moonkafka.Uuid::zero().to_bytes())
   e.write_compact_len(1) // partitions
   e.write_i32(0)
   e.write_tag_buffer() // topic
@@ -990,14 +990,108 @@ test "share group heartbeat request/response round trip v1" {
   assert_eq(result.member_id, "member-a")
   assert_eq(result.member_epoch, 1)
   assert_eq(result.heartbeat_interval_ms, 2500)
-  assert_eq(result.assignment.length(), 1)
-  assert_eq(result.assignment[0].topic_id.to_bytes(), Uuid::zero().to_bytes())
-  assert_eq(result.assignment[0].partitions, [0])
+  let assignment = result.assignment.unwrap()
+  assert_eq(assignment.length(), 1)
+  assert_eq(
+    assignment[0].topic_id.to_bytes(),
+    @moonkafka.Uuid::zero().to_bytes(),
+  )
+  assert_eq(assignment[0].partitions, [0])
   // The driver negotiates v1 for the 4.3 broker's advertised range.
   let versions = @moonkafka.decode_api_versions_response(
     @buf.Decoder::new(fake_api_versions_response(0)),
   )
   assert_eq(versions.0.pick(@moonkafka.API_SHARE_GROUP_HEARTBEAT), 1)
+}
+
+///|
+test "consumer group heartbeat v1 request encodes owned partitions by epoch" {
+  // Owned topic partitions are schema field 10, a nullable `[]TopicPartitions`
+  // array, so the field is a compact length — not a struct presence byte.
+  // Writing it as 0xff (a struct "null") left the broker reading the tag
+  // buffer as a varint continuation byte, yielding length 126 against a body
+  // with nothing left, so it rejected the request outright. Writing a true
+  // null on the epoch-0 join is no better: the coordinator rejects that too
+  // ("TopicPartitions must be empty when (re-)joining").
+  let encode : (Int) -> Bytes raise = fn(epoch) raise {
+    @moonkafka.encode_consumer_group_heartbeat_request(
+      1,
+      "g",
+      "m",
+      epoch,
+      subscribed_topic_names=Some(["t"]),
+    )
+  }
+  let expected = fn(epoch : Int, owned : Int) {
+    let e = @buf.Encoder::new()
+    e.write_compact_string("g")
+    e.write_compact_string("m")
+    e.write_i32(epoch) // member epoch
+    e.write_compact_nullable_string(None) // instance id
+    e.write_compact_nullable_string(None) // rack id
+    e.write_i32(-1) // rebalance timeout
+    e.write_compact_len(1) // subscribed topic names
+    e.write_compact_string("t")
+    e.write_compact_nullable_string(None) // subscribed topic regex
+    e.write_compact_nullable_string(None) // server assignor
+    e.write_compact_len(owned) // owned topic partitions
+    e.write_tag_buffer()
+    e.to_bytes()
+  }
+  // The join owns nothing yet and must say so with an empty list (0x01).
+  let join = encode(0)
+  assert_eq(join, expected(0, 0))
+  assert_eq(join[join.length() - 2], b'\x01')
+  assert_eq(join[join.length() - 1], b'\x00')
+  // A joined member reports "unchanged" with a null array (0x00).
+  let heartbeat = encode(7)
+  assert_eq(heartbeat, expected(7, -1))
+  assert_eq(heartbeat[heartbeat.length() - 2], b'\x00')
+  assert_eq(heartbeat[heartbeat.length() - 1], b'\x00')
+}
+
+///|
+test "consumer group heartbeat response distinguishes a null assignment" {
+  // Assignment is a nullable struct so the coordinator can send null to
+  // mean "no change" rather than re-sending it every heartbeat (KIP-893).
+  // Reading that as an empty assignment dropped the partitions the member
+  // had just been given, so the null has to survive decoding.
+  let response = fn(present : Bool, topics : Int) {
+    let e = @buf.Encoder::new()
+    e.write_i32(0) // throttle
+    e.write_i16(0) // error
+    e.write_compact_nullable_string(None) // error message
+    e.write_compact_nullable_string(Some("member-a"))
+    e.write_i32(3) // member epoch
+    e.write_i32(5000) // heartbeat interval
+    if present {
+      e.write_i8(1) // assignment present
+      e.write_compact_len(topics)
+      for _ in 0..<topics {
+        e.write_bytes(@moonkafka.Uuid::zero().to_bytes())
+        e.write_compact_len(0)
+        e.write_tag_buffer()
+      }
+      e.write_tag_buffer() // assignment
+    } else {
+      e.write_i8(-1) // assignment null
+    }
+    e.write_tag_buffer() // top level
+    e.to_bytes()
+  }
+  let (unchanged, _) = @moonkafka.decode_consumer_group_heartbeat_response(
+    @buf.Decoder::new(response(false, 0)),
+  )
+  assert_true(unchanged.assignment is None)
+  // An assignment the coordinator did send is Some, empty or not.
+  let (empty, _) = @moonkafka.decode_consumer_group_heartbeat_response(
+    @buf.Decoder::new(response(true, 0)),
+  )
+  assert_eq(empty.assignment.unwrap().length(), 0)
+  let (assigned, _) = @moonkafka.decode_consumer_group_heartbeat_response(
+    @buf.Decoder::new(response(true, 1)),
+  )
+  assert_eq(assigned.assignment.unwrap().length(), 1)
 }
 
 ///|
@@ -1015,7 +1109,7 @@ test "share fetch v2 negotiates and decodes acquired records" {
   e.write_compact_nullable_string(None)
   e.write_i32(0) // acquisition lock timeout
   e.write_compact_len(1) // responses
-  e.write_bytes(Uuid::zero().to_bytes())
+  e.write_bytes(@moonkafka.Uuid::zero().to_bytes())
   e.write_compact_len(1) // partitions
   e.write_i32(0) // partition index
   e.write_i16(0) // error code
@@ -1087,7 +1181,7 @@ test "describe alter delete share group offsets negotiate and decode" {
   e.write_compact_string("share-group")
   e.write_compact_len(1) // topics
   e.write_compact_string("events")
-  e.write_bytes(Uuid::zero().to_bytes())
+  e.write_bytes(@moonkafka.Uuid::zero().to_bytes())
   e.write_compact_len(1) // partitions
   e.write_i32(0)
   e.write_i64(5L)
@@ -1130,14 +1224,16 @@ test "telemetry subscription and push negotiate and round-trip v0" {
   assert_eq(versions.0.pick(@moonkafka.API_GET_TELEMETRY_SUBSCRIPTIONS), 0)
   assert_eq(versions.0.pick(@moonkafka.API_PUSH_TELEMETRY), 0)
   // GetTelemetrySubscriptions request carries a 16-byte instance id.
-  let req = @moonkafka.encode_get_telemetry_subscriptions_request(Uuid::zero())
+  let req = @moonkafka.encode_get_telemetry_subscriptions_request(
+    @moonkafka.Uuid::zero(),
+  )
   assert_eq(req.length(), 17) // uuid + tag buffer
   // Subscription response: throttle, error, instance id, subscription id,
   // accepted compression, push interval, max bytes, delta flag, metrics.
   let e = @buf.Encoder::new()
   e.write_i32(3) // throttle
   e.write_i16(0) // error
-  e.write_bytes(Uuid::zero().to_bytes())
+  e.write_bytes(@moonkafka.Uuid::zero().to_bytes())
   e.write_i32(7) // subscription id
   e.write_compact_len(1) // accepted compressions
   e.write_i8(0) // none
@@ -1161,7 +1257,7 @@ test "telemetry subscription and push negotiate and round-trip v0" {
   // PushTelemetry request body round-trips its fields.
   let payload = b"records_sent=42\n"
   let push = @moonkafka.encode_push_telemetry_request(
-    Uuid::zero(),
+    @moonkafka.Uuid::zero(),
     7,
     false,
     0,

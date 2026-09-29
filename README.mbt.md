@@ -177,8 +177,8 @@ carries a container-backed end-to-end integration test (`make itest`) that
 drives the real CLI against a real broker. Bilingual documentation:
 <https://daqing.github.io/moonkafka-demo/>.
 
-The in-repository example in [`docs/demo`](docs/demo/README.md) covers the same
-client patterns in a single package.
+The in-repository example in [`cmd/main`](cmd/main/main.mbt) covers the same
+client patterns in a single package — `consume-group` included.
 
 ## Development
 

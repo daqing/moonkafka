@@ -12,8 +12,8 @@ test "xxh32 matches the canonical spec vectors" {
 
 ///|
 test "codec registry maps attribute bits" {
-  assert_eq(codec_by_id(0).unwrap().name, "none")
-  assert_eq(codec_by_id(4).unwrap().name, "zstd")
-  assert_true(codec_by_id(5) is None)
-  assert_eq(codecs().length(), 5)
+  assert_eq(@compression.codec_by_id(0).unwrap().name, "none")
+  assert_eq(@compression.codec_by_id(4).unwrap().name, "zstd")
+  assert_true(@compression.codec_by_id(5) is None)
+  assert_eq(@compression.codecs().length(), 5)
 }
