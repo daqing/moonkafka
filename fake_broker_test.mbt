@@ -724,8 +724,13 @@ async fn fake_classic_join(
   }
   if !coord.round_complete() {
     // The round stalled: tell the member to retry rather than let it
-    // compute against a partial group.
-    coord.arrived[id] = -1
+    // compute against a partial group. Give up the registration too — a
+    // member that never arrives again would otherwise pin
+    // `round_complete` to false for every later round. The real
+    // coordinator expires such a member on its session timeout; the
+    // member rejoins at once either way.
+    let _ = coord.members.remove(id)
+    let _ = coord.arrived.remove(id)
     return fake_join_group_response(15, -1, "", "", id, [])
   }
   coord.joins.push((id, coord.round))

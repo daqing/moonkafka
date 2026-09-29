@@ -104,10 +104,18 @@ pub async fn Consumer::commit(
   }
   let entries : Array[(Int, Int64, Int)] = []
   for p in self.partitions {
+    if self.member_spawned && !self.is_assigned(p.info.index) {
+      // Only the partitions the coordinator assigned are ours to commit; the
+      // rest belong to the group's other members.
+      continue
+    }
     match to_commit.get(p.info.index) {
       Some(offset) => entries.push((p.info.index, offset, p.info.leader_epoch))
       None => ()
     }
+  }
+  if entries.is_empty() {
+    return
   }
   let backoff = Backoff::new(
     base_ms=self.retry_backoff_ms,
@@ -115,15 +123,21 @@ pub async fn Consumer::commit(
   )
   for attempt in 0..<=self.retries {
     let conn = self.group_coordinator_conn()
-    // A joined KIP-848 member commits as itself. The coordinator rejects a
-    // group-less commit (generation -1, no member id) with
-    // UNKNOWN_MEMBER_ID as soon as the group has members, so auto-commit
-    // silently never landed. A consumer that never joined keeps the
-    // group-less form, which is what creates the simple group the manual
+    // A joined member commits as itself: the coordinator rejects a group-less
+    // commit (generation -1, no member id) with UNKNOWN_MEMBER_ID as soon as
+    // the group has members, so auto-commit silently never landed. The two
+    // protocols carry their generation in different fields — KIP-848 the member
+    // epoch, classic the generation id — and a consumer that never joined keeps
+    // the group-less form, which is what creates the simple group the manual
     // assignment path commits into.
-    let (generation, member_id) = if self.member_epoch > 0 &&
+    let member_generation = if self.member_epoch > 0 {
+      self.member_epoch
+    } else {
+      self.generation_id
+    }
+    let (generation, member_id) = if member_generation >= 0 &&
       !self.member_id.is_empty() {
-      (self.member_epoch, self.member_id)
+      (member_generation, self.member_id)
     } else {
       (-1, "")
     }

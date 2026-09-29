@@ -207,8 +207,14 @@ fn Consumer::start_membership(self : Consumer) -> Unit {
     // The loop picks the new subscription up on its next heartbeat.
     return
   }
-  if self.member_id.is_empty() {
-    self.member_id = new_member_id()
+  match self.member_kind {
+    // KIP-394: the classic coordinator issues the member id, so the first
+    // join carries an empty one and the loop adopts the id it answers with.
+    ClassicMember => self.member_id = ""
+    Kip848Member =>
+      if self.member_id.is_empty() {
+        self.member_id = new_member_id()
+      }
   }
   self.member_active = true
   if !self.member_spawned {
