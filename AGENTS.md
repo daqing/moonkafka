@@ -53,6 +53,18 @@ You can browse and install extra skills here:
 - Tagging then points at a commit that already carries the bump, so `git` can
   check a release's version against its tag directly.
 
+## Releasing
+
+- Cut releases with the checklist at the end of `CHANGELOG.md`, in full.
+
+- Tag every released version, and put the tag on the release commit — the one
+  carrying `VERSION`, `moon.mod` and the changelog entry. Tagging wherever
+  `HEAD` happened to sit is how `v0.3.3` came to include a CI change its entry
+  never described, and how `v0.3.1` and `v0.3.2` ended up with no tag at all.
+
+- History stays as it is: the missing tags are not backfilled, and a published
+  changelog entry is not rewritten to match what a tag turned out to contain.
+
 ## Pushing
 
 - `git push` is a serious, outward-facing operation. It happens only when the

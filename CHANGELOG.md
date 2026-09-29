@@ -259,7 +259,9 @@ Source-compatible:
 2. `moon fmt`, `moon test` (all 200+ incl. mock-broker).
 3. `make generate-golden` and commit any fixture diffs.
 4. `make integration` (Kafka 4.3 via docker or podman) once green.
-5. Bump `version` in `moon.mod`; update tag (`git tag vX.Y.Z`).
+5. Bump `version` in `moon.mod`; commit `VERSION`, `moon.mod` and the
+   changelog entry together, and tag that commit (`git tag vX.Y.Z`) — see
+   `AGENTS.md` for the tagging rule.
 6. Update `Makefile`/CI if the harness changed.
 
 [0.2.3]: https://github.com/daqing/moonkafka/releases/tag/v0.2.3
