@@ -20,8 +20,8 @@ pub(all) struct HeartbeatTopicPartitions {
 ///|
 /// Encode a ConsumerGroupHeartbeat request body. Optional fields the
 /// member leaves unchanged send None (the server keeps its state); the
-/// owned-partition list is sent as null (unchanged), so the server
-/// drives assignment.
+/// owned-partition list is empty on the epoch-0 join and null (unchanged)
+/// afterwards, so the server drives assignment.
 pub fn encode_consumer_group_heartbeat_request(
   version : Int,
   group_id : String,
@@ -59,23 +59,34 @@ pub fn encode_consumer_group_heartbeat_request(
     body.write_compact_nullable_string(subscribed_topic_regex)
   }
   body.write_compact_nullable_string(server_assignor)
-  // Owned topic partitions: a nullable struct — null ("unchanged") is a
-  // single -1 byte, not an array length.
-  body.write_i8(-1)
+  // Owned topic partitions: a nullable array of structs, so a compact
+  // length — not a struct presence byte. A member joining at epoch 0 owns
+  // nothing yet, and the coordinator rejects null outright there
+  // ("TopicPartitions must be empty when (re-)joining"), so the join sends
+  // an empty list; every other epoch sends null, meaning "unchanged".
+  if member_epoch == 0 {
+    body.write_compact_len(0)
+  } else {
+    body.write_compact_len(-1)
+  }
   body.write_tag_buffer()
   body.to_bytes()
 }
 
 ///|
 /// One member heartbeat outcome: identity/epoch reconciliation, the
-/// server's heartbeat interval, and the (possibly empty) assignment.
+/// server's heartbeat interval, and the assignment. The assignment is
+/// None when the coordinator sent none, which means the member keeps the
+/// one it has (KIP-893 made the field a nullable struct so the coordinator
+/// need not re-send an unchanged assignment every heartbeat); Some([]) is
+/// an explicit revocation of everything.
 pub struct ConsumerGroupHeartbeatResult {
   error_code : Int
   error_message : String?
   member_id : String
   member_epoch : Int
   heartbeat_interval_ms : Int
-  assignment : Array[HeartbeatTopicPartitions]
+  assignment : Array[HeartbeatTopicPartitions]?
 } derive(@debug.Debug)
 
 ///|
@@ -113,7 +124,11 @@ pub fn decode_consumer_group_heartbeat_response(
       member_id,
       member_epoch,
       heartbeat_interval_ms,
-      assignment,
+      assignment: if has_assignment >= 0 {
+        Some(assignment)
+      } else {
+        None
+      },
     },
     throttle,
   )

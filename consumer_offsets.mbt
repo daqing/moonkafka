@@ -115,10 +115,22 @@ pub async fn Consumer::commit(
   )
   for attempt in 0..<=self.retries {
     let conn = self.group_coordinator_conn()
+    // A joined KIP-848 member commits as itself. The coordinator rejects a
+    // group-less commit (generation -1, no member id) with
+    // UNKNOWN_MEMBER_ID as soon as the group has members, so auto-commit
+    // silently never landed. A consumer that never joined keeps the
+    // group-less form, which is what creates the simple group the manual
+    // assignment path commits into.
+    let (generation, member_id) = if self.member_epoch > 0 &&
+      !self.member_id.is_empty() {
+      (self.member_epoch, self.member_id)
+    } else {
+      (-1, "")
+    }
     let results = conn.offset_commit(
       group_id,
-      -1, // generation / member epoch: group-less commit
-      "",
+      generation,
+      member_id,
       topics=[
         { name: self.topic, topic_id: self.topic_id, partitions: entries, },
       ],

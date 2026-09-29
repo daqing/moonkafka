@@ -51,15 +51,16 @@ pub fn encode_share_group_heartbeat_request(
 
 ///|
 /// One share-group heartbeat outcome: identity/epoch reconciliation,
-/// the server's heartbeat interval, and the (possibly empty) topic
-/// assignment.
+/// the server's heartbeat interval, and the topic assignment. As on the
+/// consumer-group heartbeat, a None assignment is the coordinator saying
+/// it has nothing new, so the member keeps the one it has.
 pub struct ShareGroupHeartbeatResult {
   error_code : Int
   error_message : String?
   member_id : String
   member_epoch : Int
   heartbeat_interval_ms : Int
-  assignment : Array[ShareHeartbeatTopicPartitions]
+  assignment : Array[ShareHeartbeatTopicPartitions]?
 } derive(@debug.Debug)
 
 ///|
@@ -74,7 +75,8 @@ pub fn decode_share_group_heartbeat_response(
   let member_epoch = d.read_i32()
   let heartbeat_interval_ms = d.read_i32()
   let assignment : Array[ShareHeartbeatTopicPartitions] = []
-  if d.read_i8() >= 0 {
+  let has_assignment = d.read_i8()
+  if has_assignment >= 0 {
     let topics = d.read_compact_len()
     for _ in 0..<topics {
       let topic_id = Uuid::from_bytes(d.read_bytes(16))
@@ -96,7 +98,11 @@ pub fn decode_share_group_heartbeat_response(
       member_id,
       member_epoch,
       heartbeat_interval_ms,
-      assignment,
+      assignment: if has_assignment >= 0 {
+        Some(assignment)
+      } else {
+        None
+      },
     },
     throttle,
   )

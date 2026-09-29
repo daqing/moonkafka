@@ -2625,7 +2625,17 @@ fn fake_consumer_group_heartbeat_request(
   }
   let regex = d.read_compact_nullable_string()
   ignore(d.read_compact_nullable_string()) // server assignor
-  ignore(d.read_i8()) // owned topic partitions: null
+  // Owned topic partitions: a nullable array of structs, so null is a
+  // compact length of -1 rather than a struct presence byte.
+  let owned = d.read_compact_len()
+  for _ in 0..<owned {
+    ignore(d.read_bytes(16)) // topic id
+    let partitions = d.read_compact_len()
+    for _ in 0..<partitions {
+      ignore(d.read_i32())
+    }
+    d.skip_tag_buffer()
+  }
   (group_id, member_id, member_epoch, instance_id, regex)
 }
 

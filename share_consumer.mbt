@@ -353,17 +353,20 @@ async fn ShareConsumer::member_loop(self : ShareConsumer) -> Unit {
     if result.heartbeat_interval_ms > 0 {
       self.heartbeat_interval_ms = result.heartbeat_interval_ms
     }
-    let pairs : Array[(String, Int)] = []
-    for entry in result.assignment {
-      match self.cluster.topic_name(entry.topic_id) {
-        Some(name) =>
-          for partition in entry.partitions {
-            pairs.push((name, partition))
-          }
-        None => ()
+    // No assignment in the response means no change; keep the current one.
+    if result.assignment is Some(entries) {
+      let pairs : Array[(String, Int)] = []
+      for entry in entries {
+        match self.cluster.topic_name(entry.topic_id) {
+          Some(name) =>
+            for partition in entry.partitions {
+              pairs.push((name, partition))
+            }
+          None => ()
+        }
       }
+      self.assignment = pairs
     }
-    self.assignment = pairs
     // Rebuild share sessions when the assignment changes, so the
     // session's partition set follows the assignment.
     self.share_sessions = Map([])

@@ -1257,7 +1257,7 @@ pub struct ConsumerGroupHeartbeatResult {
   member_id : String
   member_epoch : Int
   heartbeat_interval_ms : Int
-  assignment : Array[HeartbeatTopicPartitions]
+  assignment : Array[HeartbeatTopicPartitions]?
 } derive(@debug.Debug)
 
 pub struct CoordinatorInfo {
@@ -1989,7 +1989,7 @@ pub struct ShareGroupHeartbeatResult {
   member_id : String
   member_epoch : Int
   heartbeat_interval_ms : Int
-  assignment : Array[ShareHeartbeatTopicPartitions]
+  assignment : Array[ShareHeartbeatTopicPartitions]?
 } derive(@debug.Debug)
 
 pub(all) struct ShareHeartbeatTopicPartitions {
