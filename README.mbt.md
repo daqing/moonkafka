@@ -197,4 +197,8 @@ Full harness guide: [`docs/5-testing.md`](docs/5-testing.md). Protocol notes:
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE).
+
+The third-party components this library links or redistributes — the MoonBit
+standard library and packages, zlib, and Zstandard — are listed with their
+licenses in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
