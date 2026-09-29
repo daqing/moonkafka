@@ -45,18 +45,20 @@ You can browse and install extra skills here:
 
 ## Versioning
 
-- Every change that touches a version number gets a commit of its own. Bumping
-  `VERSION`, `moon.mod`, or the `CHANGELOG.md` release header is never mixed
-  into a commit made for something else.
+- A version bump travels with the change it belongs to. When a change touches a
+  version number — `VERSION`, `moon.mod`, or the `CHANGELOG.md` release header —
+  the version file goes into the same commit as that change, not into a commit
+  of its own.
 
-- This holds even when the other commit is still local and unpushed: amend is
-  not an exception. Cut a new commit for the version bump.
+- Tagging then points at a commit that already carries the bump, so `git` can
+  check a release's version against its tag directly.
 
 ## Pushing
 
-- `git push` is a serious, outward-facing operation. Only ever run it after an
-  explicit instruction from the user, and never push more often than the
-  threshold below allows.
+- `git push` is a serious, outward-facing operation. It happens only when the
+  user says "push" (or 推送) in the conversation. Indirect phrasing — "looks
+  good", "let's sync" — is not authorization, so confirm before treating it as
+  one.
 
 - Right after committing, count how many commits the remote does not yet have:
 
@@ -68,12 +70,13 @@ You can browse and install extra skills here:
   this repo's feature branches generally have none — `git rev-parse @{upstream}`
   just fails there — so the explicit `origin/main` is the reliable form.)
 
-  - **10 or fewer** — stop. Do not push, and do not ask whether to push.
-  - **More than 10** — ask the user whether to push, and wait for their
-    confirmation before running it.
+  - **Fewer than 10** — stop. Do not push, and do not raise it.
+  - **10 or more** — say that unpushed commits have piled up and suggest
+    pushing, but only say it. Do not push.
 
 - The count is of unpushed commits, not of the branch's total history. A commit
-  made on a branch that is already in sync is 1, which is never a reason to ask.
+  made on a branch that is already in sync is 1, which never reaches the
+  threshold.
 
 ## Tooling
 
