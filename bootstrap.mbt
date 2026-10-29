@@ -44,21 +44,22 @@ pub async fn connect_bootstrap(
   )
   for _ in 0..<n {
     let addr = servers.next()
-    match dial(addr, client_id, timeout_ms, use_tls, tls) {
-      Ok(conn) => {
-        // SASL runs before the connection is handed out; an authentication
-        // failure is NOT a dial failure, so it propagates without failover.
-        match sasl {
-          Some(sasl) => conn.authenticate(sasl, timeout_ms~)
-          None => ()
-        }
-        // Every connection negotiates API versions, like the Java client:
-        // later requests on this connection pick versions from the ranges.
-        conn.negotiate_api_versions(timeout_ms~)
-        return conn
+    let conn = try dial(addr, client_id, timeout_ms, use_tls, tls) catch {
+      e => {
+        last_error = e
+        continue
       }
-      Err(e) => last_error = e
     }
+    // SASL runs before the connection is handed out; an authentication
+    // failure is NOT a dial failure, so it propagates without failover.
+    match sasl {
+      Some(sasl) => conn.authenticate(sasl, timeout_ms~)
+      None => ()
+    }
+    // Every connection negotiates API versions, like the Java client:
+    // later requests on this connection pick versions from the ranges.
+    conn.negotiate_api_versions(timeout_ms~)
+    return conn
   }
   raise TransportError::ConnectionClosed(
     "all \{n} bootstrap servers failed; last error: \{last_error}",
@@ -66,33 +67,26 @@ pub async fn connect_bootstrap(
 }
 
 ///|
-/// The Result escapes to the caller as data, so Ok/Err wrapping is the
-/// point of this helper rather than a mechanical try? replacement.
 async fn dial(
   addr : HostPort,
   client_id : String,
   timeout_ms : Int,
   use_tls : Bool,
   tls : TlsClientOptions?,
-) -> Result[BrokerConnection, Error] {
+) -> BrokerConnection raise {
   // Without explicit TLS options, a TLS protocol still gets defaults whose
   // server name is the dialed host.
   let tls_opts = match tls {
     Some(opts) => Some(opts)
     None => if use_tls { Some(TlsClientOptions::new(addr.host)) } else { None }
   }
-  try
-    @async.with_timeout(timeout_ms, () => {
-      BrokerConnection::connect(
-        addr.host,
-        addr.port,
-        client_id~,
-        timeout_ms~,
-        tls=tls_opts,
-      )
-    })
-    |> Ok
-  catch {
-    e => Err(e)
-  }
+  @async.with_timeout(timeout_ms, () => {
+    BrokerConnection::connect(
+      addr.host,
+      addr.port,
+      client_id~,
+      timeout_ms~,
+      tls=tls_opts,
+    )
+  })
 }
