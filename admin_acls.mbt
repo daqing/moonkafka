@@ -9,145 +9,145 @@
 
 ///|
 /// ACL resource types (ResourceType byte values).
-pub const ACL_RESOURCE_UNKNOWN : Int = 0
+pub const ACL_RESOURCE_UNKNOWN : Int32 = 0
 
 ///|
-pub const ACL_RESOURCE_ANY : Int = 1
+pub const ACL_RESOURCE_ANY : Int32 = 1
 
 ///|
-pub const ACL_RESOURCE_TOPIC : Int = 2
+pub const ACL_RESOURCE_TOPIC : Int32 = 2
 
 ///|
-pub const ACL_RESOURCE_GROUP : Int = 3
+pub const ACL_RESOURCE_GROUP : Int32 = 3
 
 ///|
-pub const ACL_RESOURCE_CLUSTER : Int = 4
+pub const ACL_RESOURCE_CLUSTER : Int32 = 4
 
 ///|
-pub const ACL_RESOURCE_TRANSACTIONAL_ID : Int = 5
+pub const ACL_RESOURCE_TRANSACTIONAL_ID : Int32 = 5
 
 ///|
-pub const ACL_RESOURCE_DELEGATION_TOKEN : Int = 6
+pub const ACL_RESOURCE_DELEGATION_TOKEN : Int32 = 6
 
 ///|
 /// v3 and newer brokers.
-pub const ACL_RESOURCE_USER : Int = 7
+pub const ACL_RESOURCE_USER : Int32 = 7
 
 ///|
 /// Resource pattern types (PatternType byte values).
-pub const ACL_PATTERN_UNKNOWN : Int = 0
+pub const ACL_PATTERN_UNKNOWN : Int32 = 0
 
 ///|
-pub const ACL_PATTERN_ANY : Int = 1
+pub const ACL_PATTERN_ANY : Int32 = 1
 
 ///|
 /// MATCH in filters; never describes a stored binding.
-pub const ACL_PATTERN_MATCH : Int = 2
+pub const ACL_PATTERN_MATCH : Int32 = 2
 
 ///|
-pub const ACL_PATTERN_LITERAL : Int = 3
+pub const ACL_PATTERN_LITERAL : Int32 = 3
 
 ///|
-pub const ACL_PATTERN_PREFIXED : Int = 4
+pub const ACL_PATTERN_PREFIXED : Int32 = 4
 
 ///|
 /// ACL operations (AclOperation byte values).
-pub const ACL_OPERATION_UNKNOWN : Int = 0
+pub const ACL_OPERATION_UNKNOWN : Int32 = 0
 
 ///|
-pub const ACL_OPERATION_ANY : Int = 1
+pub const ACL_OPERATION_ANY : Int32 = 1
 
 ///|
-pub const ACL_OPERATION_ALL : Int = 2
+pub const ACL_OPERATION_ALL : Int32 = 2
 
 ///|
-pub const ACL_OPERATION_READ : Int = 3
+pub const ACL_OPERATION_READ : Int32 = 3
 
 ///|
-pub const ACL_OPERATION_WRITE : Int = 4
+pub const ACL_OPERATION_WRITE : Int32 = 4
 
 ///|
-pub const ACL_OPERATION_CREATE : Int = 5
+pub const ACL_OPERATION_CREATE : Int32 = 5
 
 ///|
-pub const ACL_OPERATION_DELETE : Int = 6
+pub const ACL_OPERATION_DELETE : Int32 = 6
 
 ///|
-pub const ACL_OPERATION_ALTER : Int = 7
+pub const ACL_OPERATION_ALTER : Int32 = 7
 
 ///|
-pub const ACL_OPERATION_DESCRIBE : Int = 8
+pub const ACL_OPERATION_DESCRIBE : Int32 = 8
 
 ///|
-pub const ACL_OPERATION_CLUSTER_ACTION : Int = 9
+pub const ACL_OPERATION_CLUSTER_ACTION : Int32 = 9
 
 ///|
-pub const ACL_OPERATION_DESCRIBE_CONFIGS : Int = 10
+pub const ACL_OPERATION_DESCRIBE_CONFIGS : Int32 = 10
 
 ///|
-pub const ACL_OPERATION_ALTER_CONFIGS : Int = 11
+pub const ACL_OPERATION_ALTER_CONFIGS : Int32 = 11
 
 ///|
-pub const ACL_OPERATION_IDEMPOTENT_WRITE : Int = 12
+pub const ACL_OPERATION_IDEMPOTENT_WRITE : Int32 = 12
 
 ///|
-pub const ACL_OPERATION_CREATE_TOKENS : Int = 13
+pub const ACL_OPERATION_CREATE_TOKENS : Int32 = 13
 
 ///|
-pub const ACL_OPERATION_DESCRIBE_TOKENS : Int = 14
+pub const ACL_OPERATION_DESCRIBE_TOKENS : Int32 = 14
 
 ///|
 /// KIP-939 era; supported by 4.3 brokers.
-pub const ACL_OPERATION_TWO_PHASE_COMMIT : Int = 15
+pub const ACL_OPERATION_TWO_PHASE_COMMIT : Int32 = 15
 
 ///|
 /// ACL permission types (AclPermissionType byte values).
-pub const ACL_PERMISSION_UNKNOWN : Int = 0
+pub const ACL_PERMISSION_UNKNOWN : Int32 = 0
 
 ///|
-pub const ACL_PERMISSION_ANY : Int = 1
+pub const ACL_PERMISSION_ANY : Int32 = 1
 
 ///|
-pub const ACL_PERMISSION_DENY : Int = 2
+pub const ACL_PERMISSION_DENY : Int32 = 2
 
 ///|
-pub const ACL_PERMISSION_ALLOW : Int = 3
+pub const ACL_PERMISSION_ALLOW : Int32 = 3
 
 ///|
 /// One ACL binding: who may do what with which resource from where.
 pub(all) struct AclBinding {
-  resource_type : Int
+  resource_type : Int32
   resource_name : String
-  pattern_type : Int
+  pattern_type : Int32
   principal : String
   host : String
-  operation : Int
-  permission_type : Int
+  operation : Int32
+  permission_type : Int32
 } derive(@debug.Debug)
 
 ///|
 /// One ACL to create.
 pub(all) struct AclCreation {
-  resource_type : Int
+  resource_type : Int32
   resource_name : String
-  pattern_type : Int
+  pattern_type : Int32
   principal : String
   host : String
-  operation : Int
-  permission_type : Int
+  operation : Int32
+  permission_type : Int32
 } derive(@debug.Debug)
 
 ///|
 /// Filter describing which ACLs to list or delete: a None field matches
 /// anything; ANY/MATCH enum values widen the match.
 pub(all) struct AclFilter {
-  resource_type : Int
+  resource_type : Int32
   resource_name : String?
-  pattern_type : Int
+  pattern_type : Int32
   principal : String?
   host : String?
-  operation : Int
-  permission_type : Int
+  operation : Int32
+  permission_type : Int32
 } derive(@debug.Debug)
 
 ///|
@@ -198,7 +198,7 @@ fn decode_acl_binding(d : @buf.Decoder) -> AclBinding raise {
 ///|
 /// One ACL creation result.
 pub struct CreateAclsResult {
-  error_code : Int
+  error_code : Int32
   error_message : String?
 } derive(@debug.Debug)
 
@@ -218,7 +218,7 @@ pub fn encode_create_acls_request(creations : Array[AclCreation]) -> Bytes {
 /// Decode a CreateAcls v2/v3 response body: one result per creation.
 pub fn decode_create_acls_response(
   d : @buf.Decoder,
-) -> (Array[CreateAclsResult], Int) raise {
+) -> (Array[CreateAclsResult], Int32) raise {
   let throttle = d.read_i32()
   let out : Array[CreateAclsResult] = []
   let n = d.read_compact_len()
@@ -236,7 +236,7 @@ pub fn decode_create_acls_response(
 pub async fn BrokerConnection::create_acls(
   self : BrokerConnection,
   creations : Array[AclCreation],
-  timeout_ms? : Int = 30000,
+  timeout_ms~ : Int32 = 30000,
 ) -> Array[CreateAclsResult] {
   let d = self.request(
     API_CREATE_ACLS,
@@ -254,21 +254,21 @@ pub async fn BrokerConnection::create_acls(
 pub(all) struct AclDescription {
   principal : String
   host : String
-  operation : Int
-  permission_type : Int
+  operation : Int32
+  permission_type : Int32
 } derive(@debug.Debug)
 
 ///|
 pub struct DescribedAclResource {
-  resource_type : Int
+  resource_type : Int32
   resource_name : String
-  pattern_type : Int
+  pattern_type : Int32
   acls : Array[AclDescription]
 } derive(@debug.Debug)
 
 ///|
 pub struct DescribeAclsResult {
-  error_code : Int
+  error_code : Int32
   error_message : String?
   resources : Array[DescribedAclResource]
 } derive(@debug.Debug)
@@ -286,7 +286,7 @@ pub fn encode_describe_acls_request(filter : AclFilter) -> Bytes {
 /// Decode a DescribeAcls v2/v3 response body.
 pub fn decode_describe_acls_response(
   d : @buf.Decoder,
-) -> (DescribeAclsResult, Int) raise {
+) -> (DescribeAclsResult, Int32) raise {
   let throttle = d.read_i32()
   let error_code = d.read_i16()
   let error_message = d.read_compact_nullable_string()
@@ -317,7 +317,7 @@ pub fn decode_describe_acls_response(
 pub async fn BrokerConnection::describe_acls(
   self : BrokerConnection,
   filter : AclFilter,
-  timeout_ms? : Int = 30000,
+  timeout_ms~ : Int32 = 30000,
 ) -> DescribeAclsResult {
   let d = self.request(
     API_DESCRIBE_ACLS,
@@ -333,14 +333,14 @@ pub async fn BrokerConnection::describe_acls(
 ///|
 /// One ACL a delete filter matched, with its own deletion error.
 pub struct DeletedAcl {
-  error_code : Int
+  error_code : Int32
   error_message : String?
   binding : AclBinding
 } derive(@debug.Debug)
 
 ///|
 pub struct DeleteAclsFilterResult {
-  error_code : Int
+  error_code : Int32
   error_message : String?
   matching_acls : Array[DeletedAcl]
 } derive(@debug.Debug)
@@ -362,7 +362,7 @@ pub fn encode_delete_acls_request(filters : Array[AclFilter]) -> Bytes {
 /// carrying the ACLs it matched and deleted.
 pub fn decode_delete_acls_response(
   d : @buf.Decoder,
-) -> (Array[DeleteAclsFilterResult], Int) raise {
+) -> (Array[DeleteAclsFilterResult], Int32) raise {
   let throttle = d.read_i32()
   let out : Array[DeleteAclsFilterResult] = []
   let n = d.read_compact_len()
@@ -392,7 +392,7 @@ pub fn decode_delete_acls_response(
 pub async fn BrokerConnection::delete_acls(
   self : BrokerConnection,
   filters : Array[AclFilter],
-  timeout_ms? : Int = 30000,
+  timeout_ms~ : Int32 = 30000,
 ) -> Array[DeleteAclsFilterResult] {
   let d = self.request(
     API_DELETE_ACLS,

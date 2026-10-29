@@ -17,15 +17,15 @@
 
 ///|
 /// XXH32 (the 32-bit xxHash) as the LZ4 frame spec requires it.
-pub fn xxh32(data : Bytes, seed : UInt) -> UInt {
-  let prime1 : UInt = 2654435761U
-  let prime2 : UInt = 2246822519U
-  let prime3 : UInt = 3266489917U
-  let prime4 : UInt = 668265263U
-  let prime5 : UInt = 374761393U
+pub fn xxh32(data : Bytes, seed : UInt32) -> UInt32 {
+  let prime1 : UInt32 = 2654435761U
+  let prime2 : UInt32 = 2246822519U
+  let prime3 : UInt32 = 3266489917U
+  let prime4 : UInt32 = 668265263U
+  let prime5 : UInt32 = 374761393U
   let n = data.length()
   let mut i = 0
-  let mut acc : UInt = if n >= 16 {
+  let mut acc : UInt32 = if n >= 16 {
     i = 16
     let a = read_u32_le(data, 0).add(seed).mul(prime1)
     let b = read_u32_le(data, 4).add(seed).mul(prime1)
@@ -58,7 +58,7 @@ pub fn xxh32(data : Bytes, seed : UInt) -> UInt {
 }
 
 ///|
-fn read_u32_le(data : Bytes, at : Int) -> UInt {
+fn read_u32_le(data : Bytes, at : Int32) -> UInt32 {
   data[at].to_uint() |
   (data[at + 1].to_uint() << 8) |
   (data[at + 2].to_uint() << 16) |
@@ -66,14 +66,18 @@ fn read_u32_le(data : Bytes, at : Int) -> UInt {
 }
 
 ///|
-fn write_u32_le(e : @buf.Encoder, v : UInt) -> Unit {
+fn write_u32_le(e : @buf.Encoder, v : UInt32) -> Unit {
   for shift in [0, 8, 16, 24] {
     e.write_byte(((v >> shift) & 0xFFU).to_byte())
   }
 }
 
 ///|
-fn lz4_expect(data : Bytes, pos : Int, n : Int) -> Unit raise @buf.DecodeError {
+fn lz4_expect(
+  data : Bytes,
+  pos : Int32,
+  n : Int32,
+) -> Unit raise @buf.DecodeError {
   if pos > data.length() - n {
     raise @buf.Malformed("lz4 input truncated")
   }
@@ -85,7 +89,7 @@ fn lz4_expect(data : Bytes, pos : Int, n : Int) -> Unit raise @buf.DecodeError {
 /// equality check is skipped.
 pub fn lz4_decode_block(
   data : Bytes,
-  expected : Int,
+  expected : Int32,
 ) -> Bytes raise @buf.DecodeError {
   let n = data.length()
   let cap = if expected < 0 { 64 } else { expected }
@@ -158,8 +162,8 @@ pub fn lz4_encode_block(data : Bytes) -> Bytes {
     return e.to_bytes()
   }
   let table_size = 1 << 16
-  let table : Array[Int] = Array::make(table_size, 0)
-  let hash = fn(i : Int) -> Int {
+  let table : Array[Int32] = Array::make(table_size, 0)
+  let hash = fn(i : Int32) -> Int32 {
     let v = data[i].to_uint() |
       (data[i + 1].to_uint() << 8) |
       (data[i + 2].to_uint() << 16) |
@@ -325,8 +329,8 @@ pub fn lz4_compress(data : Bytes) -> Bytes {
   let e = @buf.Encoder::new()
   write_u32_le(e, 0x184D2204U)
   // FLG: version 1, block independent, no checksums, no content size.
-  let flg : Int = (1 << 6) | (1 << 5)
-  let bd : Int = 0x40 // 64KB max block size
+  let flg : Int32 = (1 << 6) | (1 << 5)
+  let bd : Int32 = 0x40 // 64KB max block size
   e.write_byte(flg.to_byte())
   e.write_byte(bd.to_byte())
   // HC: XXH32 over (FLG, BD), folded to one byte.

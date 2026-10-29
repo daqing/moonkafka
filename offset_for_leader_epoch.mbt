@@ -8,9 +8,9 @@
 ///|
 /// One partition's epoch end offset.
 pub struct EpochEndOffset {
-  partition : Int
-  error_code : Int
-  leader_epoch : Int
+  partition : Int32
+  error_code : Int32
+  leader_epoch : Int32
   end_offset : Int64
 } derive(@debug.Debug)
 
@@ -20,8 +20,8 @@ pub struct EpochEndOffset {
 /// consumer sends its current leader epoch for fencing).
 pub fn encode_offset_for_leader_epoch_request(
   topic : String,
-  partitions : Array[(Int, Int, Int)],
-  timeout_ms? : Int = 0,
+  partitions : Array[(Int32, Int32, Int32)],
+  timeout_ms~ : Int32 = 0,
 ) -> Bytes {
   let body = @buf.Encoder::new()
   body.write_i32(-1) // replica_id: consumer
@@ -47,7 +47,7 @@ pub fn encode_offset_for_leader_epoch_request(
 /// means the broker has no data for the requested epoch.
 pub fn decode_offset_for_leader_epoch_response(
   d : @buf.Decoder,
-) -> (Array[EpochEndOffset], Int) raise {
+) -> (Array[EpochEndOffset], Int32) raise {
   let throttle = d.read_i32()
   let out : Array[EpochEndOffset] = []
   let n = d.read_compact_len()
@@ -72,8 +72,8 @@ pub fn decode_offset_for_leader_epoch_response(
 pub async fn BrokerConnection::offset_for_leader_epoch(
   self : BrokerConnection,
   topic : String,
-  partitions : Array[(Int, Int, Int)],
-  timeout_ms? : Int = 30000,
+  partitions : Array[(Int32, Int32, Int32)],
+  timeout_ms~ : Int32 = 30000,
 ) -> Array[EpochEndOffset] {
   let version = self.api_version(API_OFFSET_FOR_LEADER_EPOCH)
   let d = self.request(

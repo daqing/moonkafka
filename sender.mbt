@@ -24,7 +24,7 @@ priv enum SendRound {
 fn batch_expired(
   batch : ProducerBatch,
   now_ms : Int64,
-  delivery_timeout_ms : Int,
+  delivery_timeout_ms : Int32,
 ) -> Bool {
   now_ms >= batch.created_ms + delivery_timeout_ms.to_int64()
 }
@@ -33,7 +33,7 @@ fn batch_expired(
 /// The sender's tick when no batch is ready. Bounds the added latency of
 /// linger_ms=0 producers; precise wakeup on first append lands with the
 /// D6 background-task polish.
-const SENDER_TICK_MS : Int = 5
+const SENDER_TICK_MS : Int32 = 5
 
 ///|
 async fn Producer::sender_loop(self : Producer) -> Unit {
@@ -75,7 +75,7 @@ async fn Producer::sender_loop(self : Producer) -> Unit {
     }
     // Group by partition leader from the cached metadata; batches whose
     // leader is unknown wait a round after a metadata refresh.
-    let by_leader : Map[Int, Array[(Int, ProducerBatch)]] = Map([])
+    let by_leader : Map[Int32, Array[(Int32, ProducerBatch)]] = Map([])
     let orphaned : Array[ProducerBatch] = []
     for batch in ready {
       match self.leader_of(batch.partition) {
@@ -113,7 +113,7 @@ async fn Producer::sender_loop(self : Producer) -> Unit {
 
 ///|
 /// The partition leader from the cached metadata, if known.
-fn Producer::leader_of(self : Producer, partition : Int) -> Int? {
+fn Producer::leader_of(self : Producer, partition : Int32) -> Int32? {
   match self.cluster.topic(self.topic) {
     Some(t) =>
       for p in t.partitions {
@@ -133,8 +133,8 @@ fn Producer::leader_of(self : Producer, partition : Int) -> Int? {
 /// their batches' senders immediately.
 async fn Producer::send_round(
   self : Producer,
-  leader : Int,
-  entries : Array[(Int, ProducerBatch)],
+  leader : Int32,
+  entries : Array[(Int32, ProducerBatch)],
 ) -> SendRound {
   // The leader must be known from metadata; dial failures are retriable.
   guard self.cluster.broker(leader) is Some(_) else {
@@ -144,7 +144,7 @@ async fn Producer::send_round(
     return RoundRetry
   }
   // Resolve the batch -> wire bytes once per round.
-  let partitions : Array[(Int, Bytes)] = []
+  let partitions : Array[(Int32, Bytes)] = []
   for entry in entries {
     entry.1.attempts += 1
     partitions.push((entry.0, entry.1.builder.to_bytes()))
@@ -221,11 +221,11 @@ async fn Producer::send_round(
   }
   // Map results back per partition; entries the broker never answered
   // (retriable codes included) retry next round.
-  let by_partition : Map[Int, ProducerBatch] = Map([])
+  let by_partition : Map[Int32, ProducerBatch] = Map([])
   for entry in entries {
     by_partition[entry.0] = entry.1
   }
-  let handled : Map[Int, Bool] = Map([])
+  let handled : Map[Int32, Bool] = Map([])
   let mut retried = false
   for result in results {
     match by_partition.get(result.partition) {
@@ -291,8 +291,8 @@ async fn Producer::send_round(
 /// or awaiting a response.
 async fn Producer::send_acks0(
   self : Producer,
-  leader : Int,
-  partitions : Array[(Int, Bytes)],
+  leader : Int32,
+  partitions : Array[(Int32, Bytes)],
 ) -> Bool {
   let conn = self.cluster.connection(leader) catch { _ => return false }
   let version = conn.api_version(API_PRODUCE)

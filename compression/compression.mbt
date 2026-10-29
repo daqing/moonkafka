@@ -11,7 +11,7 @@
 ///|
 pub(all) struct Codec {
   /// RecordBatch attribute-bit value (0-4).
-  id : Int
+  id : Int32
   name : String
   compress : (Bytes) -> Bytes raise @buf.DecodeError
   decompress : (Bytes) -> Bytes raise @buf.DecodeError
@@ -52,7 +52,7 @@ pub fn codecs() -> Array[Codec] {
 ///|
 /// The codec for a RecordBatch attribute-bit value, if one exists
 /// (values above 4 are reserved).
-pub fn codec_by_id(id : Int) -> Codec? {
+pub fn codec_by_id(id : Int32) -> Codec? {
   for codec in codecs() {
     if codec.id == id {
       return Some(codec)

@@ -13,26 +13,26 @@
 ///|
 /// One partition's commit outcome: (partition index, error code).
 pub struct OffsetCommitPartitionResult {
-  partition : Int
-  error_code : Int
+  partition : Int32
+  error_code : Int32
 } derive(@debug.Debug)
 
 ///|
 /// One fetched committed offset.
 pub(all) struct CommittedOffset {
   topic : String
-  partition : Int
+  partition : Int32
   /// -1 when the partition has no committed offset.
   offset : Int64
-  leader_epoch : Int
-  error_code : Int
+  leader_epoch : Int32
+  error_code : Int32
 } derive(@debug.Debug)
 
 ///|
 /// One group's OffsetFetch result.
 pub struct OffsetFetchGroupResult {
   group_id : String
-  error_code : Int
+  error_code : Int32
   partitions : Array[CommittedOffset]
 } derive(@debug.Debug)
 
@@ -43,7 +43,7 @@ pub struct OffsetFetchGroupResult {
 pub(all) struct CommitTopic {
   name : String
   topic_id : Uuid
-  partitions : Array[(Int, Int64, Int)]
+  partitions : Array[(Int32, Int64, Int32)]
 } derive(@debug.Debug)
 
 ///|
@@ -51,9 +51,9 @@ pub(all) struct CommitTopic {
 /// member_epoch` is -1 and `member_id` empty for group-less commits;
 /// KIP-848 members send their epoch.
 pub fn encode_offset_commit_request(
-  version : Int,
+  version : Int32,
   group_id : String,
-  generation_id_or_member_epoch : Int,
+  generation_id_or_member_epoch : Int32,
   member_id : String,
   group_instance_id : String?,
   topics : Array[CommitTopic],
@@ -95,9 +95,9 @@ pub fn encode_offset_commit_request(
 /// topic name present through v9 and the topic id from v10): flat
 /// per-partition results plus the throttle hint.
 pub fn decode_offset_commit_response(
-  version : Int,
+  version : Int32,
   d : @buf.Decoder,
-) -> (Array[OffsetCommitPartitionResult], Int) raise {
+) -> (Array[OffsetCommitPartitionResult], Int32) raise {
   let throttle = d.read_i32()
   let out : Array[OffsetCommitPartitionResult] = []
   let n = d.read_compact_len()
@@ -124,11 +124,11 @@ pub fn decode_offset_commit_response(
 pub async fn BrokerConnection::offset_commit(
   self : BrokerConnection,
   group_id : String,
-  generation_id_or_member_epoch : Int,
+  generation_id_or_member_epoch : Int32,
   member_id : String,
-  group_instance_id? : String? = None,
+  group_instance_id~ : String? = None,
   topics~ : Array[CommitTopic],
-  timeout_ms? : Int = 30000,
+  timeout_ms~ : Int32 = 30000,
 ) -> Array[OffsetCommitPartitionResult] {
   let version = self.api_version(API_OFFSET_COMMIT)
   let d = self.request(
@@ -152,7 +152,7 @@ pub async fn BrokerConnection::offset_commit(
 pub(all) struct FetchOffsetTopic {
   name : String
   topic_id : Uuid
-  partitions : Array[Int]
+  partitions : Array[Int32]
 } derive(@debug.Debug)
 
 ///|
@@ -160,12 +160,12 @@ pub(all) struct FetchOffsetTopic {
 /// `member_id`/`member_epoch` identify a KIP-848 member (v9+); a
 /// group-less fetch sends ""/-1.
 pub fn encode_offset_fetch_request(
-  version : Int,
+  version : Int32,
   group_id : String,
   member_id : String,
-  member_epoch : Int,
+  member_epoch : Int32,
   topics : Array[FetchOffsetTopic],
-  require_stable? : Bool = false,
+  require_stable~ : Bool = false,
 ) -> Bytes raise {
   if version < 8 || version > 10 {
     raise ProtocolError::ProtocolError(
@@ -207,9 +207,9 @@ pub fn encode_offset_fetch_request(
 /// Decode an OffsetFetch v8/v9/v10 response body: per-group results
 /// (partitions flattened across topics) plus the throttle hint.
 pub fn decode_offset_fetch_response(
-  version : Int,
+  version : Int32,
   d : @buf.Decoder,
-) -> (Array[OffsetFetchGroupResult], Int) raise {
+) -> (Array[OffsetFetchGroupResult], Int32) raise {
   let throttle = d.read_i32()
   let out : Array[OffsetFetchGroupResult] = []
   let groups = d.read_compact_len()
@@ -254,11 +254,11 @@ pub fn decode_offset_fetch_response(
 pub async fn BrokerConnection::offset_fetch(
   self : BrokerConnection,
   group_id : String,
-  member_id? : String = "",
-  member_epoch? : Int = -1,
+  member_id~ : String = "",
+  member_epoch~ : Int32 = -1,
   topics~ : Array[FetchOffsetTopic],
-  require_stable? : Bool = false,
-  timeout_ms? : Int = 30000,
+  require_stable~ : Bool = false,
+  timeout_ms~ : Int32 = 30000,
 ) -> Array[OffsetFetchGroupResult] {
   let version = self.api_version(API_OFFSET_FETCH)
   let d = self.request(

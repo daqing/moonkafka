@@ -22,8 +22,8 @@ pub struct JoinGroupMember {
 
 ///|
 pub struct JoinGroupResult {
-  error_code : Int
-  generation_id : Int
+  error_code : Int32
+  generation_id : Int32
   protocol_name : String
   leader_id : String
   member_id : String
@@ -37,10 +37,10 @@ pub struct JoinGroupResult {
 /// assignor names this member supports with subscription metadata.
 pub fn encode_join_group_request(
   group_id : String,
-  session_timeout_ms : Int,
-  rebalance_timeout_ms : Int,
+  session_timeout_ms : Int32,
+  rebalance_timeout_ms : Int32,
   member_id : String,
-  group_instance_id? : String? = None,
+  group_instance_id~ : String? = None,
   protocols~ : Array[JoinGroupProtocol],
 ) -> Bytes {
   let body = @buf.Encoder::new()
@@ -66,7 +66,7 @@ pub fn encode_join_group_request(
 /// Decode a JoinGroup v9 response body.
 pub fn decode_join_group_response(
   d : @buf.Decoder,
-) -> (JoinGroupResult, Int) raise {
+) -> (JoinGroupResult, Int32) raise {
   let throttle = d.read_i32()
   let error_code = d.read_i16()
   let generation_id = d.read_i32()
@@ -96,12 +96,12 @@ pub fn decode_join_group_response(
 pub async fn BrokerConnection::join_group(
   self : BrokerConnection,
   group_id : String,
-  session_timeout_ms : Int,
-  rebalance_timeout_ms : Int,
+  session_timeout_ms : Int32,
+  rebalance_timeout_ms : Int32,
   member_id : String,
-  group_instance_id? : String? = None,
+  group_instance_id~ : String? = None,
   protocols~ : Array[JoinGroupProtocol],
-  timeout_ms? : Int = 30000,
+  timeout_ms~ : Int32 = 30000,
 ) -> JoinGroupResult {
   let version = self.api_version(API_JOIN_GROUP)
   let d = self.request(
@@ -131,7 +131,7 @@ pub(all) struct SyncGroupAssignment {
 
 ///|
 pub struct SyncGroupResult {
-  error_code : Int
+  error_code : Int32
   protocol_name : String
   assignment : Bytes
 } derive(@debug.Debug)
@@ -141,10 +141,10 @@ pub struct SyncGroupResult {
 /// assignment; followers send an empty list and receive their own.
 pub fn encode_sync_group_request(
   group_id : String,
-  generation_id : Int,
+  generation_id : Int32,
   member_id : String,
-  group_instance_id? : String? = None,
-  protocol_name? : String = "",
+  group_instance_id~ : String? = None,
+  protocol_name~ : String = "",
   assignments~ : Array[SyncGroupAssignment],
 ) -> Bytes {
   let body = @buf.Encoder::new()
@@ -175,7 +175,7 @@ pub fn encode_sync_group_request(
 /// Decode a SyncGroup v5 response body.
 pub fn decode_sync_group_response(
   d : @buf.Decoder,
-) -> (SyncGroupResult, Int) raise {
+) -> (SyncGroupResult, Int32) raise {
   let throttle = d.read_i32()
   let error_code = d.read_i16()
   let _protocol_type = d.read_compact_nullable_string()
@@ -190,12 +190,12 @@ pub fn decode_sync_group_response(
 pub async fn BrokerConnection::sync_group(
   self : BrokerConnection,
   group_id : String,
-  generation_id : Int,
+  generation_id : Int32,
   member_id : String,
-  group_instance_id? : String? = None,
-  protocol_name? : String = "",
+  group_instance_id~ : String? = None,
+  protocol_name~ : String = "",
   assignments~ : Array[SyncGroupAssignment],
-  timeout_ms? : Int = 30000,
+  timeout_ms~ : Int32 = 30000,
 ) -> SyncGroupResult {
   let version = self.api_version(API_SYNC_GROUP)
   let d = self.request(
@@ -220,9 +220,9 @@ pub async fn BrokerConnection::sync_group(
 /// Encode a Heartbeat v4 request body.
 pub fn encode_heartbeat_request(
   group_id : String,
-  generation_id : Int,
+  generation_id : Int32,
   member_id : String,
-  group_instance_id? : String? = None,
+  group_instance_id~ : String? = None,
 ) -> Bytes {
   let body = @buf.Encoder::new()
   body.write_compact_string(group_id)
@@ -235,7 +235,7 @@ pub fn encode_heartbeat_request(
 
 ///|
 /// Decode a Heartbeat v4 response body: just the error code.
-pub fn decode_heartbeat_response(d : @buf.Decoder) -> (Int, Int) raise {
+pub fn decode_heartbeat_response(d : @buf.Decoder) -> (Int32, Int32) raise {
   let throttle = d.read_i32()
   let error_code = d.read_i16()
   d.skip_tag_buffer()
@@ -246,11 +246,11 @@ pub fn decode_heartbeat_response(d : @buf.Decoder) -> (Int, Int) raise {
 pub async fn BrokerConnection::group_heartbeat(
   self : BrokerConnection,
   group_id : String,
-  generation_id : Int,
+  generation_id : Int32,
   member_id : String,
-  group_instance_id? : String? = None,
-  timeout_ms? : Int = 30000,
-) -> Int {
+  group_instance_id~ : String? = None,
+  timeout_ms~ : Int32 = 30000,
+) -> Int32 {
   let version = self.api_version(API_HEARTBEAT)
   let d = self.request(
     API_HEARTBEAT,
@@ -271,7 +271,7 @@ pub async fn BrokerConnection::group_heartbeat(
 ///|
 pub struct LeaveGroupMemberResult {
   member_id : String
-  error_code : Int
+  error_code : Int32
 } derive(@debug.Debug)
 
 ///|
@@ -280,7 +280,7 @@ pub struct LeaveGroupMemberResult {
 pub fn encode_leave_group_request(
   group_id : String,
   member_id : String,
-  group_instance_id? : String? = None,
+  group_instance_id~ : String? = None,
 ) -> Bytes {
   let body = @buf.Encoder::new()
   body.write_compact_string(group_id)
@@ -298,7 +298,7 @@ pub fn encode_leave_group_request(
 /// member's per-member entry.
 pub fn decode_leave_group_response(
   d : @buf.Decoder,
-) -> (Int, Array[LeaveGroupMemberResult], Int) raise {
+) -> (Int32, Array[LeaveGroupMemberResult], Int32) raise {
   let throttle = d.read_i32()
   let error_code = d.read_i16()
   let n = d.read_compact_len()
@@ -319,9 +319,9 @@ pub async fn BrokerConnection::leave_group(
   self : BrokerConnection,
   group_id : String,
   member_id : String,
-  group_instance_id? : String? = None,
-  timeout_ms? : Int = 30000,
-) -> Int {
+  group_instance_id~ : String? = None,
+  timeout_ms~ : Int32 = 30000,
+) -> Int32 {
   let version = self.api_version(API_LEAVE_GROUP)
   let d = self.request(
     API_LEAVE_GROUP,

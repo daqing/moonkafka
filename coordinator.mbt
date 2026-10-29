@@ -14,7 +14,7 @@ pub(all) enum CoordinatorType {
 } derive(@debug.Debug, Eq)
 
 ///|
-fn CoordinatorType::code(self : CoordinatorType) -> Int {
+fn CoordinatorType::code(self : CoordinatorType) -> Int32 {
   match self {
     Group => 0
     Transaction => 1
@@ -27,10 +27,10 @@ fn CoordinatorType::code(self : CoordinatorType) -> Int {
 /// (COORDINATOR_NOT_AVAILABLE, GROUP_AUTHORIZATION_FAILED, ...).
 pub struct CoordinatorInfo {
   key : String
-  node_id : Int
+  node_id : Int32
   host : String
-  port : Int
-  error_code : Int
+  port : Int32
+  error_code : Int32
   error_message : String?
 } derive(@debug.Debug)
 
@@ -56,7 +56,7 @@ pub fn encode_find_coordinator_request(
 /// key, plus the throttle hint.
 pub fn decode_find_coordinator_response(
   d : @buf.Decoder,
-) -> (Array[CoordinatorInfo], Int) raise {
+) -> (Array[CoordinatorInfo], Int32) raise {
   let throttle = d.read_i32()
   let n = d.read_compact_len()
   let out : Array[CoordinatorInfo] = []
@@ -79,7 +79,7 @@ pub async fn BrokerConnection::find_coordinator(
   self : BrokerConnection,
   keys : Array[String],
   coordinator_type : CoordinatorType,
-  timeout_ms? : Int = 30000,
+  timeout_ms~ : Int32 = 30000,
 ) -> Array[CoordinatorInfo] {
   let version = self.api_version(API_FIND_COORDINATOR)
   let d = self.request(

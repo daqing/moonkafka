@@ -33,11 +33,11 @@ pub const OFFSET_EARLIEST_PENDING_UPLOAD : Int64 = -6L
 /// Encode a ListOffsets v10/v11 request body: one topic, one entry per
 /// partition. `timestamp` is a sentinel or a wall-clock query.
 pub fn encode_list_offsets_request(
-  version : Int,
+  version : Int32,
   topic : String,
   partitions : Array[PartitionInfo],
   timestamp : Int64,
-  timeout_ms? : Int = 0,
+  timeout_ms~ : Int32 = 0,
 ) -> Bytes raise {
   if version < 10 || version > 11 {
     raise ProtocolError::ProtocolError(
@@ -68,9 +68,9 @@ pub fn encode_list_offsets_request(
 /// in milliseconds.
 pub fn decode_list_offsets_response(
   d : @buf.Decoder,
-) -> (Map[Int, Int64], Int) raise {
+) -> (Map[Int32, Int64], Int32) raise {
   let throttle = d.read_i32() // throttle_time_ms
-  let offsets : Map[Int, Int64] = Map([])
+  let offsets : Map[Int32, Int64] = Map([])
   let topic_count = d.read_compact_len()
   for _ in 0..<topic_count {
     let _name = d.read_compact_string()

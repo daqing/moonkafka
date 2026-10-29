@@ -4,7 +4,7 @@
 ///|
 test "pick_common chooses the highest common version" {
   // (driver min, driver max, want, broker min, broker max, expected)
-  let cases : Array[(Int, Int, Int, Int, Int, Int?)] = [
+  let cases : Array[(Int32, Int32, Int32, Int32, Int32, Int32?)] = [
     (12, 16, 16, 0, 20, Some(16)), // broker covers everything: driver ceiling
     (12, 16, 16, 13, 20, Some(16)), // broker floor above driver floor
     (12, 16, 16, 0, 13, Some(13)), // broker max caps below the driver ceiling
@@ -40,8 +40,8 @@ test "driver matrix rows are well-formed" {
 }
 
 ///|
-fn versions_of(pairs : Array[(Int, Int, Int)]) -> BrokerVersions {
-  let ranges : Map[Int, (Int, Int)] = Map([])
+fn versions_of(pairs : Array[(Int32, Int32, Int32)]) -> BrokerVersions {
+  let ranges : Map[Int32, (Int32, Int32)] = Map([])
   for pair in pairs {
     let (key, min, max) = pair
     ranges[key] = (min, max)

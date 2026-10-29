@@ -24,14 +24,14 @@ priv enum MemberKind {
 // revoked topic-partitions before they are dropped, on_assign with the
 // newly gained ones after they are added.
 pub struct RebalanceListener {
-  on_assign : (Array[(String, Int)]) -> Unit
-  on_revoke : (Array[(String, Int)]) -> Unit
+  on_assign : (Array[(String, Int32)]) -> Unit
+  on_revoke : (Array[(String, Int32)]) -> Unit
 }
 
 ///|
 pub fn RebalanceListener::new(
-  on_assign~ : (Array[(String, Int)]) -> Unit,
-  on_revoke~ : (Array[(String, Int)]) -> Unit,
+  on_assign~ : (Array[(String, Int32)]) -> Unit,
+  on_revoke~ : (Array[(String, Int32)]) -> Unit,
 ) -> RebalanceListener {
   { on_assign, on_revoke, }
 }
@@ -248,7 +248,7 @@ pub async fn Consumer::unsubscribe(self : Consumer) -> Unit {
 
 ///|
 /// The topic partitions currently assigned to this member.
-pub fn Consumer::assignment(self : Consumer) -> Array[(String, Int)] {
+pub fn Consumer::assignment(self : Consumer) -> Array[(String, Int32)] {
   self.assignment_pairs()
 }
 
@@ -350,7 +350,7 @@ async fn Consumer::member_loop(self : Consumer) -> Unit {
     // to say, so the member keeps what it has; only an assignment the
     // coordinator actually sent is applied.
     if result.assignment is Some(entries) {
-      let pairs : Array[(String, Int)] = []
+      let pairs : Array[(String, Int32)] = []
       for entry in entries {
         match self.cluster.topic_name(entry.topic_id) {
           Some(name) =>
@@ -364,7 +364,7 @@ async fn Consumer::member_loop(self : Consumer) -> Unit {
     }
     // Sleep the server's interval in tick-sized steps so close()
     // lands promptly.
-    let wait = Int::max(1, self.heartbeat_interval_ms / SENDER_TICK_MS)
+    let wait = Int32::max(1, self.heartbeat_interval_ms / SENDER_TICK_MS)
     for _ in 0..<wait {
       if self.closed || !self.member_active {
         break
@@ -431,10 +431,10 @@ fn Consumer::expanded_subscription(self : Consumer) -> Array[String] {
 /// on_revoke, swap the assignment in, then fire on_assign.
 fn Consumer::set_assignment(
   self : Consumer,
-  pairs : Array[(String, Int)],
+  pairs : Array[(String, Int32)],
 ) -> Unit {
   let current = self.assignment_pairs()
-  let revoked : Array[(String, Int)] = []
+  let revoked : Array[(String, Int32)] = []
   for pair in current {
     let mut kept = false
     for other in pairs {
@@ -446,7 +446,7 @@ fn Consumer::set_assignment(
       revoked.push(pair)
     }
   }
-  let assigned : Array[(String, Int)] = []
+  let assigned : Array[(String, Int32)] = []
   for pair in pairs {
     let mut known = false
     for other in current {
@@ -471,7 +471,10 @@ fn Consumer::set_assignment(
 }
 
 ///|
-fn Consumer::fire_revoke(self : Consumer, pairs : Array[(String, Int)]) -> Unit {
+fn Consumer::fire_revoke(
+  self : Consumer,
+  pairs : Array[(String, Int32)],
+) -> Unit {
   match self.rebalance_listener {
     Some(listener) => (listener.on_revoke)(pairs)
     None => ()
@@ -479,7 +482,7 @@ fn Consumer::fire_revoke(self : Consumer, pairs : Array[(String, Int)]) -> Unit 
 }
 
 ///|
-fn Consumer::assignment_pairs(self : Consumer) -> Array[(String, Int)] {
+fn Consumer::assignment_pairs(self : Consumer) -> Array[(String, Int32)] {
   self.assignment
 }
 
@@ -493,7 +496,7 @@ fn heartbeat_error_detail(message : String?) -> String {
 
 ///|
 /// True when (topic, partition) is in the member's assignment.
-fn Consumer::is_assigned(self : Consumer, partition : Int) -> Bool {
+fn Consumer::is_assigned(self : Consumer, partition : Int32) -> Bool {
   for pair in self.assignment {
     if pair.0 == self.topic && pair.1 == partition {
       return true

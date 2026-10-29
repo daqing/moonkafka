@@ -9,66 +9,66 @@
 
 ///|
 /// Config resource types (ConfigResource.Type byte values).
-pub const CONFIG_RESOURCE_UNKNOWN : Int = 0
+pub const CONFIG_RESOURCE_UNKNOWN : Int32 = 0
 
 ///|
-pub const CONFIG_RESOURCE_TOPIC : Int = 2
+pub const CONFIG_RESOURCE_TOPIC : Int32 = 2
 
 ///|
-pub const CONFIG_RESOURCE_BROKER : Int = 4
+pub const CONFIG_RESOURCE_BROKER : Int32 = 4
 
 ///|
-pub const CONFIG_RESOURCE_BROKER_LOGGER : Int = 8
+pub const CONFIG_RESOURCE_BROKER_LOGGER : Int32 = 8
 
 ///|
-pub const CONFIG_RESOURCE_CLIENT_METRICS : Int = 16
+pub const CONFIG_RESOURCE_CLIENT_METRICS : Int32 = 16
 
 ///|
-pub const CONFIG_RESOURCE_GROUP : Int = 32
+pub const CONFIG_RESOURCE_GROUP : Int32 = 32
 
 ///|
 /// Incremental config operations (AlterConfigOp.OpType byte values).
-pub const CONFIG_OP_SET : Int = 0
+pub const CONFIG_OP_SET : Int32 = 0
 
 ///|
-pub const CONFIG_OP_DELETE : Int = 1
+pub const CONFIG_OP_DELETE : Int32 = 1
 
 ///|
-pub const CONFIG_OP_APPEND : Int = 2
+pub const CONFIG_OP_APPEND : Int32 = 2
 
 ///|
-pub const CONFIG_OP_SUBTRACT : Int = 3
+pub const CONFIG_OP_SUBTRACT : Int32 = 3
 
 ///|
 /// Leader election types (ElectionType byte values).
-pub const ELECTION_PREFERRED : Int = 0
+pub const ELECTION_PREFERRED : Int32 = 0
 
 ///|
-pub const ELECTION_UNCLEAN : Int = 1
+pub const ELECTION_UNCLEAN : Int32 = 1
 
 ///|
 /// DescribeCluster endpoint types (schema: 1 = brokers, 2 = controllers).
-pub const ENDPOINT_TYPE_BROKERS : Int = 1
+pub const ENDPOINT_TYPE_BROKERS : Int32 = 1
 
 ///|
-pub const ENDPOINT_TYPE_CONTROLLERS : Int = 2
+pub const ENDPOINT_TYPE_CONTROLLERS : Int32 = 2
 
 ///|
 /// UpdateFeatures upgrade types (UpdateFeaturesRequest.UpgradeType).
-pub const FEATURE_UPGRADE : Int = 1
+pub const FEATURE_UPGRADE : Int32 = 1
 
 ///|
-pub const FEATURE_SAFE_DOWNGRADE : Int = 2
+pub const FEATURE_SAFE_DOWNGRADE : Int32 = 2
 
 ///|
-pub const FEATURE_UNSAFE_DOWNGRADE : Int = 3
+pub const FEATURE_UNSAFE_DOWNGRADE : Int32 = 3
 
 ///|
 /// One cluster broker of a DescribeCluster result.
 pub(all) struct AdminClusterBroker {
-  node_id : Int
+  node_id : Int32
   host : String
-  port : Int
+  port : Int32
   rack : String?
   /// v2+ only; false below v2.
   is_fenced : Bool
@@ -76,16 +76,16 @@ pub(all) struct AdminClusterBroker {
 
 ///|
 pub struct AdminClusterDescription {
-  error_code : Int
+  error_code : Int32
   error_message : String?
   /// The endpoint type the broker answered for (v1+; 1 at v0).
-  endpoint_type : Int
+  endpoint_type : Int32
   cluster_id : String?
-  controller_id : Int
+  controller_id : Int32
   brokers : Array[AdminClusterBroker]
   /// 32-bit bitfield of cluster operations the caller is authorized
   /// for, when requested; -2147483648 when not.
-  cluster_authorized_operations : Int
+  cluster_authorized_operations : Int32
 } derive(@debug.Debug)
 
 ///|
@@ -93,7 +93,7 @@ pub struct AdminClusterDescription {
 pub fn encode_describe_cluster_request(
   include_cluster_authorized_operations : Bool,
   include_fenced_brokers : Bool,
-  version : Int,
+  version : Int32,
 ) -> Bytes {
   let body = @buf.Encoder::new()
   body.write_bool(include_cluster_authorized_operations)
@@ -110,9 +110,9 @@ pub fn encode_describe_cluster_request(
 ///|
 /// Decode a DescribeCluster v0-v2 response body.
 pub fn decode_describe_cluster_response(
-  version : Int,
+  version : Int32,
   d : @buf.Decoder,
-) -> (AdminClusterDescription, Int) raise {
+) -> (AdminClusterDescription, Int32) raise {
   let throttle = d.read_i32()
   let error_code = d.read_i16()
   let error_message = d.read_compact_nullable_string()
@@ -153,9 +153,9 @@ pub fn decode_describe_cluster_response(
 ///|
 pub async fn BrokerConnection::describe_cluster(
   self : BrokerConnection,
-  include_authorized_operations? : Bool = false,
-  include_fenced_brokers? : Bool = false,
-  timeout_ms? : Int = 30000,
+  include_authorized_operations~ : Bool = false,
+  include_fenced_brokers~ : Bool = false,
+  timeout_ms~ : Int32 = 30000,
 ) -> AdminClusterDescription {
   let version = self.api_version(API_DESCRIBE_CLUSTER)
   let d = self.request(
@@ -175,7 +175,7 @@ pub async fn BrokerConnection::describe_cluster(
 /// One config resource to describe: type + name, with an optional key
 /// filter (None lists every key).
 pub(all) struct ConfigResourceKey {
-  resource_type : Int
+  resource_type : Int32
   resource_name : String
   config_keys : Array[String]?
 } derive(@debug.Debug)
@@ -186,19 +186,19 @@ pub(all) struct AdminConfigEntry {
   name : String
   value : String?
   read_only : Bool
-  config_source : Int
+  config_source : Int32
   is_sensitive : Bool
   /// (name, value, source) triples.
-  synonyms : Array[(String, String?, Int)]
-  config_type : Int
+  synonyms : Array[(String, String?, Int32)]
+  config_type : Int32
   documentation : String?
 } derive(@debug.Debug)
 
 ///|
 pub struct AdminConfigsResult {
-  error_code : Int
+  error_code : Int32
   error_message : String?
-  resource_type : Int
+  resource_type : Int32
   resource_name : String
   configs : Array[AdminConfigEntry]
 } derive(@debug.Debug)
@@ -234,7 +234,7 @@ pub fn encode_describe_configs_request(
 /// Decode a DescribeConfigs v4 response body.
 pub fn decode_describe_configs_response(
   d : @buf.Decoder,
-) -> (Array[AdminConfigsResult], Int) raise {
+) -> (Array[AdminConfigsResult], Int32) raise {
   let throttle = d.read_i32()
   let out : Array[AdminConfigsResult] = []
   let n = d.read_compact_len()
@@ -251,7 +251,7 @@ pub fn decode_describe_configs_response(
       let read_only = d.read_bool()
       let config_source = d.read_i8()
       let is_sensitive = d.read_bool()
-      let synonyms : Array[(String, String?, Int)] = []
+      let synonyms : Array[(String, String?, Int32)] = []
       let synonym_count = d.read_compact_len()
       for _ in 0..<synonym_count {
         let synonym = d.read_compact_string()
@@ -291,7 +291,7 @@ pub fn decode_describe_configs_response(
 pub async fn BrokerConnection::describe_configs(
   self : BrokerConnection,
   resources : Array[ConfigResourceKey],
-  timeout_ms? : Int = 30000,
+  timeout_ms~ : Int32 = 30000,
 ) -> Array[AdminConfigsResult] {
   let d = self.request(
     API_DESCRIBE_CONFIGS,
@@ -308,7 +308,7 @@ pub async fn BrokerConnection::describe_configs(
 /// One incremental config update: an operation applied to one key.
 pub(all) struct AlterableConfig {
   name : String
-  operation : Int
+  operation : Int32
   /// None for CONFIG_OP_DELETE.
   value : String?
 } derive(@debug.Debug)
@@ -316,16 +316,16 @@ pub(all) struct AlterableConfig {
 ///|
 /// One resource's incremental updates.
 pub(all) struct AlterableConfigResource {
-  resource_type : Int
+  resource_type : Int32
   resource_name : String
   configs : Array[AlterableConfig]
 } derive(@debug.Debug)
 
 ///|
 pub struct AlterConfigsResult {
-  error_code : Int
+  error_code : Int32
   error_message : String?
-  resource_type : Int
+  resource_type : Int32
   resource_name : String
 } derive(@debug.Debug)
 
@@ -358,7 +358,7 @@ pub fn encode_incremental_alter_configs_request(
 /// Decode an IncrementalAlterConfigs v1 response body.
 pub fn decode_incremental_alter_configs_response(
   d : @buf.Decoder,
-) -> (Array[AlterConfigsResult], Int) raise {
+) -> (Array[AlterConfigsResult], Int32) raise {
   let throttle = d.read_i32()
   let out : Array[AlterConfigsResult] = []
   let n = d.read_compact_len()
@@ -378,8 +378,8 @@ pub fn decode_incremental_alter_configs_response(
 pub async fn BrokerConnection::incremental_alter_configs(
   self : BrokerConnection,
   resources : Array[AlterableConfigResource],
-  timeout_ms? : Int = 30000,
-  validate_only? : Bool = false,
+  timeout_ms~ : Int32 = 30000,
+  validate_only~ : Bool = false,
 ) -> Array[AlterConfigsResult] {
   let d = self.request(
     API_INCREMENTAL_ALTER_CONFIGS,
@@ -403,7 +403,7 @@ pub(all) struct SettableConfig {
 /// One resource's full config replacement (AlterConfigs semantics: the
 /// given list replaces the resource's overridable configs).
 pub(all) struct SettableConfigResource {
-  resource_type : Int
+  resource_type : Int32
   resource_name : String
   configs : Array[SettableConfig]
 } derive(@debug.Debug)
@@ -437,7 +437,7 @@ pub fn encode_alter_configs_request(
 /// IncrementalAlterConfigs).
 pub fn decode_alter_configs_response(
   d : @buf.Decoder,
-) -> (Array[AlterConfigsResult], Int) raise {
+) -> (Array[AlterConfigsResult], Int32) raise {
   decode_incremental_alter_configs_response(d)
 }
 
@@ -445,8 +445,8 @@ pub fn decode_alter_configs_response(
 pub async fn BrokerConnection::alter_configs(
   self : BrokerConnection,
   resources : Array[SettableConfigResource],
-  timeout_ms? : Int = 30000,
-  validate_only? : Bool = false,
+  timeout_ms~ : Int32 = 30000,
+  validate_only~ : Bool = false,
 ) -> Array[AlterConfigsResult] {
   let d = self.request(
     API_ALTER_CONFIGS,
@@ -463,12 +463,12 @@ pub async fn BrokerConnection::alter_configs(
 /// One config resource the broker lists: name plus type (v1+; 0 below).
 pub(all) struct ConfigResourceListing {
   resource_name : String
-  resource_type : Int
+  resource_type : Int32
 } derive(@debug.Debug)
 
 ///|
 pub struct ListConfigResourcesResult {
-  error_code : Int
+  error_code : Int32
   resources : Array[ConfigResourceListing]
 } derive(@debug.Debug)
 
@@ -476,8 +476,8 @@ pub struct ListConfigResourcesResult {
 /// Encode a ListConfigResources v0/v1 request body: v1 filters by
 /// resource type (an empty filter means all supported types).
 pub fn encode_list_config_resources_request(
-  resource_types : Array[Int],
-  version : Int,
+  resource_types : Array[Int32],
+  version : Int32,
 ) -> Bytes {
   let body = @buf.Encoder::new()
   if version >= 1 {
@@ -493,9 +493,9 @@ pub fn encode_list_config_resources_request(
 ///|
 /// Decode a ListConfigResources v0/v1 response body.
 pub fn decode_list_config_resources_response(
-  version : Int,
+  version : Int32,
   d : @buf.Decoder,
-) -> (ListConfigResourcesResult, Int) raise {
+) -> (ListConfigResourcesResult, Int32) raise {
   let throttle = d.read_i32()
   let error_code = d.read_i16()
   let resources : Array[ConfigResourceListing] = []
@@ -513,8 +513,8 @@ pub fn decode_list_config_resources_response(
 ///|
 pub async fn BrokerConnection::list_config_resources(
   self : BrokerConnection,
-  resource_types? : Array[Int] = [],
-  timeout_ms? : Int = 30000,
+  resource_types~ : Array[Int32] = [],
+  timeout_ms~ : Int32 = 30000,
 ) -> ListConfigResourcesResult {
   let version = self.api_version(API_LIST_CONFIG_RESOURCES)
   let d = self.request(
@@ -531,7 +531,7 @@ pub async fn BrokerConnection::list_config_resources(
 ///|
 /// One partition of a log-dir result.
 pub(all) struct LogDirPartition {
-  partition_index : Int
+  partition_index : Int32
   partition_size : Int64
   offset_lag : Int64
   is_future : Bool
@@ -545,7 +545,7 @@ pub(all) struct LogDirTopic {
 
 ///|
 pub struct LogDirResult {
-  error_code : Int
+  error_code : Int32
   log_dir : String
   topics : Array[LogDirTopic]
   /// v4+; -1 when the broker did not report volume sizes.
@@ -559,7 +559,7 @@ pub struct LogDirResult {
 ///|
 pub struct AdminLogDirs {
   /// Top-level error (v3+; 0 at v2).
-  error_code : Int
+  error_code : Int32
   results : Array[LogDirResult]
 } derive(@debug.Debug)
 
@@ -567,8 +567,8 @@ pub struct AdminLogDirs {
 /// Encode a DescribeLogDirs v2-v5 request body: `topics` None asks for
 /// all topics (null array on the wire).
 pub fn encode_describe_log_dirs_request(
-  topics : Array[(String, Array[Int])]?,
-  version : Int,
+  topics : Array[(String, Array[Int32])]?,
+  version : Int32,
 ) -> Bytes {
   ignore(version) // the request shape is identical across v2-v5
   let body = @buf.Encoder::new()
@@ -594,9 +594,9 @@ pub fn encode_describe_log_dirs_request(
 ///|
 /// Decode a DescribeLogDirs v2-v5 response body.
 pub fn decode_describe_log_dirs_response(
-  version : Int,
+  version : Int32,
   d : @buf.Decoder,
-) -> (AdminLogDirs, Int) raise {
+) -> (AdminLogDirs, Int32) raise {
   let throttle = d.read_i32()
   let top_error = if version >= 3 { d.read_i16() } else { 0 }
   let results : Array[LogDirResult] = []
@@ -646,8 +646,8 @@ pub fn decode_describe_log_dirs_response(
 ///|
 pub async fn BrokerConnection::describe_log_dirs(
   self : BrokerConnection,
-  topics? : Array[(String, Array[Int])]? = None,
-  timeout_ms? : Int = 30000,
+  topics~ : Array[(String, Array[Int32])]? = None,
+  timeout_ms~ : Int32 = 30000,
 ) -> AdminLogDirs {
   let version = self.api_version(API_DESCRIBE_LOG_DIRS)
   let d = self.request(
@@ -663,8 +663,8 @@ pub async fn BrokerConnection::describe_log_dirs(
 
 ///|
 pub struct ElectLeadersPartitionResult {
-  partition : Int
-  error_code : Int
+  partition : Int32
+  error_code : Int32
   error_message : String?
 } derive(@debug.Debug)
 
@@ -677,7 +677,7 @@ pub struct ElectLeadersTopicResult {
 ///|
 pub struct AdminElectionResult {
   /// Top-level error code (v1+).
-  error_code : Int
+  error_code : Int32
   results : Array[ElectLeadersTopicResult]
 } derive(@debug.Debug)
 
@@ -685,9 +685,9 @@ pub struct AdminElectionResult {
 /// Encode an ElectLeaders v2 request body: `topic_partitions` None
 /// elects for every partition (null array on the wire).
 pub fn encode_elect_leaders_request(
-  election_type : Int,
-  topic_partitions : Array[(String, Array[Int])]?,
-  timeout_ms : Int,
+  election_type : Int32,
+  topic_partitions : Array[(String, Array[Int32])]?,
+  timeout_ms : Int32,
 ) -> Bytes {
   let body = @buf.Encoder::new()
   body.write_i8(election_type)
@@ -715,7 +715,7 @@ pub fn encode_elect_leaders_request(
 /// Decode an ElectLeaders v2 response body.
 pub fn decode_elect_leaders_response(
   d : @buf.Decoder,
-) -> (AdminElectionResult, Int) raise {
+) -> (AdminElectionResult, Int32) raise {
   let throttle = d.read_i32()
   let error_code = d.read_i16()
   let results : Array[ElectLeadersTopicResult] = []
@@ -741,9 +741,9 @@ pub fn decode_elect_leaders_response(
 ///|
 pub async fn BrokerConnection::elect_leaders(
   self : BrokerConnection,
-  election_type : Int,
-  topic_partitions? : Array[(String, Array[Int])]? = None,
-  timeout_ms? : Int = 30000,
+  election_type : Int32,
+  topic_partitions~ : Array[(String, Array[Int32])]? = None,
+  timeout_ms~ : Int32 = 30000,
 ) -> AdminElectionResult {
   let d = self.request(
     API_ELECT_LEADERS,
@@ -760,8 +760,8 @@ pub async fn BrokerConnection::elect_leaders(
 /// One partition to reassign: replica broker ids, or None to cancel a
 /// pending reassignment.
 pub(all) struct ReassignablePartition {
-  partition_index : Int
-  replicas : Array[Int]?
+  partition_index : Int32
+  replicas : Array[Int32]?
 } derive(@debug.Debug)
 
 ///|
@@ -772,14 +772,14 @@ pub(all) struct ReassignableTopic {
 
 ///|
 pub struct ReassignablePartitionResponse {
-  partition_index : Int
-  error_code : Int
+  partition_index : Int32
+  error_code : Int32
   error_message : String?
 } derive(@debug.Debug)
 
 ///|
 pub struct AdminReassignmentResult {
-  error_code : Int
+  error_code : Int32
   error_message : String?
   /// (topic, per-partition responses) pairs.
   responses : Array[(String, Array[ReassignablePartitionResponse])]
@@ -789,9 +789,9 @@ pub struct AdminReassignmentResult {
 /// Encode an AlterPartitionReassignments v0/v1 request body.
 pub fn encode_alter_partition_reassignments_request(
   topics : Array[ReassignableTopic],
-  timeout_ms : Int,
+  timeout_ms : Int32,
   allow_replication_factor_change : Bool,
-  version : Int,
+  version : Int32,
 ) -> Bytes {
   let body = @buf.Encoder::new()
   body.write_i32(timeout_ms)
@@ -824,9 +824,9 @@ pub fn encode_alter_partition_reassignments_request(
 ///|
 /// Decode an AlterPartitionReassignments v0/v1 response body.
 pub fn decode_alter_partition_reassignments_response(
-  version : Int,
+  version : Int32,
   d : @buf.Decoder,
-) -> (AdminReassignmentResult, Int) raise {
+) -> (AdminReassignmentResult, Int32) raise {
   let throttle = d.read_i32()
   if version >= 1 {
     ignore(d.read_bool()) // allow_replication_factor_change echo
@@ -861,8 +861,8 @@ pub fn decode_alter_partition_reassignments_response(
 pub async fn BrokerConnection::alter_partition_reassignments(
   self : BrokerConnection,
   topics : Array[ReassignableTopic],
-  timeout_ms? : Int = 30000,
-  allow_replication_factor_change? : Bool = true,
+  timeout_ms~ : Int32 = 30000,
+  allow_replication_factor_change~ : Bool = true,
 ) -> AdminReassignmentResult {
   let version = self.api_version(API_ALTER_PARTITION_REASSIGNMENTS)
   let d = self.request(
@@ -882,15 +882,15 @@ pub async fn BrokerConnection::alter_partition_reassignments(
 
 ///|
 pub struct OngoingPartitionReassignment {
-  partition_index : Int
-  replicas : Array[Int]
-  adding_replicas : Array[Int]
-  removing_replicas : Array[Int]
+  partition_index : Int32
+  replicas : Array[Int32]
+  adding_replicas : Array[Int32]
+  removing_replicas : Array[Int32]
 } derive(@debug.Debug)
 
 ///|
 pub struct AdminOngoingReassignments {
-  error_code : Int
+  error_code : Int32
   error_message : String?
   /// (topic, ongoing partitions) pairs.
   topics : Array[(String, Array[OngoingPartitionReassignment])]
@@ -900,8 +900,8 @@ pub struct AdminOngoingReassignments {
 /// Encode a ListPartitionReassignments v0 request body: `topics` None
 /// lists every ongoing reassignment.
 pub fn encode_list_partition_reassignments_request(
-  topics : Array[(String, Array[Int])]?,
-  timeout_ms : Int,
+  topics : Array[(String, Array[Int32])]?,
+  timeout_ms : Int32,
 ) -> Bytes {
   let body = @buf.Encoder::new()
   body.write_i32(timeout_ms)
@@ -928,7 +928,7 @@ pub fn encode_list_partition_reassignments_request(
 /// Decode a ListPartitionReassignments v0 response body.
 pub fn decode_list_partition_reassignments_response(
   d : @buf.Decoder,
-) -> (AdminOngoingReassignments, Int) raise {
+) -> (AdminOngoingReassignments, Int32) raise {
   let throttle = d.read_i32()
   let error_code = d.read_i16()
   let error_message = d.read_compact_nullable_string()
@@ -960,9 +960,9 @@ pub fn decode_list_partition_reassignments_response(
 
 ///|
 /// Read one compact int32 array.
-fn read_int32_array(d : @buf.Decoder) -> Array[Int] raise {
+fn read_int32_array(d : @buf.Decoder) -> Array[Int32] raise {
   let n = d.read_compact_len()
-  let out : Array[Int] = []
+  let out : Array[Int32] = []
   for _ in 0..<n {
     out.push(d.read_i32())
   }
@@ -972,8 +972,8 @@ fn read_int32_array(d : @buf.Decoder) -> Array[Int] raise {
 ///|
 pub async fn BrokerConnection::list_partition_reassignments(
   self : BrokerConnection,
-  topics? : Array[(String, Array[Int])]? = None,
-  timeout_ms? : Int = 30000,
+  topics~ : Array[(String, Array[Int32])]? = None,
+  timeout_ms~ : Int32 = 30000,
 ) -> AdminOngoingReassignments {
   let d = self.request(
     API_LIST_PARTITION_REASSIGNMENTS,
@@ -988,13 +988,13 @@ pub async fn BrokerConnection::list_partition_reassignments(
 
 ///|
 pub struct UnregisterBrokerResult {
-  error_code : Int
+  error_code : Int32
   error_message : String?
 } derive(@debug.Debug)
 
 ///|
 /// Encode an UnregisterBroker v0 request body.
-pub fn encode_unregister_broker_request(broker_id : Int) -> Bytes {
+pub fn encode_unregister_broker_request(broker_id : Int32) -> Bytes {
   let body = @buf.Encoder::new()
   body.write_i32(broker_id)
   body.write_tag_buffer()
@@ -1005,7 +1005,7 @@ pub fn encode_unregister_broker_request(broker_id : Int) -> Bytes {
 /// Decode an UnregisterBroker v0 response body.
 pub fn decode_unregister_broker_response(
   d : @buf.Decoder,
-) -> (UnregisterBrokerResult, Int) raise {
+) -> (UnregisterBrokerResult, Int32) raise {
   let throttle = d.read_i32()
   let error_code = d.read_i16()
   let error_message = d.read_compact_nullable_string()
@@ -1016,8 +1016,8 @@ pub fn decode_unregister_broker_response(
 ///|
 pub async fn BrokerConnection::unregister_broker(
   self : BrokerConnection,
-  broker_id : Int,
-  timeout_ms? : Int = 30000,
+  broker_id : Int32,
+  timeout_ms~ : Int32 = 30000,
 ) -> UnregisterBrokerResult {
   let d = self.request(
     API_UNREGISTER_BROKER,
@@ -1033,7 +1033,7 @@ pub async fn BrokerConnection::unregister_broker(
 ///|
 /// One quorum voter's / observer's progress.
 pub(all) struct QuorumReplicaState {
-  replica_id : Int
+  replica_id : Int32
   /// v2+.
   replica_directory_id : Uuid
   log_end_offset : Int64
@@ -1044,11 +1044,11 @@ pub(all) struct QuorumReplicaState {
 
 ///|
 pub struct QuorumPartitionState {
-  partition_index : Int
-  error_code : Int
+  partition_index : Int32
+  error_code : Int32
   error_message : String?
-  leader_id : Int
-  leader_epoch : Int
+  leader_id : Int32
+  leader_epoch : Int32
   high_watermark : Int64
   current_voters : Array[QuorumReplicaState]
   observers : Array[QuorumReplicaState]
@@ -1062,14 +1062,14 @@ pub struct QuorumTopicState {
 
 ///|
 pub struct QuorumNode {
-  node_id : Int
+  node_id : Int32
   /// (name, host, port) listeners of this controller.
-  listeners : Array[(String, String, Int)]
+  listeners : Array[(String, String, Int32)]
 } derive(@debug.Debug)
 
 ///|
 pub struct AdminQuorumDescription {
-  error_code : Int
+  error_code : Int32
   error_message : String?
   topics : Array[QuorumTopicState]
   /// v2+ quorum node/listener map (KIP-853).
@@ -1096,7 +1096,7 @@ fn decode_quorum_replica_state(d : @buf.Decoder) -> QuorumReplicaState raise {
 ///|
 /// Encode a DescribeQuorum v2 request body.
 pub fn encode_describe_quorum_request(
-  topics : Array[(String, Array[Int])],
+  topics : Array[(String, Array[Int32])],
 ) -> Bytes {
   let body = @buf.Encoder::new()
   body.write_compact_len(topics.length())
@@ -1164,7 +1164,7 @@ pub fn decode_describe_quorum_response(
   let node_count = d.read_compact_len()
   for _ in 0..<node_count {
     let node_id = d.read_i32()
-    let listeners : Array[(String, String, Int)] = []
+    let listeners : Array[(String, String, Int32)] = []
     let listener_count = d.read_compact_len()
     for _ in 0..<listener_count {
       let name = d.read_compact_string()
@@ -1183,8 +1183,8 @@ pub fn decode_describe_quorum_response(
 ///|
 pub async fn BrokerConnection::describe_quorum(
   self : BrokerConnection,
-  topics : Array[(String, Array[Int])],
-  timeout_ms? : Int = 30000,
+  topics : Array[(String, Array[Int32])],
+  timeout_ms~ : Int32 = 30000,
 ) -> AdminQuorumDescription {
   let d = self.request(
     API_DESCRIBE_QUORUM,
@@ -1201,15 +1201,15 @@ pub async fn BrokerConnection::describe_quorum(
 pub(all) struct FeatureUpdate {
   feature : String
   /// The new maximum version level; < 1 deletes the finalized feature.
-  max_version_level : Int
+  max_version_level : Int32
   /// FEATURE_UPGRADE (1), FEATURE_SAFE_DOWNGRADE (2), or
   /// FEATURE_UNSAFE_DOWNGRADE (3).
-  upgrade_type : Int
+  upgrade_type : Int32
 } derive(@debug.Debug)
 
 ///|
 pub struct AdminUpdateFeaturesResult {
-  error_code : Int
+  error_code : Int32
   error_message : String?
 } derive(@debug.Debug)
 
@@ -1217,7 +1217,7 @@ pub struct AdminUpdateFeaturesResult {
 /// Encode an UpdateFeatures v2 request body.
 pub fn encode_update_features_request(
   updates : Array[FeatureUpdate],
-  timeout_ms : Int,
+  timeout_ms : Int32,
   validate_only : Bool,
 ) -> Bytes {
   let body = @buf.Encoder::new()
@@ -1239,7 +1239,7 @@ pub fn encode_update_features_request(
 /// results array).
 pub fn decode_update_features_response(
   d : @buf.Decoder,
-) -> (AdminUpdateFeaturesResult, Int) raise {
+) -> (AdminUpdateFeaturesResult, Int32) raise {
   let throttle = d.read_i32()
   let error_code = d.read_i16()
   let error_message = d.read_compact_nullable_string()
@@ -1251,8 +1251,8 @@ pub fn decode_update_features_response(
 pub async fn BrokerConnection::update_features(
   self : BrokerConnection,
   updates : Array[FeatureUpdate],
-  timeout_ms? : Int = 30000,
-  validate_only? : Bool = false,
+  timeout_ms~ : Int32 = 30000,
+  validate_only~ : Bool = false,
 ) -> AdminUpdateFeaturesResult {
   let d = self.request(
     API_UPDATE_FEATURES,
@@ -1270,8 +1270,8 @@ pub async fn BrokerConnection::update_features(
 /// broker; `include_fenced_brokers` only applies at v2.
 pub async fn Admin::describe_cluster(
   self : Admin,
-  include_authorized_operations? : Bool = false,
-  include_fenced_brokers? : Bool = false,
+  include_authorized_operations~ : Bool = false,
+  include_fenced_brokers~ : Bool = false,
 ) -> AdminClusterDescription {
   self.with_retries(
     fn(result : AdminClusterDescription) {
@@ -1319,7 +1319,7 @@ pub async fn Admin::describe_configs(
 pub async fn Admin::incremental_alter_configs(
   self : Admin,
   resources : Array[AlterableConfigResource],
-  validate_only? : Bool = false,
+  validate_only~ : Bool = false,
 ) -> Array[AlterConfigsResult] {
   self.with_retries(
     fn(results : Array[AlterConfigsResult]) {
@@ -1348,7 +1348,7 @@ pub async fn Admin::incremental_alter_configs(
 pub async fn Admin::alter_configs(
   self : Admin,
   resources : Array[SettableConfigResource],
-  validate_only? : Bool = false,
+  validate_only~ : Bool = false,
 ) -> Array[AlterConfigsResult] {
   self.with_retries(
     fn(results : Array[AlterConfigsResult]) {
@@ -1375,7 +1375,7 @@ pub async fn Admin::alter_configs(
 /// List the broker's config resources, optionally filtered by type.
 pub async fn Admin::list_config_resources(
   self : Admin,
-  resource_types? : Array[Int] = [],
+  resource_types~ : Array[Int32] = [],
 ) -> ListConfigResourcesResult {
   self.with_retries(
     fn(result : ListConfigResourcesResult) {
@@ -1396,7 +1396,7 @@ pub async fn Admin::list_config_resources(
 /// volume capacity, and the cordon state. `topics` None asks for all.
 pub async fn Admin::describe_log_dirs(
   self : Admin,
-  topics? : Array[(String, Array[Int])]? = None,
+  topics~ : Array[(String, Array[Int32])]? = None,
 ) -> AdminLogDirs {
   self.with_retries(
     fn(result : AdminLogDirs) {
@@ -1420,8 +1420,8 @@ pub async fn Admin::describe_log_dirs(
 /// partitions; None elects for every partition.
 pub async fn Admin::elect_leaders(
   self : Admin,
-  election_type : Int,
-  topic_partitions? : Array[(String, Array[Int])]? = None,
+  election_type : Int32,
+  topic_partitions~ : Array[(String, Array[Int32])]? = None,
 ) -> AdminElectionResult {
   self.with_retries(
     fn(result : AdminElectionResult) {
@@ -1452,7 +1452,7 @@ pub async fn Admin::elect_leaders(
 pub async fn Admin::alter_partition_reassignments(
   self : Admin,
   topics : Array[ReassignableTopic],
-  allow_replication_factor_change? : Bool = true,
+  allow_replication_factor_change~ : Bool = true,
 ) -> AdminReassignmentResult {
   self.with_retries(
     fn(result : AdminReassignmentResult) {
@@ -1482,7 +1482,7 @@ pub async fn Admin::alter_partition_reassignments(
 /// List ongoing partition reassignments, optionally filtered by topic.
 pub async fn Admin::list_partition_reassignments(
   self : Admin,
-  topics? : Array[(String, Array[Int])]? = None,
+  topics~ : Array[(String, Array[Int32])]? = None,
 ) -> AdminOngoingReassignments {
   self.with_retries(
     fn(result : AdminOngoingReassignments) {
@@ -1502,7 +1502,7 @@ pub async fn Admin::list_partition_reassignments(
 /// Unregister a fenced broker from the cluster (controller-routed).
 pub async fn Admin::unregister_broker(
   self : Admin,
-  broker_id : Int,
+  broker_id : Int32,
 ) -> UnregisterBrokerResult {
   self.with_retries(
     fn(result : UnregisterBrokerResult) {
@@ -1520,8 +1520,8 @@ pub async fn Admin::unregister_broker(
 /// progress. Defaults to the cluster metadata partition.
 pub async fn Admin::describe_quorum(
   self : Admin,
-  topic? : String = "__cluster_metadata",
-  partition? : Int = 0,
+  topic~ : String = "__cluster_metadata",
+  partition~ : Int32 = 0,
 ) -> AdminQuorumDescription {
   self.with_retries(
     fn(result : AdminQuorumDescription) {
@@ -1551,7 +1551,7 @@ pub async fn Admin::describe_quorum(
 pub async fn Admin::update_features(
   self : Admin,
   updates : Array[FeatureUpdate],
-  validate_only? : Bool = false,
+  validate_only~ : Bool = false,
 ) -> AdminUpdateFeaturesResult {
   self.with_retries(
     fn(result : AdminUpdateFeaturesResult) {

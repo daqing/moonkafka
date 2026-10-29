@@ -8,7 +8,7 @@
 /// call-site context (which request, which topic/partition) on top of
 /// the protocol-level code.
 pub(all) suberror BrokerError {
-  BrokerError(Int, String)
+  BrokerError(Int32, String)
 }
 
 ///|
@@ -42,7 +42,7 @@ pub fn BrokerError::is_retriable(self : BrokerError) -> Bool {
 ///|
 /// Protocol name for a broker error code; unknown codes render as
 /// "UNKNOWN(code)".
-pub fn error_name(code : Int) -> String {
+pub fn error_name(code : Int32) -> String {
   match error_codes.get(code) {
     Some((name, _)) => name
     None => "UNKNOWN(\{code})"
@@ -52,7 +52,7 @@ pub fn error_name(code : Int) -> String {
 ///|
 /// Whether the protocol marks the error code as retriable; unknown
 /// codes are treated as not retriable.
-pub fn error_retriable(code : Int) -> Bool {
+pub fn error_retriable(code : Int32) -> Bool {
   match error_codes.get(code) {
     Some((_, retriable)) => retriable
     None => false
@@ -60,7 +60,7 @@ pub fn error_retriable(code : Int) -> Bool {
 }
 
 ///|
-let error_codes : Map[Int, (String, Bool)] = Map([
+let error_codes : Map[Int32, (String, Bool)] = Map([
   (-1, ("UNKNOWN_SERVER_ERROR", false)),
   (0, ("NONE", false)),
   (1, ("OFFSET_OUT_OF_RANGE", false)),

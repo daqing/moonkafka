@@ -158,7 +158,7 @@ pub async fn Producer::send_offsets_to_transaction(
 async fn Producer::init_transactional(
   self : Producer,
   id : String,
-  transaction_timeout_ms : Int,
+  transaction_timeout_ms : Int32,
 ) -> Unit {
   let backoff = Backoff::new(
     base_ms=self.retry_backoff_ms,
@@ -257,7 +257,7 @@ async fn Producer::end_txn_with_retries(
 ///|
 /// Classify a broker error from a coordinator call: retriable codes
 /// return for the retry loop, fenced codes and everything else raise.
-fn classify_txn_code(code : Int) -> Unit raise {
+fn classify_txn_code(code : Int32) -> Unit raise {
   if txn_retriable_code(code) {
     return
   }
@@ -291,7 +291,7 @@ async fn Producer::txn_coordinator_conn(self : Producer) -> BrokerConnection {
 ///|
 /// FindCoordinator(Transaction) with retries while the coordinator
 /// loads; the result node id is cached until NOT_COORDINATOR.
-async fn Producer::resolve_txn_coordinator(self : Producer) -> Int {
+async fn Producer::resolve_txn_coordinator(self : Producer) -> Int32 {
   guard self.transactional_id is Some(id) else {
     raise ProtocolError::ProtocolError("no transactional id configured")
   }
@@ -392,9 +392,9 @@ async fn Producer::flush_transaction(self : Producer) -> Unit {
 /// errors requeue the round.
 async fn Producer::add_round_partitions(
   self : Producer,
-  entries : Array[(Int, ProducerBatch)],
+  entries : Array[(Int32, ProducerBatch)],
 ) -> SendRound {
-  let need : Array[Int] = []
+  let need : Array[Int32] = []
   for entry in entries {
     if !self.txn_added.get(entry.0).unwrap_or(false) {
       need.push(entry.0)

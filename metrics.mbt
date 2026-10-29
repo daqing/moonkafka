@@ -7,17 +7,17 @@
 /// Snapshot of the producer's counters at read time.
 pub struct ProducerMetrics {
   /// Records sitting in the accumulator's queues right now.
-  records_queued : Int
+  records_queued : Int32
   /// Estimated wire bytes queued right now.
-  bytes_queued : Int
+  bytes_queued : Int32
   /// Batches popped for sending and not yet resolved (on the wire or
   /// waiting for a retry round).
-  batches_in_flight : Int
+  batches_in_flight : Int32
   /// Records delivered and acknowledged by a broker.
-  records_sent : Int
-  records_failed : Int
-  batches_sent : Int
-  batches_failed : Int
+  records_sent : Int32
+  records_failed : Int32
+  batches_sent : Int32
+  batches_failed : Int32
   /// Cumulative throttle hints from Produce responses, summed over the
   /// cluster client's connections.
   throttle_time_ms : Int64

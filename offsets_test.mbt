@@ -2,7 +2,7 @@
 // ListOffsetsRequest.json / ListOffsetsResponse.json schemas.
 
 ///|
-fn offsets_partition(index : Int, error : Int) -> Bytes {
+fn offsets_partition(index : Int32, error : Int32) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(index)
   e.write_i16(error)

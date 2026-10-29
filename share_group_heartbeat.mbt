@@ -11,7 +11,7 @@
 /// partitions per topic.
 pub(all) struct ShareHeartbeatTopicPartitions {
   topic_id : Uuid
-  partitions : Array[Int]
+  partitions : Array[Int32]
 } derive(@debug.Debug)
 
 ///|
@@ -19,12 +19,12 @@ pub(all) struct ShareHeartbeatTopicPartitions {
 /// -1 leaves; a positive value reconciles. Rack and subscription ride
 /// along only when they change (None keeps the broker's state).
 pub fn encode_share_group_heartbeat_request(
-  version : Int,
+  version : Int32,
   group_id : String,
   member_id : String,
-  member_epoch : Int,
-  rack_id? : String? = None,
-  subscribed_topic_names? : Array[String]? = None,
+  member_epoch : Int32,
+  rack_id~ : String? = None,
+  subscribed_topic_names~ : Array[String]? = None,
 ) -> Bytes raise {
   if version != 1 {
     raise ProtocolError::ProtocolError(
@@ -55,11 +55,11 @@ pub fn encode_share_group_heartbeat_request(
 /// consumer-group heartbeat, a None assignment is the coordinator saying
 /// it has nothing new, so the member keeps the one it has.
 pub struct ShareGroupHeartbeatResult {
-  error_code : Int
+  error_code : Int32
   error_message : String?
   member_id : String
-  member_epoch : Int
-  heartbeat_interval_ms : Int
+  member_epoch : Int32
+  heartbeat_interval_ms : Int32
   assignment : Array[ShareHeartbeatTopicPartitions]?
 } derive(@debug.Debug)
 
@@ -67,7 +67,7 @@ pub struct ShareGroupHeartbeatResult {
 /// Decode a ShareGroupHeartbeat response body.
 pub fn decode_share_group_heartbeat_response(
   d : @buf.Decoder,
-) -> (ShareGroupHeartbeatResult, Int) raise {
+) -> (ShareGroupHeartbeatResult, Int32) raise {
   let throttle = d.read_i32()
   let error_code = d.read_i16()
   let error_message = d.read_compact_nullable_string()
@@ -81,7 +81,7 @@ pub fn decode_share_group_heartbeat_response(
     for _ in 0..<topics {
       let topic_id = Uuid::from_bytes(d.read_bytes(16))
       let n = d.read_compact_len()
-      let partitions : Array[Int] = []
+      let partitions : Array[Int32] = []
       for _ in 0..<n {
         partitions.push(d.read_i32())
       }
@@ -113,10 +113,10 @@ pub async fn BrokerConnection::share_group_heartbeat(
   self : BrokerConnection,
   group_id : String,
   member_id : String,
-  member_epoch : Int,
-  rack_id? : String? = None,
-  subscribed_topic_names? : Array[String]? = None,
-  timeout_ms? : Int = 30000,
+  member_epoch : Int32,
+  rack_id~ : String? = None,
+  subscribed_topic_names~ : Array[String]? = None,
+  timeout_ms~ : Int32 = 30000,
 ) -> ShareGroupHeartbeatResult {
   let version = self.api_version(API_SHARE_GROUP_HEARTBEAT)
   let d = self.request(

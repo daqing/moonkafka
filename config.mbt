@@ -45,11 +45,11 @@ pub impl @debug.Debug for SaslConfig with fn to_repr(self : SaslConfig) -> Repr 
 /// One "host:port" (or "[ipv6]:port") entry of the bootstrap list.
 pub(all) struct HostPort {
   host : String
-  port : Int
+  port : Int32
 } derive(Eq, Compare, Hash, @debug.Debug)
 
 ///|
-const DEFAULT_KAFKA_PORT : Int = 9092
+const DEFAULT_KAFKA_PORT : Int32 = 9092
 
 ///|
 /// Parse a single bootstrap entry. The port defaults to 9092 when omitted;
@@ -113,7 +113,7 @@ pub fn HostPort::parse(entry : String) -> HostPort raise ProtocolError {
 }
 
 ///|
-fn chars_to_string(chars : Array[Char], start : Int, end : Int) -> String {
+fn chars_to_string(chars : Array[Char], start : Int32, end : Int32) -> String {
   let sb = StringBuilder()
   for i in start..<end {
     sb.write_char(chars[i])
@@ -124,9 +124,9 @@ fn chars_to_string(chars : Array[Char], start : Int, end : Int) -> String {
 ///|
 fn parse_port(
   chars : Array[Char],
-  start : Int,
+  start : Int32,
   entry : String,
-) -> Int raise ProtocolError {
+) -> Int32 raise ProtocolError {
   if start >= chars.length() {
     raise ProtocolError::ProtocolError(
       "bootstrap entry \{entry} has an empty port",
@@ -160,14 +160,14 @@ fn parse_port(
 pub struct CommonConfig {
   bootstrap_servers : Array[String]
   client_id : String
-  request_timeout_ms : Int
-  connection_max_idle_ms : Int
+  request_timeout_ms : Int32
+  connection_max_idle_ms : Int32
   /// How long cached metadata stays fresh before the next opportunistic
   /// refresh (Java's metadata.max.age.ms).
-  metadata_max_age_ms : Int
-  retries : Int
-  retry_backoff_ms : Int
-  retry_backoff_max_ms : Int
+  metadata_max_age_ms : Int32
+  retries : Int32
+  retry_backoff_ms : Int32
+  retry_backoff_max_ms : Int32
   security_protocol : SecurityProtocol
   sasl : SaslConfig?
   /// TLS settings for Ssl / SaslSsl protocols; None synthesizes defaults
@@ -182,11 +182,11 @@ pub struct CommonConfig {
 /// delivery.timeout.ms, which the batching producer (Phase 3) introduces.
 pub fn CommonConfig::new(
   bootstrap_servers : Array[String],
-  request_timeout_ms? : Int = 30000,
-  security_protocol? : SecurityProtocol = Plaintext,
-  sasl? : SaslConfig? = None,
-  tls? : TlsClientOptions? = None,
-  metadata_max_age_ms? : Int = 300000,
+  request_timeout_ms~ : Int32 = 30000,
+  security_protocol~ : SecurityProtocol = Plaintext,
+  sasl~ : SaslConfig? = None,
+  tls~ : TlsClientOptions? = None,
+  metadata_max_age_ms~ : Int32 = 300000,
 ) -> CommonConfig raise {
   let config : CommonConfig = {
     bootstrap_servers,
@@ -270,25 +270,25 @@ pub fn CommonConfig::bootstrap_addresses(
 pub struct ProducerConfig {
   common : CommonConfig
   topic : String
-  acks : Int
+  acks : Int32
   /// Partition selection strategy (murmur2 for keyed records in every
   /// strategy; unkeyed records are sticky or round-robin).
   partitioner : Partitioner
   /// Maximum encoded size of one produce batch per partition.
-  batch_size : Int
+  batch_size : Int32
   /// How long a not-yet-full batch waits for more records before it is
   /// sent; 0 sends as soon as the flusher arrives.
-  linger_ms : Int
+  linger_ms : Int32
   /// Total bytes the accumulator may queue across all partitions.
-  buffer_memory : Int
+  buffer_memory : Int32
   /// Unacknowledged Produce requests allowed per broker connection; the
   /// sender pipelines up to this many. Must stay <= 5 once idempotence
   /// lands, to preserve ordering.
-  max_in_flight : Int
+  max_in_flight : Int32
   /// Bounded window from append to broker acknowledgement (Java's
   /// delivery.timeout.ms); records still unacknowledged when it passes
   /// fail with a delivery error.
-  delivery_timeout_ms : Int
+  delivery_timeout_ms : Int32
   /// Idempotent producer: broker-side duplicate suppression per
   /// producer id. Defaults to following acks (on when acks=-1).
   enable_idempotence : Bool
@@ -297,7 +297,7 @@ pub struct ProducerConfig {
   transactional_id : String?
   /// How long the coordinator may wait on a transaction before aborting
   /// it on the producer's behalf (Java's transaction.timeout.ms).
-  transaction_timeout_ms : Int
+  transaction_timeout_ms : Int32
 } derive(@debug.Debug)
 
 ///|
@@ -309,21 +309,21 @@ pub struct ProducerConfig {
 pub fn ProducerConfig::new(
   bootstrap_servers : Array[String],
   topic : String,
-  acks? : Int = 1,
-  request_timeout_ms? : Int = 30000,
-  security_protocol? : SecurityProtocol = Plaintext,
-  sasl? : SaslConfig? = None,
-  tls? : TlsClientOptions? = None,
-  partitioner? : Partitioner = Murmur2,
-  batch_size? : Int = 16384,
-  linger_ms? : Int = 0,
-  buffer_memory? : Int = 33554432,
-  metadata_max_age_ms? : Int = 300000,
-  max_in_flight? : Int = 5,
-  delivery_timeout_ms? : Int = 120000,
-  enable_idempotence? : Bool? = None,
-  transactional_id? : String? = None,
-  transaction_timeout_ms? : Int = 60000,
+  acks~ : Int32 = 1,
+  request_timeout_ms~ : Int32 = 30000,
+  security_protocol~ : SecurityProtocol = Plaintext,
+  sasl~ : SaslConfig? = None,
+  tls~ : TlsClientOptions? = None,
+  partitioner~ : Partitioner = Murmur2,
+  batch_size~ : Int32 = 16384,
+  linger_ms~ : Int32 = 0,
+  buffer_memory~ : Int32 = 33554432,
+  metadata_max_age_ms~ : Int32 = 300000,
+  max_in_flight~ : Int32 = 5,
+  delivery_timeout_ms~ : Int32 = 120000,
+  enable_idempotence~ : Bool? = None,
+  transactional_id~ : String? = None,
+  transaction_timeout_ms~ : Int32 = 60000,
 ) -> ProducerConfig raise {
   if acks != 0 && acks != 1 && acks != -1 {
     raise ProtocolError::ProtocolError(
@@ -449,15 +449,15 @@ pub struct ConsumerConfig {
   /// Commit the polled positions every auto_commit_interval_ms and once
   /// more on close; requires a group id.
   enable_auto_commit : Bool
-  auto_commit_interval_ms : Int
+  auto_commit_interval_ms : Int32
   /// Out-of-range recovery policy; defaults to following `start_from`.
   auto_offset_reset : AutoOffsetReset
   /// Upper bound on records one poll returns; extra records stay in the
   /// log and the position rewinds to the first unconsumed record.
-  max_poll_records : Int
+  max_poll_records : Int32
   /// Per-partition byte cap carried in each fetch request (Java's
   /// max.partition.fetch.bytes).
-  max_partition_fetch_bytes : Int
+  max_partition_fetch_bytes : Int32
   /// Fetch with READ_COMMITTED isolation and filter aborted
   /// transactions out of polled records.
   enable_read_committed : Bool
@@ -466,12 +466,12 @@ pub struct ConsumerConfig {
   group_instance_id : String?
   /// Classic-protocol pacing: heartbeats must land well inside the
   /// session timeout or the coordinator evicts the member.
-  heartbeat_interval_ms : Int
-  session_timeout_ms : Int
+  heartbeat_interval_ms : Int32
+  session_timeout_ms : Int32
   /// The longest allowed gap between poll() calls; exceeding it makes
   /// the consumer leave its group and surface the error (Java's
   /// max.poll.interval.ms).
-  max_poll_interval_ms : Int
+  max_poll_interval_ms : Int32
   /// Which group protocol subscribe() runs.
   group_protocol : GroupProtocol
 } derive(@debug.Debug)
@@ -480,24 +480,24 @@ pub struct ConsumerConfig {
 pub fn ConsumerConfig::new(
   bootstrap_servers : Array[String],
   topic : String,
-  start_from? : StartFrom = Earliest,
-  request_timeout_ms? : Int = 30000,
-  security_protocol? : SecurityProtocol = Plaintext,
-  sasl? : SaslConfig? = None,
-  tls? : TlsClientOptions? = None,
-  metadata_max_age_ms? : Int = 300000,
-  group_id? : String? = None,
-  enable_auto_commit? : Bool = true,
-  auto_commit_interval_ms? : Int = 5000,
-  auto_offset_reset? : AutoOffsetReset? = None,
-  max_poll_records? : Int = 500,
-  max_partition_fetch_bytes? : Int = 1048576,
-  enable_read_committed? : Bool = false,
-  group_instance_id? : String? = None,
-  heartbeat_interval_ms? : Int = 3000,
-  session_timeout_ms? : Int = 45000,
-  max_poll_interval_ms? : Int = 300000,
-  group_protocol? : GroupProtocol = ConsumerProtocol,
+  start_from~ : StartFrom = Earliest,
+  request_timeout_ms~ : Int32 = 30000,
+  security_protocol~ : SecurityProtocol = Plaintext,
+  sasl~ : SaslConfig? = None,
+  tls~ : TlsClientOptions? = None,
+  metadata_max_age_ms~ : Int32 = 300000,
+  group_id~ : String? = None,
+  enable_auto_commit~ : Bool = true,
+  auto_commit_interval_ms~ : Int32 = 5000,
+  auto_offset_reset~ : AutoOffsetReset? = None,
+  max_poll_records~ : Int32 = 500,
+  max_partition_fetch_bytes~ : Int32 = 1048576,
+  enable_read_committed~ : Bool = false,
+  group_instance_id~ : String? = None,
+  heartbeat_interval_ms~ : Int32 = 3000,
+  session_timeout_ms~ : Int32 = 45000,
+  max_poll_interval_ms~ : Int32 = 300000,
+  group_protocol~ : GroupProtocol = ConsumerProtocol,
 ) -> ConsumerConfig raise {
   if topic.length() == 0 {
     raise ProtocolError::ProtocolError("topic must not be empty")

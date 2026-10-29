@@ -12,8 +12,8 @@ pub fn[H : @crypto.CryptoHasher] scram_pbkdf2_hmac(
   h : H,
   password : Bytes,
   salt : Bytes,
-  iterations : Int,
-  dk_len : Int,
+  iterations : Int32,
+  dk_len : Int32,
 ) -> Bytes {
   let hlen = h.size()
   let mut u : FixedArray[Byte] = FixedArray::make(hlen, b'\x00')
@@ -82,7 +82,7 @@ pub fn scram_salted_password(
   sha512 : Bool,
   password : Bytes,
   salt : Bytes,
-  iterations : Int,
+  iterations : Int32,
 ) -> Bytes {
   let hlen = if sha512 { 64 } else { 32 }
   if sha512 {
@@ -225,7 +225,7 @@ pub fn ScramServerFirst::parse(msg : String) -> ScramServerFirst raise {
 pub(all) struct ScramServerFirst {
   nonce : String
   salt : Bytes
-  iterations : Int
+  iterations : Int32
 } derive(@debug.Debug)
 
 ///|
@@ -258,7 +258,7 @@ fn scram_attr(part : String) -> (Char, String) raise {
 }
 
 ///|
-fn scram_parse_iterations(s : String) -> Int raise {
+fn scram_parse_iterations(s : String) -> Int32 raise {
   let mut v = 0
   for c in s {
     let d = c.to_int() - 48

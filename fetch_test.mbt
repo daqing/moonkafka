@@ -2,7 +2,7 @@
 // FetchRequest.json / FetchResponse.json schemas.
 
 ///|
-fn test_topic(version : Int) -> @moonkafka.FetchTopicReq raise {
+fn test_topic(version : Int32) -> @moonkafka.FetchTopicReq raise {
   {
     name: "events",
     topic_id: if version == 12 {
@@ -17,7 +17,7 @@ fn test_topic(version : Int) -> @moonkafka.FetchTopicReq raise {
 }
 
 ///|
-fn test_session(version : Int) -> @moonkafka.FetchSessionReq raise {
+fn test_session(version : Int32) -> @moonkafka.FetchSessionReq raise {
   {
     session_id: 7,
     session_epoch: 2,
@@ -224,7 +224,7 @@ test "fetch codecs refuse versions without codecs" {
 ///|
 test "fetch session acquires an id and then goes incremental" {
   let s = @moonkafka.FetchSession::new()
-  let wanted : Map[Int, (Int64, Int)] = Map([])
+  let wanted : Map[Int32, (Int64, Int32)] = Map([])
   wanted[0] = (42L, 3)
   let full = s.prepare("events", @moonkafka.Uuid::zero(), wanted, 100)
   assert_eq(full.session_id, 0)
@@ -249,12 +249,12 @@ test "fetch session acquires an id and then goes incremental" {
 ///|
 test "fetch session forgets removed partitions" {
   let s = @moonkafka.FetchSession::new()
-  let wanted : Map[Int, (Int64, Int)] = Map([])
+  let wanted : Map[Int32, (Int64, Int32)] = Map([])
   wanted[0] = (1L, 0)
   wanted[1] = (2L, 0)
   ignore(s.prepare("events", @moonkafka.Uuid::zero(), wanted, 100))
   s.handle_response(9, 0)
-  let none : Map[Int, (Int64, Int)] = Map([])
+  let none : Map[Int32, (Int64, Int32)] = Map([])
   let after = s.prepare(
     "events",
     @moonkafka.Uuid::parse("AAAAAAAAAAAAAAAAAAAAAQ"),
@@ -273,7 +273,7 @@ test "fetch session forgets removed partitions" {
 ///|
 test "fetch session restarts from a full request after eviction" {
   let s = @moonkafka.FetchSession::new()
-  let wanted : Map[Int, (Int64, Int)] = Map([])
+  let wanted : Map[Int32, (Int64, Int32)] = Map([])
   wanted[0] = (1L, 0)
   ignore(s.prepare("events", @moonkafka.Uuid::zero(), wanted, 100))
   s.handle_response(9, 0)
@@ -294,7 +294,7 @@ test "fetch session restarts from a full request after eviction" {
 ///|
 test "fetch session without a broker grant stays sessionless" {
   let s = @moonkafka.FetchSession::new()
-  let wanted : Map[Int, (Int64, Int)] = Map([])
+  let wanted : Map[Int32, (Int64, Int32)] = Map([])
   wanted[0] = (1L, 0)
   ignore(s.prepare("events", @moonkafka.Uuid::zero(), wanted, 100))
   s.handle_response(0, 0) // broker declined to create a session

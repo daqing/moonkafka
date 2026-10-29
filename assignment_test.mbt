@@ -3,7 +3,7 @@
 
 ///|
 test "range assignor splits each topic into contiguous chunks" {
-  let counts : Map[String, Int] = Map([("events", 3)])
+  let counts : Map[String, Int32] = Map([("events", 3)])
   let out = @moonkafka.compute_assignment(
     @moonkafka.RangeAssignor,
     [
@@ -19,7 +19,7 @@ test "range assignor splits each topic into contiguous chunks" {
 
 ///|
 test "round robin assignor circles sorted topic partitions" {
-  let counts : Map[String, Int] = Map([("t1", 2), ("t2", 2)])
+  let counts : Map[String, Int32] = Map([("t1", 2), ("t2", 2)])
   let out = @moonkafka.compute_assignment(
     @moonkafka.RoundRobinAssignor,
     [
@@ -34,8 +34,8 @@ test "round robin assignor circles sorted topic partitions" {
 
 ///|
 test "sticky assignor keeps prior partitions and balances the spread" {
-  let counts : Map[String, Int] = Map([("events", 2)])
-  let owned : Map[String, Array[(String, Int)]] = Map([
+  let counts : Map[String, Int32] = Map([("events", 2)])
+  let owned : Map[String, Array[(String, Int32)]] = Map([
     ("a", [("events", 0), ("events", 1)]),
   ])
   let out = @moonkafka.compute_assignment(
@@ -54,8 +54,8 @@ test "sticky assignor keeps prior partitions and balances the spread" {
 
 ///|
 test "sticky assignor keeps a balanced assignment untouched" {
-  let counts : Map[String, Int] = Map([("events", 2)])
-  let owned : Map[String, Array[(String, Int)]] = Map([
+  let counts : Map[String, Int32] = Map([("events", 2)])
+  let owned : Map[String, Array[(String, Int32)]] = Map([
     ("a", [("events", 0)]),
     ("b", [("events", 1)]),
   ])

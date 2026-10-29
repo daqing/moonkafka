@@ -10,10 +10,10 @@
 // bytes remaining" and the join never completed.
 
 ///|
-pub const CONSUMER_PROTOCOL_SUBSCRIPTION_VERSION : Int = 0
+pub const CONSUMER_PROTOCOL_SUBSCRIPTION_VERSION : Int32 = 0
 
 ///|
-pub const CONSUMER_PROTOCOL_ASSIGNMENT_VERSION : Int = 0
+pub const CONSUMER_PROTOCOL_ASSIGNMENT_VERSION : Int32 = 0
 
 ///|
 /// The highest ConsumerProtocol version this client reads. Both messages
@@ -24,7 +24,7 @@ pub const CONSUMER_PROTOCOL_ASSIGNMENT_VERSION : Int = 0
 /// assignment — and has not moved across those versions; the fields that
 /// follow (OwnedPartitions, GenerationId, RackId, UserData) are left
 /// unread.
-const CONSUMER_PROTOCOL_MAX_VERSION : Int = 3
+const CONSUMER_PROTOCOL_MAX_VERSION : Int32 = 3
 
 ///|
 /// Serialize a ConsumerProtocolSubscription: the subscribed topic names
@@ -66,7 +66,7 @@ pub fn decode_consumer_protocol_subscription(
 ///|
 /// Serialize a ConsumerProtocolAssignment: topic partitions per member.
 pub fn encode_consumer_protocol_assignment(
-  assignment : Array[(String, Array[Int])],
+  assignment : Array[(String, Array[Int32])],
 ) -> Bytes {
   let body = @buf.Encoder::new()
   body.write_i16(CONSUMER_PROTOCOL_ASSIGNMENT_VERSION)
@@ -89,7 +89,7 @@ pub fn encode_consumer_protocol_assignment(
 /// Parse a ConsumerProtocolAssignment: topic partitions per member.
 pub fn decode_consumer_protocol_assignment(
   data : Bytes,
-) -> Array[(String, Array[Int])] raise {
+) -> Array[(String, Array[Int32])] raise {
   let d = @buf.Decoder::new(data)
   let version = d.read_i16()
   guard 0 <= version && version <= CONSUMER_PROTOCOL_MAX_VERSION else {
@@ -98,12 +98,12 @@ pub fn decode_consumer_protocol_assignment(
     )
   }
   let n = d.read_i32()
-  let out : Array[(String, Array[Int])] = []
+  let out : Array[(String, Array[Int32])] = []
   for _ in 0..<n {
     let len = d.read_i16()
     let topic = @utf8.decode_lossy(d.read_bytes(len)[:])
     let parts = d.read_i32()
-    let partitions : Array[Int] = []
+    let partitions : Array[Int32] = []
     for _ in 0..<parts {
       partitions.push(d.read_i32())
     }

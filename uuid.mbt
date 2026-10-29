@@ -33,8 +33,8 @@ pub fn Uuid::to_bytes(self : Uuid) -> Bytes {
 /// (2 chars, low 4 bits zero-padded).
 pub impl Show for Uuid with fn output(self, logger) {
   let sb = StringBuilder()
-  let mut acc : Int = 0
-  let mut count : Int = 0
+  let mut acc : Int32 = 0
+  let mut count : Int32 = 0
   for b in self.bytes {
     acc = ((acc << 8) | b.to_int()) & 0xFFFFFF
     count = count + 1
@@ -66,8 +66,8 @@ let b64url_chars : Array[String] = [
 ]
 
 ///|
-fn uuid_char_value(c : Char) -> Int raise @buf.DecodeError {
-  let v : Int = c.to_int()
+fn uuid_char_value(c : Char) -> Int32 raise @buf.DecodeError {
+  let v : Int32 = c.to_int()
   if v >= 65 && v <= 90 {
     v - 65 // A-Z
   } else if v >= 97 && v <= 122 {
@@ -91,8 +91,8 @@ pub fn Uuid::parse(s : String) -> Uuid raise @buf.DecodeError {
     raise @buf.Malformed("uuid string must be 22 chars, got \{s.length()}")
   }
   let out : Array[Byte] = Array(capacity=16)
-  let mut acc : Int = 0
-  let mut bits : Int = 0
+  let mut acc : Int32 = 0
+  let mut bits : Int32 = 0
   for c in s {
     acc = ((acc << 6) | uuid_char_value(c)) & 0xFFFFFF
     bits = bits + 6

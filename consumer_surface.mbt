@@ -8,7 +8,7 @@
 pub(all) struct GroupMetadata {
   group_id : String
   member_id : String
-  generation_id : Int
+  generation_id : Int32
 } derive(@debug.Debug)
 
 ///|
@@ -19,14 +19,14 @@ pub(all) struct GroupMetadata {
 /// Mutually exclusive with subscribe().
 pub async fn Consumer::assign(
   self : Consumer,
-  partitions : Array[(String, Int)],
+  partitions : Array[(String, Int32)],
 ) -> Unit {
   if self.member_active {
     raise ProtocolError::ProtocolError(
       "assign() is mutually exclusive with subscribe()",
     )
   }
-  let known : Array[Int] = []
+  let known : Array[Int32] = []
   for pair in partitions {
     let (topic, partition) = pair
     if topic != self.topic {
@@ -38,7 +38,7 @@ pub async fn Consumer::assign(
   }
   self.manual_assignment = Some(partitions)
   // Resolve positions: committed offsets first, then the reset policy.
-  let committed : Map[Int, Int64] = Map([])
+  let committed : Map[Int32, Int64] = Map([])
   if self.group_id is Some(_) {
     try {
       let map = self.committed(partitions=Some(known))
@@ -92,7 +92,7 @@ pub fn Consumer::unassign(self : Consumer) -> Unit {
 ///|
 /// The current read position of one partition, if it is part of the
 /// consumer's metadata view.
-pub fn Consumer::position(self : Consumer, partition : Int) -> Int64? {
+pub fn Consumer::position(self : Consumer, partition : Int32) -> Int64? {
   for p in self.partitions {
     if p.info.index == partition {
       return Some(p.next_offset)

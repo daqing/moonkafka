@@ -6,7 +6,7 @@
 /// Rotating view over parsed bootstrap server addresses.
 pub struct BootstrapServers {
   addrs : Array[HostPort]
-  mut cursor : Int
+  mut cursor : Int32
 } derive(@debug.Debug)
 
 ///|
@@ -33,10 +33,10 @@ pub fn BootstrapServers::next(self : BootstrapServers) -> HostPort {
 pub async fn connect_bootstrap(
   servers : BootstrapServers,
   client_id : String,
-  timeout_ms? : Int = 10000,
-  sasl? : SaslConfig? = None,
-  use_tls? : Bool = false,
-  tls? : TlsClientOptions? = None,
+  timeout_ms~ : Int32 = 10000,
+  sasl~ : SaslConfig? = None,
+  use_tls~ : Bool = false,
+  tls~ : TlsClientOptions? = None,
 ) -> BrokerConnection {
   let n = servers.addrs.length()
   let mut last_error : Error = ProtocolError::ProtocolError(
@@ -44,7 +44,7 @@ pub async fn connect_bootstrap(
   )
   for _ in 0..<n {
     let addr = servers.next()
-    let conn = try dial(addr, client_id, timeout_ms, use_tls, tls) catch {
+    let conn = dial(addr, client_id, timeout_ms, use_tls, tls) catch {
       e => {
         last_error = e
         continue
@@ -70,10 +70,10 @@ pub async fn connect_bootstrap(
 async fn dial(
   addr : HostPort,
   client_id : String,
-  timeout_ms : Int,
+  timeout_ms : Int32,
   use_tls : Bool,
   tls : TlsClientOptions?,
-) -> BrokerConnection raise {
+) -> BrokerConnection {
   // Without explicit TLS options, a TLS protocol still gets defaults whose
   // server name is the dialed host.
   let tls_opts = match tls {

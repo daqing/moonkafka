@@ -11,7 +11,7 @@
 /// Commit error codes worth retrying: the coordinator is loading (14),
 /// unavailable (15), moved (16), or a rebalance is in flight (27) — the
 /// Java client re-issues the commit in all four cases.
-fn commit_retriable(code : Int) -> Bool {
+fn commit_retriable(code : Int32) -> Bool {
   code == 14 || code == 15 || code == 16 || code == 27
 }
 
@@ -73,8 +73,8 @@ async fn Consumer::group_coordinator_conn(self : Consumer) -> BrokerConnection {
 
 ///|
 /// Snapshot the current read positions per partition.
-fn Consumer::positions(self : Consumer) -> Map[Int, Int64] {
-  let out : Map[Int, Int64] = Map([])
+fn Consumer::positions(self : Consumer) -> Map[Int32, Int64] {
+  let out : Map[Int32, Int64] = Map([])
   for p in self.partitions {
     out[p.info.index] = p.next_offset
   }
@@ -88,7 +88,7 @@ fn Consumer::positions(self : Consumer) -> Map[Int, Int64] {
 /// the committed-offset cache.
 pub async fn Consumer::commit(
   self : Consumer,
-  offsets? : Map[Int, Int64],
+  offsets? : Map[Int32, Int64],
 ) -> Unit {
   guard self.group_id is Some(group_id) else {
     raise ProtocolError::ProtocolError(
@@ -102,7 +102,7 @@ pub async fn Consumer::commit(
   if to_commit.is_empty() {
     return
   }
-  let entries : Array[(Int, Int64, Int)] = []
+  let entries : Array[(Int32, Int64, Int32)] = []
   for p in self.partitions {
     if self.member_spawned && !self.is_assigned(p.info.index) {
       // Only the partitions the coordinator assigned are ours to commit; the
@@ -185,8 +185,8 @@ pub async fn Consumer::commit(
 /// message. Nothing is awaited.
 pub fn Consumer::commit_async(
   self : Consumer,
-  offsets? : Map[Int, Int64],
-  on_complete? : (String?) -> Unit = fn(_msg) { () },
+  offsets? : Map[Int32, Int64],
+  on_complete~ : (String?) -> Unit = fn(_msg) { () },
 ) -> Unit raise {
   guard self.group_id is Some(_) else {
     raise ProtocolError::ProtocolError(
@@ -216,8 +216,8 @@ pub fn Consumer::commit_async(
 /// map. Partitions without a commit carry -1.
 pub async fn Consumer::committed(
   self : Consumer,
-  partitions? : Array[Int]? = None,
-) -> Map[Int, Int64] {
+  partitions~ : Array[Int32]? = None,
+) -> Map[Int32, Int64] {
   guard self.group_id is Some(group_id) else {
     raise ProtocolError::ProtocolError(
       "committed() requires a group_id on the consumer config",
@@ -230,7 +230,7 @@ pub async fn Consumer::committed(
   if wanted.is_empty() {
     return Map([])
   }
-  let by_index : Map[Int, PartitionInfo] = Map([])
+  let by_index : Map[Int32, PartitionInfo] = Map([])
   for p in self.partitions {
     by_index[p.info.index] = p.info
   }
@@ -248,7 +248,7 @@ pub async fn Consumer::committed(
       timeout_ms=self.request_timeout_ms,
     )
     let mut code = 0
-    let out : Map[Int, Int64] = Map([])
+    let out : Map[Int32, Int64] = Map([])
     for group in groups {
       if group.error_code != 0 {
         code = group.error_code
@@ -286,7 +286,7 @@ pub async fn Consumer::committed(
 ///|
 /// The cached committed offset for one partition, if known locally.
 /// Call `committed()` to refresh from the coordinator.
-pub fn Consumer::committed_cached(self : Consumer, partition : Int) -> Int64? {
+pub fn Consumer::committed_cached(self : Consumer, partition : Int32) -> Int64? {
   self.committed_offsets.get(partition)
 }
 
@@ -296,7 +296,7 @@ pub fn Consumer::committed_cached(self : Consumer, partition : Int) -> Int64? {
 /// outside).
 pub fn Consumer::seek(
   self : Consumer,
-  partition : Int,
+  partition : Int32,
   offset : Int64,
 ) -> Unit raise {
   let mut known = false
@@ -317,7 +317,7 @@ pub fn Consumer::seek(
 /// Resolve the given partitions (default: all) to the log start offset.
 pub async fn Consumer::seek_to_beginning(
   self : Consumer,
-  partitions? : Array[Int]? = None,
+  partitions~ : Array[Int32]? = None,
 ) -> Unit {
   self.seek_to_sentinel(partitions, OFFSET_EARLIEST)
 }
@@ -326,7 +326,7 @@ pub async fn Consumer::seek_to_beginning(
 /// Resolve the given partitions (default: all) to the log end offset.
 pub async fn Consumer::seek_to_end(
   self : Consumer,
-  partitions? : Array[Int]? = None,
+  partitions~ : Array[Int32]? = None,
 ) -> Unit {
   self.seek_to_sentinel(partitions, OFFSET_LATEST)
 }
@@ -334,7 +334,7 @@ pub async fn Consumer::seek_to_end(
 ///|
 async fn Consumer::seek_to_sentinel(
   self : Consumer,
-  partitions : Array[Int]?,
+  partitions : Array[Int32]?,
   sentinel : Int64,
 ) -> Unit {
   let wanted = self.seek_partitions(partitions)
@@ -366,7 +366,7 @@ async fn Consumer::seek_to_sentinel(
 /// whose timestamp is >= `timestamp` (ListOffsets by timestamp).
 pub async fn Consumer::seek_by_timestamp(
   self : Consumer,
-  partition : Int,
+  partition : Int32,
   timestamp : Int64,
 ) -> Unit {
   let wanted = self.seek_partitions(Some([partition]))
@@ -395,7 +395,7 @@ pub async fn Consumer::seek_by_timestamp(
 ///|
 fn Consumer::seek_partitions(
   self : Consumer,
-  partitions : Array[Int]?,
+  partitions : Array[Int32]?,
 ) -> Array[PartitionState] {
   match partitions {
     None => self.partitions.copy()
@@ -425,7 +425,7 @@ async fn Consumer::autocommit_loop(self : Consumer) -> Unit {
   for ;; {
     // Poll the closed flag at most once per interval; a finer wakeup
     // lands with the D6 background-task polish.
-    for _ in 0..<Int::max(1, self.auto_commit_interval_ms / SENDER_TICK_MS) {
+    for _ in 0..<Int32::max(1, self.auto_commit_interval_ms / SENDER_TICK_MS) {
       if self.closed {
         break
       }

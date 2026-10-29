@@ -9,7 +9,7 @@
 /// later requests pick their version from them (api_version).
 pub async fn BrokerConnection::negotiate_api_versions(
   self : BrokerConnection,
-  timeout_ms? : Int = 30000,
+  timeout_ms~ : Int32 = 30000,
 ) -> Unit {
   let d = self.request(
     API_API_VERSIONS,
@@ -26,7 +26,7 @@ pub async fn BrokerConnection::negotiate_api_versions(
 pub async fn BrokerConnection::fetch_metadata(
   self : BrokerConnection,
   topics : Array[String]?,
-  timeout_ms? : Int = 30000,
+  timeout_ms~ : Int32 = 30000,
 ) -> Metadata {
   let version = self.api_version(API_METADATA)
   let d = self.request(
@@ -48,9 +48,9 @@ pub async fn BrokerConnection::fetch_metadata(
 pub async fn BrokerConnection::describe_topic_partitions(
   self : BrokerConnection,
   topics : Array[String],
-  response_partition_limit? : Int = 2000,
-  cursor? : TopicPartitionCursor? = None,
-  timeout_ms? : Int = 30000,
+  response_partition_limit~ : Int32 = 2000,
+  cursor~ : TopicPartitionCursor? = None,
+  timeout_ms~ : Int32 = 30000,
 ) -> DescribeTopicPartitions {
   let version = self.api_version(API_DESCRIBE_TOPIC_PARTITIONS)
   let d = self.request(
@@ -74,8 +74,8 @@ pub async fn BrokerConnection::list_offsets(
   topic : String,
   partitions : Array[PartitionInfo],
   timestamp : Int64,
-  timeout_ms? : Int = 30000,
-) -> Map[Int, Int64] {
+  timeout_ms~ : Int32 = 30000,
+) -> Map[Int32, Int64] {
   let version = self.api_version(API_LIST_OFFSETS)
   let d = self.request(
     API_LIST_OFFSETS,
@@ -95,11 +95,11 @@ pub async fn BrokerConnection::list_offsets(
 pub async fn BrokerConnection::produce(
   self : BrokerConnection,
   topic : String,
-  topic_id? : Uuid = Uuid::zero(),
-  transactional_id? : String? = None,
-  partitions~ : Array[(Int, Bytes)],
-  acks~ : Int,
-  timeout_ms~ : Int,
+  topic_id~ : Uuid = Uuid::zero(),
+  transactional_id~ : String? = None,
+  partitions~ : Array[(Int32, Bytes)],
+  acks~ : Int32,
+  timeout_ms~ : Int32,
 ) -> Array[ProducePartitionResult] {
   let version = self.api_version(API_PRODUCE)
   let d = self.request(
@@ -130,11 +130,11 @@ pub async fn BrokerConnection::fetch(
   self : BrokerConnection,
   topics : Array[FetchTopicReq],
   session~ : FetchSessionReq,
-  max_wait_ms~ : Int,
-  min_bytes? : Int = 1,
-  max_bytes? : Int = 0x7fffffff,
-  isolation_level? : Int = 0,
-  timeout_ms? : Int = 30000,
+  max_wait_ms~ : Int32,
+  min_bytes~ : Int32 = 1,
+  max_bytes~ : Int32 = 0x7fffffff,
+  isolation_level~ : Int32 = 0,
+  timeout_ms~ : Int32 = 30000,
 ) -> FetchResult {
   let version = self.api_version(API_FETCH)
   let d = self.request(

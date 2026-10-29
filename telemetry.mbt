@@ -14,12 +14,12 @@
 
 ///|
 pub struct TelemetrySubscription {
-  error_code : Int
+  error_code : Int32
   client_instance_id : Uuid
-  subscription_id : Int
-  accepted_compression_types : Array[Int]
-  push_interval_ms : Int
-  telemetry_max_bytes : Int
+  subscription_id : Int32
+  accepted_compression_types : Array[Int32]
+  push_interval_ms : Int32
+  telemetry_max_bytes : Int32
   delta_temporality : Bool
   requested_metrics : Array[String]
 } derive(@debug.Debug)
@@ -40,12 +40,12 @@ pub fn encode_get_telemetry_subscriptions_request(
 /// Decode a GetTelemetrySubscriptions v0 response body.
 pub fn decode_get_telemetry_subscriptions_response(
   d : @buf.Decoder,
-) -> (TelemetrySubscription, Int) raise {
+) -> (TelemetrySubscription, Int32) raise {
   let throttle = d.read_i32()
   let error_code = d.read_i16()
   let client_instance_id = Uuid::from_bytes(d.read_bytes(16))
   let subscription_id = d.read_i32()
-  let accepted_compression_types : Array[Int] = []
+  let accepted_compression_types : Array[Int32] = []
   let n_compression = d.read_compact_len()
   for _ in 0..<n_compression {
     accepted_compression_types.push(d.read_i8())
@@ -78,8 +78,8 @@ pub fn decode_get_telemetry_subscriptions_response(
 pub async fn BrokerConnection::get_telemetry_subscriptions(
   self : BrokerConnection,
   client_instance_id : Uuid,
-  timeout_ms? : Int = 30000,
-) -> (TelemetrySubscription, Int) {
+  timeout_ms~ : Int32 = 30000,
+) -> (TelemetrySubscription, Int32) {
   let version = self.api_version(API_GET_TELEMETRY_SUBSCRIPTIONS)
   let d = self.request(
     API_GET_TELEMETRY_SUBSCRIPTIONS,
@@ -97,9 +97,9 @@ pub async fn BrokerConnection::get_telemetry_subscriptions(
 /// payload rendered by the client's metrics provider.
 pub fn encode_push_telemetry_request(
   client_instance_id : Uuid,
-  subscription_id : Int,
+  subscription_id : Int32,
   terminating : Bool,
-  compression_type : Int,
+  compression_type : Int32,
   metrics : Bytes,
 ) -> Bytes {
   let body = @buf.Encoder::new()
@@ -116,7 +116,7 @@ pub fn encode_push_telemetry_request(
 ///|
 /// Decode a PushTelemetry v0 response body: the throttle hint plus the
 /// top-level error code.
-pub fn decode_push_telemetry_response(d : @buf.Decoder) -> (Int, Int) raise {
+pub fn decode_push_telemetry_response(d : @buf.Decoder) -> (Int32, Int32) raise {
   let throttle = d.read_i32()
   let error_code = d.read_i16()
   d.skip_tag_buffer()
@@ -127,12 +127,12 @@ pub fn decode_push_telemetry_response(d : @buf.Decoder) -> (Int, Int) raise {
 pub async fn BrokerConnection::push_telemetry(
   self : BrokerConnection,
   client_instance_id : Uuid,
-  subscription_id : Int,
+  subscription_id : Int32,
   metrics : Bytes,
-  terminating? : Bool = false,
-  compression_type? : Int = 0,
-  timeout_ms? : Int = 30000,
-) -> Int {
+  terminating~ : Bool = false,
+  compression_type~ : Int32 = 0,
+  timeout_ms~ : Int32 = 30000,
+) -> Int32 {
   let version = self.api_version(API_PUSH_TELEMETRY)
   let d = self.request(
     API_PUSH_TELEMETRY,

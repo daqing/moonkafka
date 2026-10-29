@@ -4,7 +4,7 @@
 test "fetch session epoch wrap forces a full request" {
   let s = FetchSession::new()
   s.handle_response(9, 0)
-  let huge : Map[Int, (Int64, Int)] = Map([])
+  let huge : Map[Int32, (Int64, Int32)] = Map([])
   huge[0] = (1L, 0)
   ignore(s.prepare("events", Uuid::zero(), huge, 100))
   // Pretend the epochs ran out.

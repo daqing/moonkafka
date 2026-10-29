@@ -1013,7 +1013,7 @@ test "consumer group heartbeat v1 request encodes owned partitions by epoch" {
   // with nothing left, so it rejected the request outright. Writing a true
   // null on the epoch-0 join is no better: the coordinator rejects that too
   // ("TopicPartitions must be empty when (re-)joining").
-  let encode : (Int) -> Bytes raise = fn(epoch) raise {
+  let encode : (Int32) -> Bytes raise = fn(epoch) raise {
     @moonkafka.encode_consumer_group_heartbeat_request(
       1,
       "g",
@@ -1022,7 +1022,7 @@ test "consumer group heartbeat v1 request encodes owned partitions by epoch" {
       subscribed_topic_names=Some(["t"]),
     )
   }
-  let expected = fn(epoch : Int, owned : Int) {
+  let expected = fn(epoch : Int32, owned : Int32) {
     let e = @buf.Encoder::new()
     e.write_compact_string("g")
     e.write_compact_string("m")
@@ -1056,7 +1056,7 @@ test "consumer group heartbeat response distinguishes a null assignment" {
   // mean "no change" rather than re-sending it every heartbeat (KIP-893).
   // Reading that as an empty assignment dropped the partitions the member
   // had just been given, so the null has to survive decoding.
-  let response = fn(present : Bool, topics : Int) {
+  let response = fn(present : Bool, topics : Int32) {
     let e = @buf.Encoder::new()
     e.write_i32(0) // throttle
     e.write_i16(0) // error

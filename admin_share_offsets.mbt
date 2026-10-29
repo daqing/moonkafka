@@ -9,7 +9,7 @@
 /// the partitions to describe (empty = all).
 pub(all) struct ShareOffsetDescribeTopic {
   name : String
-  partitions : Array[Int]
+  partitions : Array[Int32]
 } derive(@debug.Debug)
 
 ///|
@@ -52,11 +52,11 @@ pub fn encode_describe_share_group_offsets_request(
 ///|
 /// One described partition's share start offset.
 pub(all) struct ShareOffsetDescribePartition {
-  partition : Int
+  partition : Int32
   start_offset : Int64
-  leader_epoch : Int
+  leader_epoch : Int32
   lag : Int64
-  error_code : Int
+  error_code : Int32
   error_message : String?
 } derive(@debug.Debug)
 
@@ -71,7 +71,7 @@ pub(all) struct ShareOffsetDescribeTopicResult {
 pub(all) struct ShareOffsetDescribeGroupResult {
   group_id : String
   topics : Array[ShareOffsetDescribeTopicResult]
-  error_code : Int
+  error_code : Int32
   error_message : String?
 } derive(@debug.Debug)
 
@@ -79,9 +79,9 @@ pub(all) struct ShareOffsetDescribeGroupResult {
 /// Decode a DescribeShareGroupOffsets v0/v1 response body. Lag defaults
 /// to -1 in v0.
 pub fn decode_describe_share_group_offsets_response(
-  version : Int,
+  version : Int32,
   d : @buf.Decoder,
-) -> (Array[ShareOffsetDescribeGroupResult], Int) raise {
+) -> (Array[ShareOffsetDescribeGroupResult], Int32) raise {
   if version < 0 || version > 1 {
     raise ProtocolError::ProtocolError(
       "moonkafka implements DescribeShareGroupOffsets v0-v1, got v\{version}",
@@ -132,7 +132,7 @@ pub fn decode_describe_share_group_offsets_response(
 pub async fn BrokerConnection::describe_share_group_offsets(
   self : BrokerConnection,
   groups : Array[ShareOffsetDescribeGroup],
-  timeout_ms? : Int = 30000,
+  timeout_ms~ : Int32 = 30000,
 ) -> Array[ShareOffsetDescribeGroupResult] {
   let version = self.api_version(API_DESCRIBE_SHARE_GROUP_OFFSETS)
   let d = self.request(
@@ -151,7 +151,7 @@ pub async fn BrokerConnection::describe_share_group_offsets(
 ///|
 /// One partition's start offset to alter.
 pub(all) struct ShareOffsetAlterPartition {
-  partition : Int
+  partition : Int32
   start_offset : Int64
 } derive(@debug.Debug)
 
@@ -187,8 +187,8 @@ pub fn encode_alter_share_group_offsets_request(
 
 ///|
 pub(all) struct ShareOffsetAlterPartitionResult {
-  partition : Int
-  error_code : Int
+  partition : Int32
+  error_code : Int32
   error_message : String?
 } derive(@debug.Debug)
 
@@ -201,7 +201,7 @@ pub(all) struct ShareOffsetAlterTopicResult {
 
 ///|
 pub struct ShareOffsetAlterResult {
-  error_code : Int
+  error_code : Int32
   error_message : String?
   topics : Array[ShareOffsetAlterTopicResult]
 } derive(@debug.Debug)
@@ -210,7 +210,7 @@ pub struct ShareOffsetAlterResult {
 /// Decode an AlterShareGroupOffsets v0 response body.
 pub fn decode_alter_share_group_offsets_response(
   d : @buf.Decoder,
-) -> (ShareOffsetAlterResult, Int) raise {
+) -> (ShareOffsetAlterResult, Int32) raise {
   let throttle = d.read_i32()
   let error_code = d.read_i16()
   let error_message = d.read_compact_nullable_string()
@@ -244,7 +244,7 @@ pub async fn BrokerConnection::alter_share_group_offsets(
   self : BrokerConnection,
   group_id : String,
   topics : Array[ShareOffsetAlterTopic],
-  timeout_ms? : Int = 30000,
+  timeout_ms~ : Int32 = 30000,
 ) -> ShareOffsetAlterResult {
   let version = self.api_version(API_ALTER_SHARE_GROUP_OFFSETS)
   let d = self.request(
@@ -279,13 +279,13 @@ pub fn encode_delete_share_group_offsets_request(
 pub(all) struct ShareOffsetDeleteTopicResult {
   name : String
   topic_id : Uuid
-  error_code : Int
+  error_code : Int32
   error_message : String?
 } derive(@debug.Debug)
 
 ///|
 pub struct ShareOffsetDeleteResult {
-  error_code : Int
+  error_code : Int32
   error_message : String?
   topics : Array[ShareOffsetDeleteTopicResult]
 } derive(@debug.Debug)
@@ -294,7 +294,7 @@ pub struct ShareOffsetDeleteResult {
 /// Decode a DeleteShareGroupOffsets v0 response body.
 pub fn decode_delete_share_group_offsets_response(
   d : @buf.Decoder,
-) -> (ShareOffsetDeleteResult, Int) raise {
+) -> (ShareOffsetDeleteResult, Int32) raise {
   let throttle = d.read_i32()
   let error_code = d.read_i16()
   let error_message = d.read_compact_nullable_string()
@@ -322,7 +322,7 @@ pub async fn BrokerConnection::delete_share_group_offsets(
   self : BrokerConnection,
   group_id : String,
   topics : Array[String],
-  timeout_ms? : Int = 30000,
+  timeout_ms~ : Int32 = 30000,
 ) -> ShareOffsetDeleteResult {
   let version = self.api_version(API_DELETE_SHARE_GROUP_OFFSETS)
   let d = self.request(

@@ -24,13 +24,13 @@
 /// GROUP_ID_NOT_FOUND: what v6 reports for a group the coordinator does
 /// not hold as a classic group (KIP-1043), including KIP-848 consumer
 /// groups.
-pub const GROUP_ID_NOT_FOUND : Int = 69
+pub const GROUP_ID_NOT_FOUND : Int32 = 69
 
 ///|
 /// The AuthorizedOperations sentinel a broker sends when the request did
 /// not ask for authorized operations, or the group errored
 /// (Integer.MIN_VALUE in the Java client).
-pub const AUTHORIZED_OPERATIONS_NONE : Int = -2147483648
+pub const AUTHORIZED_OPERATIONS_NONE : Int32 = -2147483648
 
 ///|
 /// One member of a described classic group.
@@ -69,7 +69,7 @@ pub fn AdminGroupMember::subscribed_topics(
 /// Empty under the same conditions as `subscribed_topics`.
 pub fn AdminGroupMember::assigned_partitions(
   self : AdminGroupMember,
-) -> Array[(String, Array[Int])] {
+) -> Array[(String, Array[Int32])] {
   if self.member_assignment.length() == 0 {
     return []
   }
@@ -81,7 +81,7 @@ pub fn AdminGroupMember::assigned_partitions(
 ///|
 /// One group's DescribeGroups result (error codes as values).
 pub struct AdminGroupDescription {
-  error_code : Int
+  error_code : Int32
   /// The broker's error message (v6, KIP-1043); null when there was none.
   error_message : String?
   group_id : String
@@ -98,7 +98,7 @@ pub struct AdminGroupDescription {
   members : Array[AdminGroupMember]
   /// The authorized-operations bitfield, or None when the request did not
   /// ask for it (the broker's MIN_VALUE sentinel).
-  authorized_operations : Int?
+  authorized_operations : Int32?
 } derive(@debug.Debug)
 
 ///|
@@ -132,7 +132,7 @@ pub fn encode_describe_groups_request(
 /// requested group, in request order.
 pub fn decode_describe_groups_response(
   d : @buf.Decoder,
-) -> (Array[AdminGroupDescription], Int) raise {
+) -> (Array[AdminGroupDescription], Int32) raise {
   let throttle = d.read_i32()
   let out : Array[AdminGroupDescription] = []
   let n = d.read_compact_len()
@@ -189,8 +189,8 @@ pub fn decode_describe_groups_response(
 pub async fn BrokerConnection::describe_groups(
   self : BrokerConnection,
   groups : Array[String],
-  include_authorized_operations? : Bool = false,
-  timeout_ms? : Int = 30000,
+  include_authorized_operations~ : Bool = false,
+  timeout_ms~ : Int32 = 30000,
 ) -> Array[AdminGroupDescription] {
   let d = self.request(
     API_DESCRIBE_GROUPS,
@@ -214,7 +214,7 @@ pub async fn BrokerConnection::describe_groups(
 pub async fn Admin::describe_groups(
   self : Admin,
   groups : Array[String],
-  include_authorized_operations? : Bool = false,
+  include_authorized_operations~ : Bool = false,
 ) -> Array[AdminGroupDescription] {
   self.with_retries(
     fn(results : Array[AdminGroupDescription]) {
@@ -240,20 +240,20 @@ pub async fn Admin::describe_groups(
 ///|
 /// MemberType values from ConsumerGroupDescribe v1 (KIP-1099): a group
 /// migrating between protocols can hold both kinds at once.
-pub const GROUP_MEMBER_TYPE_UNKNOWN : Int = -1
+pub const GROUP_MEMBER_TYPE_UNKNOWN : Int32 = -1
 
 ///|
-pub const GROUP_MEMBER_TYPE_CLASSIC : Int = 0
+pub const GROUP_MEMBER_TYPE_CLASSIC : Int32 = 0
 
 ///|
-pub const GROUP_MEMBER_TYPE_CONSUMER : Int = 1
+pub const GROUP_MEMBER_TYPE_CONSUMER : Int32 = 1
 
 ///|
 /// One topic's partitions inside a member's assignment.
 pub struct AdminAssignedTopicPartitions {
   topic_id : Uuid
   topic_name : String
-  partitions : Array[Int]
+  partitions : Array[Int32]
 } derive(@debug.Debug)
 
 ///|
@@ -265,7 +265,7 @@ pub struct AdminConsumerGroupMember {
   rack_id : String?
   /// The epoch this member last reconciled at; behind the group epoch
   /// while it catches up.
-  member_epoch : Int
+  member_epoch : Int32
   client_id : String
   client_host : String
   subscribed_topic_names : Array[String]
@@ -277,27 +277,27 @@ pub struct AdminConsumerGroupMember {
   /// What the broker intends it to fetch from once it reconciles; differs
   /// from `assignment` while the member epoch lags the assignment epoch.
   target_assignment : Array[AdminAssignedTopicPartitions]
-  member_type : Int
+  member_type : Int32
 } derive(@debug.Debug)
 
 ///|
 /// One group's ConsumerGroupDescribe result (error codes as values).
 pub struct AdminConsumerGroupDescription {
-  error_code : Int
+  error_code : Int32
   error_message : String?
   group_id : String
   /// Empty, Stable, or Assigning.
   group_state : String
-  group_epoch : Int
+  group_epoch : Int32
   /// The epoch of the metadata the target assignments were computed from;
   /// behind `group_epoch` while the broker recomputes.
-  assignment_epoch : Int
+  assignment_epoch : Int32
   /// The selected server-side assignor.
   assignor_name : String
   members : Array[AdminConsumerGroupMember]
   /// The authorized-operations bitfield, or None when the request did not
   /// ask for it (the broker's MIN_VALUE sentinel).
-  authorized_operations : Int?
+  authorized_operations : Int32?
 } derive(@debug.Debug)
 
 ///|
@@ -328,7 +328,7 @@ fn decode_group_assignment(
   for _ in 0..<n {
     let topic_id = Uuid::from_bytes(d.read_bytes(16))
     let topic_name = d.read_compact_string()
-    let partitions : Array[Int] = []
+    let partitions : Array[Int32] = []
     let count = d.read_compact_len()
     for _ in 0..<count {
       partitions.push(d.read_i32())
@@ -345,7 +345,7 @@ fn decode_group_assignment(
 /// requested group, in request order.
 pub fn decode_consumer_group_describe_response(
   d : @buf.Decoder,
-) -> (Array[AdminConsumerGroupDescription], Int) raise {
+) -> (Array[AdminConsumerGroupDescription], Int32) raise {
   let throttle = d.read_i32()
   let out : Array[AdminConsumerGroupDescription] = []
   let n = d.read_compact_len()
@@ -416,8 +416,8 @@ pub fn decode_consumer_group_describe_response(
 pub async fn BrokerConnection::describe_consumer_groups(
   self : BrokerConnection,
   group_ids : Array[String],
-  include_authorized_operations? : Bool = false,
-  timeout_ms? : Int = 30000,
+  include_authorized_operations~ : Bool = false,
+  timeout_ms~ : Int32 = 30000,
 ) -> Array[AdminConsumerGroupDescription] {
   let d = self.request(
     API_CONSUMER_GROUP_DESCRIBE,
@@ -443,7 +443,7 @@ pub async fn BrokerConnection::describe_consumer_groups(
 pub async fn Admin::describe_consumer_groups(
   self : Admin,
   group_ids : Array[String],
-  include_authorized_operations? : Bool = false,
+  include_authorized_operations~ : Bool = false,
 ) -> Array[AdminConsumerGroupDescription] {
   self.with_retries(
     fn(results : Array[AdminConsumerGroupDescription]) {
@@ -488,7 +488,7 @@ pub struct AdminListedGroup {
 /// single top-level error covers the whole listing, and `groups` is empty
 /// when it is non-zero.
 pub struct AdminListGroupsResult {
-  error_code : Int
+  error_code : Int32
   groups : Array[AdminListedGroup]
 } derive(@debug.Debug)
 
@@ -517,7 +517,7 @@ pub fn encode_list_groups_request(
 /// groups the broker listed, with their state and type names.
 pub fn decode_list_groups_response(
   d : @buf.Decoder,
-) -> (AdminListGroupsResult, Int) raise {
+) -> (AdminListGroupsResult, Int32) raise {
   let throttle = d.read_i32()
   let error_code = d.read_i16()
   let groups : Array[AdminListedGroup] = []
@@ -539,7 +539,7 @@ pub async fn BrokerConnection::list_groups(
   self : BrokerConnection,
   states_filter : Array[String],
   types_filter : Array[String],
-  timeout_ms? : Int = 30000,
+  timeout_ms~ : Int32 = 30000,
 ) -> AdminListGroupsResult {
   let d = self.request(
     API_LIST_GROUPS,
@@ -563,8 +563,8 @@ pub async fn BrokerConnection::list_groups(
 /// raise.
 pub async fn Admin::list_groups(
   self : Admin,
-  states_filter? : Array[String] = [],
-  types_filter? : Array[String] = [],
+  states_filter~ : Array[String] = [],
+  types_filter~ : Array[String] = [],
 ) -> AdminListGroupsResult {
   self.with_retries(
     fn(result : AdminListGroupsResult) {
@@ -613,7 +613,7 @@ pub struct AdminDeletedGroup {
   /// 0 on success; otherwise the per-group error, e.g. GROUP_ID_NOT_FOUND
   /// (69) for an unknown group or NON_EMPTY_GROUP (68) for one that still
   /// has members.
-  error_code : Int
+  error_code : Int32
 } derive(@debug.Debug)
 
 ///|
@@ -633,7 +633,7 @@ pub fn encode_delete_groups_request(groups : Array[String]) -> Bytes {
 /// group, in request order, with per-group error codes as values.
 pub fn decode_delete_groups_response(
   d : @buf.Decoder,
-) -> (Array[AdminDeletedGroup], Int) raise {
+) -> (Array[AdminDeletedGroup], Int32) raise {
   let throttle = d.read_i32()
   let out : Array[AdminDeletedGroup] = []
   let n = d.read_compact_len()
@@ -651,7 +651,7 @@ pub fn decode_delete_groups_response(
 pub async fn BrokerConnection::delete_groups(
   self : BrokerConnection,
   groups : Array[String],
-  timeout_ms? : Int = 30000,
+  timeout_ms~ : Int32 = 30000,
 ) -> Array[AdminDeletedGroup] {
   let d = self.request(
     API_DELETE_GROUPS,

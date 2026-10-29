@@ -16,7 +16,7 @@ pub struct TelemetryClientConfig {
   client_instance_id : Uuid
   /// Cap the payload the client renders (the broker's budget wins if
   /// the subscription reports a smaller telemetry_max_bytes).
-  max_push_bytes : Int
+  max_push_bytes : Int32
   /// Renders the metrics payload pushed on each interval.
   metrics_provider : MetricsProvider
 }
@@ -24,14 +24,14 @@ pub struct TelemetryClientConfig {
 ///|
 pub fn TelemetryClientConfig::new(
   bootstrap_servers : Array[String],
-  client_instance_id? : Uuid = Uuid::zero(),
-  max_push_bytes? : Int = 16384,
+  client_instance_id~ : Uuid = Uuid::zero(),
+  max_push_bytes~ : Int32 = 16384,
   metrics_provider~ : MetricsProvider,
-  request_timeout_ms? : Int = 30000,
-  security_protocol? : SecurityProtocol = Plaintext,
-  sasl? : SaslConfig? = None,
-  tls? : TlsClientOptions? = None,
-  metadata_max_age_ms? : Int = 300000,
+  request_timeout_ms~ : Int32 = 30000,
+  security_protocol~ : SecurityProtocol = Plaintext,
+  sasl~ : SaslConfig? = None,
+  tls~ : TlsClientOptions? = None,
+  metadata_max_age_ms~ : Int32 = 300000,
 ) -> TelemetryClientConfig raise {
   {
     common: CommonConfig::new(
@@ -54,13 +54,13 @@ pub struct TelemetryClient {
   /// The user's task group; hosts the push loop.
   group : @async.TaskGroup[Unit]
   priv mut client_instance_id : Uuid
-  max_push_bytes : Int
+  max_push_bytes : Int32
   metrics_provider : MetricsProvider
-  priv mut subscription_id : Int
+  priv mut subscription_id : Int32
   priv mut active : Bool
   priv mut closed : Bool
-  priv mut push_interval_ms : Int
-  priv mut telemetry_max_bytes : Int
+  priv mut push_interval_ms : Int32
+  priv mut telemetry_max_bytes : Int32
 }
 
 ///|
@@ -154,7 +154,7 @@ async fn TelemetryClient::push_loop(self : TelemetryClient) -> Unit {
     if error_code != 0 {
       self.subscription_id = 0 // re-fetch the subscription next round.
     }
-    let wait = Int::max(1, self.push_interval_ms / SENDER_TICK_MS)
+    let wait = Int32::max(1, self.push_interval_ms / SENDER_TICK_MS)
     for _ in 0..<wait {
       if self.closed || !self.active {
         break
@@ -193,7 +193,7 @@ async fn TelemetryClient::refresh_subscription(self : TelemetryClient) -> Bool {
 /// Render the provider's payload, capped at the byte budget. Returns
 /// true when the render had to be truncated (too large to send).
 fn TelemetryClient::render_payload(self : TelemetryClient) -> (Bytes, Bool) {
-  let budget = Int::min(self.telemetry_max_bytes, self.max_push_bytes)
+  let budget = Int32::min(self.telemetry_max_bytes, self.max_push_bytes)
   let full = (self.metrics_provider)()
   if full.length() > budget {
     // Copy the first budget bytes into an owned payload.
