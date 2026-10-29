@@ -20,18 +20,18 @@ priv enum BatchResult {
 
 ///|
 priv struct ProducerBatch {
-  partition : Int
+  partition : Int32
   builder : RecordBatchBuilder
   created_ms : Int64
   /// Closed batches accept no more records and are ready to send.
   mut closed : Bool
   /// Send attempts so far, reported in delivery-timeout errors.
-  mut attempts : Int
+  mut attempts : Int32
   /// Set when the sticky boundary for this batch already fired (append
   /// closed it by rotation); the sender fires it otherwise.
   mut boundary_fired : Bool
   /// Estimated wire size; also the batch's share of buffer_memory.
-  mut size_estimate : Int
+  mut size_estimate : Int32
   mut result : BatchResult?
   /// One semaphore per waiting sender, registered under the accumulator
   /// lock; release() wakes every waiter exactly once.
@@ -40,34 +40,34 @@ priv struct ProducerBatch {
 
 ///|
 /// When the batch becomes ready under the linger setting.
-fn ProducerBatch::ready_at(self : ProducerBatch, linger_ms : Int) -> Int64 {
+fn ProducerBatch::ready_at(self : ProducerBatch, linger_ms : Int32) -> Int64 {
   self.created_ms + linger_ms.to_int64()
 }
 
 ///|
 priv struct RecordAccumulator {
-  batch_size : Int
-  buffer_memory : Int
-  linger_ms : Int
+  batch_size : Int32
+  buffer_memory : Int32
+  linger_ms : Int32
   lock : @async.Mutex
   /// Per-partition queues; the last batch of a queue is the open one.
-  batches : Map[Int, Array[ProducerBatch]]
+  batches : Map[Int32, Array[ProducerBatch]]
   /// Sum of queued batches' size estimates, capped by buffer_memory.
-  mut pool_bytes : Int
+  mut pool_bytes : Int32
   /// Batches popped for sending and not yet resolved.
-  mut in_flight : Int
+  mut in_flight : Int32
   /// Delivery counters, maintained by resolve_locked.
-  mut records_sent : Int
-  mut records_failed : Int
-  mut batches_sent : Int
-  mut batches_failed : Int
+  mut records_sent : Int32
+  mut records_failed : Int32
+  mut batches_sent : Int32
+  mut batches_failed : Int32
 }
 
 ///|
 fn RecordAccumulator::new(
-  batch_size : Int,
-  buffer_memory : Int,
-  linger_ms : Int,
+  batch_size : Int32,
+  buffer_memory : Int32,
+  linger_ms : Int32,
 ) -> RecordAccumulator {
   {
     batch_size,
@@ -87,7 +87,7 @@ fn RecordAccumulator::new(
 ///|
 fn RecordAccumulator::queue(
   self : RecordAccumulator,
-  partition : Int,
+  partition : Int32,
 ) -> Array[ProducerBatch] {
   match self.batches.get(partition) {
     Some(q) => q
@@ -110,12 +110,12 @@ fn RecordAccumulator::queue(
 async fn RecordAccumulator::append(
   self : RecordAccumulator,
   now_ms : Int64,
-  partition : Int,
+  partition : Int32,
   timestamp : Int64,
   key : Bytes?,
   value : Bytes?,
   headers : Array[(Bytes, Bytes)],
-) -> (ProducerBatch, Int, Bool) {
+) -> (ProducerBatch, Int32, Bool) {
   self.lock.acquire()
   defer self.lock.release()
   let queue = self.queue(partition)
@@ -221,7 +221,7 @@ async fn RecordAccumulator::drain_ready(
 /// re-stamp after UNKNOWN_PRODUCER_ID.
 async fn RecordAccumulator::restamp(
   self : RecordAccumulator,
-  stamp : (ProducerBatch, Int) -> Unit,
+  stamp : (ProducerBatch, Int32) -> Unit,
 ) -> Unit {
   self.lock.acquire()
   defer self.lock.release()
@@ -317,7 +317,7 @@ async fn RecordAccumulator::metrics(
 ///|
 /// Total records released with an error so far; the transaction manager
 /// compares snapshots to detect any failed send inside a transaction.
-async fn RecordAccumulator::failed_count(self : RecordAccumulator) -> Int {
+async fn RecordAccumulator::failed_count(self : RecordAccumulator) -> Int32 {
   self.lock.acquire()
   defer self.lock.release()
   self.records_failed
@@ -327,7 +327,7 @@ async fn RecordAccumulator::failed_count(self : RecordAccumulator) -> Int {
 /// Batches not yet resolved: queued (open or waiting for the sender) plus
 /// popped and in flight. Zero means every appended record reached a
 /// terminal result — the commit/abort flush condition.
-async fn RecordAccumulator::outstanding(self : RecordAccumulator) -> Int {
+async fn RecordAccumulator::outstanding(self : RecordAccumulator) -> Int32 {
   self.lock.acquire()
   defer self.lock.release()
   let mut n = self.in_flight

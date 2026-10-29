@@ -5,12 +5,12 @@
 
 ///|
 fn fake_api_versions_response(
-  throttle_ms : Int,
-  hide_apis? : Array[Int] = [],
+  throttle_ms : Int32,
+  hide_apis~ : Array[Int32] = [],
 ) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i16(0) // error_code
-  let all_apis : Array[(Int, Int)] = [
+  let all_apis : Array[(Int32, Int32)] = [
     (0, 13),
     (1, 16),
     (2, 11),
@@ -259,7 +259,7 @@ fn fake_find_coordinator_request_keys(rest : Bytes) -> Array[String] raise {
 ///|
 /// FindCoordinator v4 response body: one entry per requested key, all
 /// pointing at node 0.
-fn fake_find_coordinator_response(keys : Array[String], port : Int) -> Bytes {
+fn fake_find_coordinator_response(keys : Array[String], port : Int32) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(0) // throttle
   e.write_compact_len(keys.length())
@@ -279,7 +279,7 @@ fn fake_find_coordinator_response(keys : Array[String], port : Int) -> Bytes {
 ///|
 /// Parse an InitProducerId v5 request: (transactional id, timeout,
 /// producer id, producer epoch).
-fn fake_init_producer_id_request(rest : Bytes) -> (String?, Int64, Int) raise {
+fn fake_init_producer_id_request(rest : Bytes) -> (String?, Int64, Int32) raise {
   let d = @buf.Decoder::new(rest)
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
@@ -298,7 +298,7 @@ fn fake_init_producer_id_request(rest : Bytes) -> (String?, Int64, Int) raise {
 /// a bump request keeps the pid and increments the epoch.
 fn fake_init_producer_id_response(
   producer_id : Int64,
-  producer_epoch : Int,
+  producer_epoch : Int32,
 ) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(0) // throttle
@@ -314,9 +314,9 @@ fn fake_init_producer_id_response(
 /// topics array.
 fn fake_metadata_response(
   topic : String,
-  broker_port : Int,
-  version : Int,
-  partition_count? : Int = 1,
+  broker_port : Int32,
+  version : Int32,
+  partition_count~ : Int32 = 1,
 ) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(0) // throttle
@@ -365,8 +365,8 @@ let fake_topic_id : Bytes = Bytes::make(16, b'\x2a')
 /// count sits in the batch's v2 header (i32 at bytes 57..61).
 fn fake_produce_request_info(
   rest : Bytes,
-  version : Int,
-) -> (Int, Int, Int64, Int, Int) raise {
+  version : Int32,
+) -> (Int32, Int32, Int64, Int32, Int32) raise {
   let d = @buf.Decoder::new(rest)
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
@@ -400,7 +400,7 @@ fn fake_produce_request_info(
 }
 
 ///|
-fn i32_at(data : Bytes, at : Int) -> Int {
+fn i32_at(data : Bytes, at : Int32) -> Int32 {
   (data[at].to_int() << 24) |
   (data[at + 1].to_int() << 16) |
   (data[at + 2].to_int() << 8) |
@@ -410,9 +410,9 @@ fn i32_at(data : Bytes, at : Int) -> Int {
 ///|
 fn fake_produce_response(
   topic : String,
-  version : Int,
+  version : Int32,
   base_offset : Int64,
-  error_code? : Int = 0,
+  error_code~ : Int32 = 0,
 ) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_compact_len(1) // topics
@@ -441,7 +441,7 @@ fn fake_produce_response(
 fn fake_list_offsets_response(
   topic : String,
   offset : Int64,
-  partition_count? : Int = 1,
+  partition_count~ : Int32 = 1,
 ) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(0) // throttle
@@ -464,7 +464,7 @@ fn fake_list_offsets_response(
 ///|
 /// session_epoch of a Fetch request at v15+ (no replica_id field): the
 /// value sits after max_wait/min/max/isolation and session_id.
-fn fake_fetch_request_session_epoch(rest : Bytes) -> Int raise {
+fn fake_fetch_request_session_epoch(rest : Bytes) -> Int32 raise {
   let d = @buf.Decoder::new(rest)
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
@@ -483,22 +483,22 @@ fn fake_fetch_request_session_epoch(rest : Bytes) -> Int raise {
 /// Shared state of the fake classic group coordinator. Wrapped in a
 /// single-entry array so every connection task mutates the same cell.
 struct FakeCoordinator {
-  mut next_member : Int
+  mut next_member : Int32
   /// member id -> instance id ("" = none)
   members : Map[String, String]
   /// Current completed round == the group's generation.
-  mut round : Int
+  mut round : Int32
   /// member -> round of its last join.
-  arrived : Map[String, Int]
+  arrived : Map[String, Int32]
   /// member -> subscription metadata (first protocol entry).
   subscriptions : Map[String, Bytes]
   /// member -> assignment bytes the leader synced.
   assignments : Map[String, Bytes]
   /// member -> generation of the stored assignment.
-  sync_generations : Map[String, Int]
+  sync_generations : Map[String, Int32]
   mut protocol : String
-  joins : Array[(String, Int)]
-  syncs : Array[(String, Int)]
+  joins : Array[(String, Int32)]
+  syncs : Array[(String, Int32)]
   leaves : Array[String]
 }
 
@@ -552,8 +552,8 @@ fn fake_join_group_request(
 ///|
 /// JoinGroup v9 response body.
 fn fake_join_group_response(
-  error_code : Int,
-  generation : Int,
+  error_code : Int32,
+  generation : Int32,
   protocol : String,
   leader : String,
   member_id : String,
@@ -585,7 +585,7 @@ fn fake_join_group_response(
 /// Parse a SyncGroup v5 request: (member id, generation, assignments).
 fn fake_sync_group_request(
   rest : Bytes,
-) -> (String, Int, Array[(String, Bytes)]) raise {
+) -> (String, Int32, Array[(String, Bytes)]) raise {
   let d = @buf.Decoder::new(rest)
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
@@ -626,7 +626,7 @@ fn fake_sync_group_response(assignment : Bytes) -> Bytes {
 
 ///|
 /// Parse a Heartbeat v4 request: (member id, generation).
-fn fake_classic_heartbeat_request(rest : Bytes) -> (String, Int) raise {
+fn fake_classic_heartbeat_request(rest : Bytes) -> (String, Int32) raise {
   let d = @buf.Decoder::new(rest)
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
@@ -641,7 +641,7 @@ fn fake_classic_heartbeat_request(rest : Bytes) -> (String, Int) raise {
 
 ///|
 /// Heartbeat v4 response body.
-fn fake_classic_heartbeat_response(error_code : Int) -> Bytes {
+fn fake_classic_heartbeat_response(error_code : Int32) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(0) // throttle
   e.write_i16(error_code)
@@ -773,7 +773,7 @@ fn FakeCoordinator::round_complete(self : FakeCoordinator) -> Bool {
 /// replication factors, timeout, validate-only).
 fn fake_create_topics_request(
   rest : Bytes,
-) -> (Array[(String, Int, Int)], Bool) raise {
+) -> (Array[(String, Int32, Int32)], Bool) raise {
   let d = @buf.Decoder::new(rest)
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
@@ -781,7 +781,7 @@ fn fake_create_topics_request(
   ignore(d.read_nullable_string()) // client id
   d.skip_tag_buffer()
   let n = d.read_compact_len()
-  let topics : Array[(String, Int, Int)] = []
+  let topics : Array[(String, Int32, Int32)] = []
   for _ in 0..<n {
     let name = d.read_compact_string()
     let num_partitions = d.read_i32()
@@ -810,7 +810,7 @@ fn fake_create_topics_request(
 ///|
 /// CreateTopics v7 response body: per-topic success with generated ids.
 fn fake_create_topics_response(
-  results : Array[(String, Bytes, Int, String?)],
+  results : Array[(String, Bytes, Int32, String?)],
 ) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(0) // throttle
@@ -890,7 +890,7 @@ fn fake_delete_topics_response(
 /// timeout).
 fn fake_delete_records_request(
   rest : Bytes,
-) -> (Array[(String, Array[(Int, Int64)])], Int) raise {
+) -> (Array[(String, Array[(Int32, Int64)])], Int32) raise {
   let d = @buf.Decoder::new(rest)
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
@@ -898,11 +898,11 @@ fn fake_delete_records_request(
   ignore(d.read_nullable_string()) // client id
   d.skip_tag_buffer()
   let n = d.read_compact_len()
-  let topics : Array[(String, Array[(Int, Int64)])] = []
+  let topics : Array[(String, Array[(Int32, Int64)])] = []
   for _ in 0..<n {
     let name = d.read_compact_string()
     let parts = d.read_compact_len()
-    let partitions : Array[(Int, Int64)] = []
+    let partitions : Array[(Int32, Int64)] = []
     for _ in 0..<parts {
       let index = d.read_i32()
       let offset = d.read_i64()
@@ -918,7 +918,9 @@ fn fake_delete_records_request(
 
 ///|
 /// DeleteRecords v2 response body: per-partition low watermarks.
-fn fake_delete_records_response(results : Array[(Int, Int64, Int)]) -> Bytes {
+fn fake_delete_records_response(
+  results : Array[(Int32, Int64, Int32)],
+) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(0) // throttle
   e.write_compact_len(1) // one topic
@@ -940,7 +942,7 @@ fn fake_delete_records_response(results : Array[(Int, Int64, Int)]) -> Bytes {
 /// Parse a CreatePartitions v3 request: (names, counts, timeout).
 fn fake_create_partitions_request(
   rest : Bytes,
-) -> (Array[(String, Int, Int)], Bool) raise {
+) -> (Array[(String, Int32, Int32)], Bool) raise {
   let d = @buf.Decoder::new(rest)
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
@@ -948,7 +950,7 @@ fn fake_create_partitions_request(
   ignore(d.read_nullable_string()) // client id
   d.skip_tag_buffer()
   let n = d.read_compact_len()
-  let topics : Array[(String, Int, Int)] = []
+  let topics : Array[(String, Int32, Int32)] = []
   for _ in 0..<n {
     let name = d.read_compact_string()
     let count = d.read_i32()
@@ -969,7 +971,7 @@ fn fake_create_partitions_request(
 ///|
 /// CreatePartitions v3 response body.
 fn fake_create_partitions_response(
-  results : Array[(String, Int, String?)],
+  results : Array[(String, Int32, String?)],
 ) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(0) // throttle
@@ -990,7 +992,7 @@ fn fake_create_partitions_response(
 /// partition) pairs).
 fn fake_offset_delete_request(
   rest : Bytes,
-) -> (String, Array[(String, Array[Int])]) raise {
+) -> (String, Array[(String, Array[Int32])]) raise {
   let d = @buf.Decoder::new(rest)
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
@@ -1000,12 +1002,12 @@ fn fake_offset_delete_request(
   let group_len = d.read_i16()
   let group_id = @utf8.decode_lossy(d.read_bytes(group_len)[:])
   let n = d.read_i32()
-  let topics : Array[(String, Array[Int])] = []
+  let topics : Array[(String, Array[Int32])] = []
   for _ in 0..<n {
     let name_len = d.read_i16()
     let name = @utf8.decode_lossy(d.read_bytes(name_len)[:])
     let parts = d.read_i32()
-    let partitions : Array[Int] = []
+    let partitions : Array[Int32] = []
     for _ in 0..<parts {
       partitions.push(d.read_i32())
     }
@@ -1016,7 +1018,9 @@ fn fake_offset_delete_request(
 
 ///|
 /// OffsetDelete v0 response body (non-flexible framing).
-fn fake_offset_delete_response(results : Array[(String, Int, Int)]) -> Bytes {
+fn fake_offset_delete_response(
+  results : Array[(String, Int32, Int32)],
+) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i16(0) // top-level error
   e.write_i32(0) // throttle
@@ -1039,18 +1043,18 @@ fn fake_offset_delete_response(results : Array[(String, Int, Int)]) -> Bytes {
 /// bytes they produced.
 struct FakeClusterOps {
   describe_cluster : Array[Bool] // include-authorized-operations flags
-  describe_configs : Array[(Int, String, Array[String]?)]
-  incremental_alters : Array[(Int, String, Array[(String, Int, String?)])]
-  alter_configs : Array[(Int, String, Array[(String, String?)])]
-  list_config_resources : Array[Array[Int]] // requested type filters
-  log_dirs : Array[Array[(String, Array[Int])]?] // requested topics
-  elect_leaders : Array[(Int, Array[(String, Array[Int])]?)] // (type, topics)
-  alter_reassignments : Array[(String, Int, Array[Int]?)] // (topic, index, replicas)
-  list_reassignments : Array[Array[(String, Array[Int])]?]
-  unregister_broker : Array[Int]
-  quorum_requests : Array[(String, Int)]
-  update_features : Array[(String, Int, Int, Bool)] // (feature, level, type, validate-only)
-  mut update_features_error : Int
+  describe_configs : Array[(Int32, String, Array[String]?)]
+  incremental_alters : Array[(Int32, String, Array[(String, Int32, String?)])]
+  alter_configs : Array[(Int32, String, Array[(String, String?)])]
+  list_config_resources : Array[Array[Int32]] // requested type filters
+  log_dirs : Array[Array[(String, Array[Int32])]?] // requested topics
+  elect_leaders : Array[(Int32, Array[(String, Array[Int32])]?)] // (type, topics)
+  alter_reassignments : Array[(String, Int32, Array[Int32]?)] // (topic, index, replicas)
+  list_reassignments : Array[Array[(String, Array[Int32])]?]
+  unregister_broker : Array[Int32]
+  quorum_requests : Array[(String, Int32)]
+  update_features : Array[(String, Int32, Int32, Bool)] // (feature, level, type, validate-only)
+  mut update_features_error : Int32
   describe_acls : Array[@moonkafka.AclFilter]
   create_acls : Array[@moonkafka.AclCreation]
   delete_acls : Array[@moonkafka.AclFilter]
@@ -1074,7 +1078,7 @@ struct FakeClusterOps {
   /// Group ids DeleteGroups answers with GROUP_ID_NOT_FOUND.
   delete_groups_not_found : Array[String]
   /// DescribeProducers requests: topics and their partition indexes.
-  describe_producers : Array[Array[(String, Array[Int])]]
+  describe_producers : Array[Array[(String, Array[Int32])]]
   /// DescribeTransactions requests: the transactional ids.
   describe_transactions : Array[Array[String]]
   /// ListTransactions requests: (state_filters, producer_id_filters,
@@ -1142,7 +1146,7 @@ fn fake_describe_cluster_request(rest : Bytes) -> Bool raise {
 ///|
 /// DescribeCluster v0-v2 response body: one broker (node 0), the fake
 /// cluster id, node 0 as controller.
-fn fake_describe_cluster_response(port : Int, version : Int) -> Bytes {
+fn fake_describe_cluster_response(port : Int32, version : Int32) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(0) // throttle
   e.write_i16(0) // error
@@ -1171,10 +1175,10 @@ fn fake_describe_cluster_response(port : Int, version : Int) -> Bytes {
 /// resource plus the include flags.
 fn fake_describe_configs_request(
   rest : Bytes,
-) -> (Array[(Int, String, Array[String]?)], Bool, Bool) raise {
+) -> (Array[(Int32, String, Array[String]?)], Bool, Bool) raise {
   let d = @buf.Decoder::new(rest)
   fake_skip_flexible_header(d)
-  let resources : Array[(Int, String, Array[String]?)] = []
+  let resources : Array[(Int32, String, Array[String]?)] = []
   let n = d.read_compact_len()
   for _ in 0..<n {
     let resource_type = d.read_i8()
@@ -1202,7 +1206,7 @@ fn fake_describe_configs_request(
 /// DescribeConfigs v4 response body: per resource, one config entry per
 /// requested key (or two canned entries for the null key filter).
 fn fake_describe_configs_response(
-  resources : Array[(Int, String, Array[String]?)],
+  resources : Array[(Int32, String, Array[String]?)],
 ) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(0) // throttle
@@ -1240,15 +1244,15 @@ fn fake_describe_configs_response(
 /// value)) per resource plus the validate-only flag.
 fn fake_incremental_alter_configs_request(
   rest : Bytes,
-) -> (Array[(Int, String, Array[(String, Int, String?)])], Bool) raise {
+) -> (Array[(Int32, String, Array[(String, Int32, String?)])], Bool) raise {
   let d = @buf.Decoder::new(rest)
   fake_skip_flexible_header(d)
-  let resources : Array[(Int, String, Array[(String, Int, String?)])] = []
+  let resources : Array[(Int32, String, Array[(String, Int32, String?)])] = []
   let n = d.read_compact_len()
   for _ in 0..<n {
     let resource_type = d.read_i8()
     let resource_name = d.read_compact_string()
-    let configs : Array[(String, Int, String?)] = []
+    let configs : Array[(String, Int32, String?)] = []
     let count = d.read_compact_len()
     for _ in 0..<count {
       let name = d.read_compact_string()
@@ -1269,10 +1273,10 @@ fn fake_incremental_alter_configs_request(
 /// resource plus the validate-only flag.
 fn fake_alter_configs_request(
   rest : Bytes,
-) -> (Array[(Int, String, Array[(String, String?)])], Bool) raise {
+) -> (Array[(Int32, String, Array[(String, String?)])], Bool) raise {
   let d = @buf.Decoder::new(rest)
   fake_skip_flexible_header(d)
-  let resources : Array[(Int, String, Array[(String, String?)])] = []
+  let resources : Array[(Int32, String, Array[(String, String?)])] = []
   let n = d.read_compact_len()
   for _ in 0..<n {
     let resource_type = d.read_i8()
@@ -1295,7 +1299,7 @@ fn fake_alter_configs_request(
 ///|
 /// AlterConfigs/IncrementalAlterConfigs response body: per-resource
 /// success echoing (type, name).
-fn fake_alter_configs_response(resources : Array[(Int, String)]) -> Bytes {
+fn fake_alter_configs_response(resources : Array[(Int32, String)]) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(0) // throttle
   e.write_compact_len(resources.length())
@@ -1314,11 +1318,11 @@ fn fake_alter_configs_response(resources : Array[(Int, String)]) -> Bytes {
 ///|
 /// Parse a ListConfigResources v0/v1 request: the requested type filter
 /// (empty at v0, which carries no filter field).
-fn fake_list_config_resources_request(rest : Bytes) -> Array[Int] raise {
+fn fake_list_config_resources_request(rest : Bytes) -> Array[Int32] raise {
   let d = @buf.Decoder::new(rest)
   fake_skip_flexible_header(d)
   let version = rest[3].to_int()
-  let types : Array[Int] = []
+  let types : Array[Int32] = []
   if version >= 1 {
     let n = d.read_compact_len()
     for _ in 0..<n {
@@ -1331,7 +1335,7 @@ fn fake_list_config_resources_request(rest : Bytes) -> Array[Int] raise {
 ///|
 /// ListConfigResources v0/v1 response body: a topic and a broker
 /// resource (types only ride v1+).
-fn fake_list_config_resources_response(version : Int) -> Bytes {
+fn fake_list_config_resources_response(version : Int32) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(0) // throttle
   e.write_i16(0) // error
@@ -1354,18 +1358,18 @@ fn fake_list_config_resources_response(version : Int) -> Bytes {
 /// Parse a DescribeLogDirs request: the requested topics (None = all).
 fn fake_describe_log_dirs_request(
   rest : Bytes,
-) -> Array[(String, Array[Int])]? raise {
+) -> Array[(String, Array[Int32])]? raise {
   let d = @buf.Decoder::new(rest)
   fake_skip_flexible_header(d)
   // Null arrays carry the compact-length marker 0 (read back as -1).
-  let topics : Array[(String, Array[Int])]? = match d.read_compact_len() {
+  let topics : Array[(String, Array[Int32])]? = match d.read_compact_len() {
     -1 => None
     n => {
-      let out : Array[(String, Array[Int])] = []
+      let out : Array[(String, Array[Int32])] = []
       for _ in 0..<n {
         let name = d.read_compact_string()
         let parts = d.read_compact_len()
-        let partitions : Array[Int] = []
+        let partitions : Array[Int32] = []
         for _ in 0..<parts {
           partitions.push(d.read_i32())
         }
@@ -1383,8 +1387,8 @@ fn fake_describe_log_dirs_request(
 /// requested topics (or both fake partitions of "events" when the
 /// request asked for all), sizes echoing the partition index.
 fn fake_describe_log_dirs_response(
-  topics : Array[(String, Array[Int])],
-  version : Int,
+  topics : Array[(String, Array[Int32])],
+  version : Int32,
 ) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(0) // throttle
@@ -1425,19 +1429,19 @@ fn fake_describe_log_dirs_response(
 /// timeout).
 fn fake_elect_leaders_request(
   rest : Bytes,
-) -> (Int, Array[(String, Array[Int])]?) raise {
+) -> (Int32, Array[(String, Array[Int32])]?) raise {
   let d = @buf.Decoder::new(rest)
   fake_skip_flexible_header(d)
   let election_type = d.read_i8()
   // Null arrays carry the compact-length marker 0 (read back as -1).
-  let topics : Array[(String, Array[Int])]? = match d.read_compact_len() {
+  let topics : Array[(String, Array[Int32])]? = match d.read_compact_len() {
     -1 => None
     n => {
-      let out : Array[(String, Array[Int])] = []
+      let out : Array[(String, Array[Int32])] = []
       for _ in 0..<n {
         let name = d.read_compact_string()
         let parts = d.read_compact_len()
-        let partitions : Array[Int] = []
+        let partitions : Array[Int32] = []
         for _ in 0..<parts {
           partitions.push(d.read_i32())
         }
@@ -1454,7 +1458,7 @@ fn fake_elect_leaders_request(
 ///|
 /// ElectLeaders v2 response body: per-partition success for the
 /// requested (or canned all) partitions.
-fn fake_elect_leaders_response(topics : Array[(String, Array[Int])]) -> Bytes {
+fn fake_elect_leaders_response(topics : Array[(String, Array[Int32])]) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(0) // throttle
   e.write_i16(0) // top-level error
@@ -1480,14 +1484,14 @@ fn fake_elect_leaders_response(topics : Array[(String, Array[Int])]) -> Bytes {
 /// replicas-or-null) triples.
 fn fake_alter_reassignments_request(
   rest : Bytes,
-) -> Array[(String, Int, Array[Int]?)] raise {
+) -> Array[(String, Int32, Array[Int32]?)] raise {
   let d = @buf.Decoder::new(rest)
   fake_skip_flexible_header(d)
   ignore(d.read_i32()) // timeout
   if rest[3].to_int() >= 1 {
     ignore(d.read_bool()) // allow replication factor change (v1+)
   }
-  let out : Array[(String, Int, Array[Int]?)] = []
+  let out : Array[(String, Int32, Array[Int32]?)] = []
   let n = d.read_compact_len()
   for _ in 0..<n {
     let name = d.read_compact_string()
@@ -1495,10 +1499,10 @@ fn fake_alter_reassignments_request(
     for _ in 0..<count {
       let index = d.read_i32()
       // Null arrays carry the compact-length marker 0 (read back as -1).
-      let replicas : Array[Int]? = match d.read_compact_len() {
+      let replicas : Array[Int32]? = match d.read_compact_len() {
         -1 => None
         parts => {
-          let ids : Array[Int] = []
+          let ids : Array[Int32] = []
           for _ in 0..<parts {
             ids.push(d.read_i32())
           }
@@ -1517,14 +1521,14 @@ fn fake_alter_reassignments_request(
 /// AlterPartitionReassignments response body: success per (topic,
 /// partition, message-null).
 fn fake_alter_reassignments_response(
-  reassignments : Array[(String, Int, Array[Int]?)],
+  reassignments : Array[(String, Int32, Array[Int32]?)],
 ) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(0) // throttle
   e.write_bool(true) // allow replication factor change echo (v1+)
   e.write_i16(0) // top-level error
   e.write_compact_nullable_string(None)
-  let by_topic : Map[String, Array[Int]] = Map([])
+  let by_topic : Map[String, Array[Int32]] = Map([])
   let order : Array[String] = []
   for entry in reassignments {
     let (name, index, _) = entry
@@ -1558,19 +1562,19 @@ fn fake_alter_reassignments_response(
 /// filter (None = all).
 fn fake_list_reassignments_request(
   rest : Bytes,
-) -> Array[(String, Array[Int])]? raise {
+) -> Array[(String, Array[Int32])]? raise {
   let d = @buf.Decoder::new(rest)
   fake_skip_flexible_header(d)
   ignore(d.read_i32()) // timeout
   // Null arrays carry the compact-length marker 0 (read back as -1).
-  let topics : Array[(String, Array[Int])]? = match d.read_compact_len() {
+  let topics : Array[(String, Array[Int32])]? = match d.read_compact_len() {
     -1 => None
     n => {
-      let out : Array[(String, Array[Int])] = []
+      let out : Array[(String, Array[Int32])] = []
       for _ in 0..<n {
         let name = d.read_compact_string()
         let parts = d.read_compact_len()
-        let partitions : Array[Int] = []
+        let partitions : Array[Int32] = []
         for _ in 0..<parts {
           partitions.push(d.read_i32())
         }
@@ -1587,7 +1591,7 @@ fn fake_list_reassignments_request(
 /// ListPartitionReassignments response body: one ongoing reassignment
 /// of "events" partition 0 (empty when the request filters others out).
 fn fake_list_reassignments_response(
-  filter : Array[(String, Array[Int])]?,
+  filter : Array[(String, Array[Int32])]?,
 ) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(0) // throttle
@@ -1620,7 +1624,7 @@ fn fake_list_reassignments_response(
 
 ///|
 /// Parse an UnregisterBroker request: the broker id.
-fn fake_unregister_broker_request(rest : Bytes) -> Int raise {
+fn fake_unregister_broker_request(rest : Bytes) -> Int32 raise {
   let d = @buf.Decoder::new(rest)
   fake_skip_flexible_header(d)
   d.read_i32()
@@ -1639,10 +1643,10 @@ fn fake_unregister_broker_response() -> Bytes {
 
 ///|
 /// Parse a DescribeQuorum request: (topic, partition) pairs.
-fn fake_describe_quorum_request(rest : Bytes) -> Array[(String, Int)] raise {
+fn fake_describe_quorum_request(rest : Bytes) -> Array[(String, Int32)] raise {
   let d = @buf.Decoder::new(rest)
   fake_skip_flexible_header(d)
-  let out : Array[(String, Int)] = []
+  let out : Array[(String, Int32)] = []
   let n = d.read_compact_len()
   for _ in 0..<n {
     let name = d.read_compact_string()
@@ -1661,7 +1665,7 @@ fn fake_describe_quorum_request(rest : Bytes) -> Array[(String, Int)] raise {
 /// DescribeQuorum v2 response body: node 0 leading with one voter
 /// (itself), plus the quorum node/listener map. No throttle field in
 /// this API.
-fn fake_describe_quorum_response(requests : Array[(String, Int)]) -> Bytes {
+fn fake_describe_quorum_response(requests : Array[(String, Int32)]) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i16(0) // top-level error
   e.write_compact_nullable_string(None)
@@ -1704,11 +1708,11 @@ fn fake_describe_quorum_response(requests : Array[(String, Int)]) -> Bytes {
 /// validate-only).
 fn fake_update_features_request(
   rest : Bytes,
-) -> (Array[(String, Int, Int)], Bool) raise {
+) -> (Array[(String, Int32, Int32)], Bool) raise {
   let d = @buf.Decoder::new(rest)
   fake_skip_flexible_header(d)
   ignore(d.read_i32()) // timeout
-  let updates : Array[(String, Int, Int)] = []
+  let updates : Array[(String, Int32, Int32)] = []
   let n = d.read_compact_len()
   for _ in 0..<n {
     let feature = d.read_compact_string()
@@ -1724,7 +1728,7 @@ fn fake_update_features_request(
 ///|
 /// UpdateFeatures v2 response body: top-level error only (v2 dropped
 /// the per-feature results).
-fn fake_update_features_response(error_code : Int) -> Bytes {
+fn fake_update_features_response(error_code : Int32) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(0) // throttle
   e.write_i16(error_code)
@@ -1832,7 +1836,7 @@ fn fake_describe_acls_response() -> Bytes {
 
 ///|
 /// CreateAcls response body: success per creation.
-fn fake_create_acls_response(count : Int) -> Bytes {
+fn fake_create_acls_response(count : Int32) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(0) // throttle
   e.write_compact_len(count)
@@ -1848,7 +1852,7 @@ fn fake_create_acls_response(count : Int) -> Bytes {
 ///|
 /// DeleteAcls response body: per filter, the canned "events" ACL as the
 /// only match (deleted successfully).
-fn fake_delete_acls_response(count : Int) -> Bytes {
+fn fake_delete_acls_response(count : Int32) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(0) // throttle
   e.write_compact_len(count)
@@ -1876,7 +1880,7 @@ fn fake_delete_acls_response(count : Int) -> Bytes {
 /// Quota/SCRAM request and response shapes: the quota APIs negotiate
 /// v0 (legacy lengths, no tag buffers) or v1 (compact + tag buffers),
 /// so their fake helpers shape by version like the real codecs.
-fn fake_quotas_len(d : @buf.Decoder, version : Int) -> Int raise {
+fn fake_quotas_len(d : @buf.Decoder, version : Int32) -> Int32 raise {
   if version >= 1 {
     d.read_compact_len()
   } else {
@@ -1885,7 +1889,7 @@ fn fake_quotas_len(d : @buf.Decoder, version : Int) -> Int raise {
 }
 
 ///|
-fn fake_write_quotas_len(e : @buf.Encoder, n : Int, version : Int) -> Unit {
+fn fake_write_quotas_len(e : @buf.Encoder, n : Int32, version : Int32) -> Unit {
   if version >= 1 {
     e.write_compact_len(n)
   } else {
@@ -1894,7 +1898,7 @@ fn fake_write_quotas_len(e : @buf.Encoder, n : Int, version : Int) -> Unit {
 }
 
 ///|
-fn fake_quotas_string(d : @buf.Decoder, version : Int) -> String raise {
+fn fake_quotas_string(d : @buf.Decoder, version : Int32) -> String raise {
   if version >= 1 {
     d.read_compact_string()
   } else {
@@ -1906,7 +1910,7 @@ fn fake_quotas_string(d : @buf.Decoder, version : Int) -> String raise {
 ///|
 fn fake_quotas_nullable_string(
   d : @buf.Decoder,
-  version : Int,
+  version : Int32,
 ) -> String? raise {
   if version >= 1 {
     d.read_compact_nullable_string()
@@ -1924,7 +1928,7 @@ fn fake_quotas_nullable_string(
 fn fake_write_quotas_string(
   e : @buf.Encoder,
   s : String,
-  version : Int,
+  version : Int32,
 ) -> Unit {
   if version >= 1 {
     e.write_compact_string(s)
@@ -1939,7 +1943,7 @@ fn fake_write_quotas_string(
 fn fake_write_quotas_nullable_string(
   e : @buf.Encoder,
   s : String?,
-  version : Int,
+  version : Int32,
 ) -> Unit {
   if version >= 1 {
     e.write_compact_nullable_string(s)
@@ -1949,7 +1953,7 @@ fn fake_write_quotas_nullable_string(
 }
 
 ///|
-fn fake_write_quotas_tag(e : @buf.Encoder, version : Int) -> Unit {
+fn fake_write_quotas_tag(e : @buf.Encoder, version : Int32) -> Unit {
   if version >= 1 {
     e.write_tag_buffer()
   }
@@ -1957,7 +1961,7 @@ fn fake_write_quotas_tag(e : @buf.Encoder, version : Int) -> Unit {
 
 ///|
 /// Skip the request header: v0 has the legacy shape (no tag buffer).
-fn fake_skip_quotas_header(d : @buf.Decoder, version : Int) -> Unit raise {
+fn fake_skip_quotas_header(d : @buf.Decoder, version : Int32) -> Unit raise {
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
   ignore(d.read_i32()) // correlation id
@@ -1972,7 +1976,7 @@ fn fake_skip_quotas_header(d : @buf.Decoder, version : Int) -> Unit raise {
 
 ///|
 /// Skip a struct's tag buffer: none at v0, one at v1+.
-fn fake_skip_quotas_tag(d : @buf.Decoder, version : Int) -> Unit raise {
+fn fake_skip_quotas_tag(d : @buf.Decoder, version : Int32) -> Unit raise {
   if version >= 1 {
     d.skip_tag_buffer()
   }
@@ -1982,7 +1986,7 @@ fn fake_skip_quotas_tag(d : @buf.Decoder, version : Int) -> Unit raise {
 /// Parse a DescribeClientQuotas v0-v1 request: the filter.
 fn fake_describe_client_quotas_request(
   rest : Bytes,
-  version : Int,
+  version : Int32,
 ) -> @moonkafka.ClientQuotaFilter raise {
   let d = @buf.Decoder::new(rest)
   fake_skip_quotas_header(d, version)
@@ -2002,7 +2006,7 @@ fn fake_describe_client_quotas_request(
 ///|
 /// DescribeClientQuotas response body: one entry for the user "alice"
 /// with the two rate quotas set.
-fn fake_describe_client_quotas_response(version : Int) -> Bytes {
+fn fake_describe_client_quotas_response(version : Int32) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(0) // throttle
   e.write_i16(0) // error
@@ -2029,7 +2033,7 @@ fn fake_describe_client_quotas_response(version : Int) -> Bytes {
 /// validate-only flag.
 fn fake_alter_client_quotas_request(
   rest : Bytes,
-  version : Int,
+  version : Int32,
 ) -> (Array[@moonkafka.ClientQuotaAlteration], Bool) raise {
   let d = @buf.Decoder::new(rest)
   fake_skip_quotas_header(d, version)
@@ -2064,7 +2068,7 @@ fn fake_alter_client_quotas_request(
 /// AlterClientQuotas response body: success per alteration.
 fn fake_alter_client_quotas_response(
   entries : Array[@moonkafka.ClientQuotaAlteration],
-  version : Int,
+  version : Int32,
 ) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(0) // throttle
@@ -2297,14 +2301,14 @@ fn fake_delete_groups_response(
 /// indexes.
 fn fake_describe_producers_request(
   rest : Bytes,
-) -> Array[(String, Array[Int])] raise {
+) -> Array[(String, Array[Int32])] raise {
   let d = @buf.Decoder::new(rest)
   fake_skip_flexible_header(d)
-  let out : Array[(String, Array[Int])] = []
+  let out : Array[(String, Array[Int32])] = []
   let n = d.read_compact_len()
   for _ in 0..<n {
     let name = d.read_compact_string()
-    let partitions : Array[Int] = []
+    let partitions : Array[Int32] = []
     let pcount = d.read_compact_len()
     for _ in 0..<pcount {
       partitions.push(d.read_i32())
@@ -2319,7 +2323,7 @@ fn fake_describe_producers_request(
 /// DescribeProducers v0 response body: echoes the requested topics and
 /// partitions. Partition 0 carries one active producer; the rest are idle.
 fn fake_describe_producers_response(
-  topics : Array[(String, Array[Int])],
+  topics : Array[(String, Array[Int32])],
 ) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(0) // throttle
@@ -2419,7 +2423,7 @@ fn fake_list_transactions_request(
 /// ListTransactions v2 response body: a top-level error, the unknown
 /// state filters, and the transactions this broker coordinates.
 fn fake_list_transactions_response(
-  error_code : Int,
+  error_code : Int32,
   unknown : Array[String],
   transactions : Array[(String, Int64, String)],
 ) -> Bytes {
@@ -2445,7 +2449,7 @@ fn fake_list_transactions_response(
 ///|
 /// The AuthorizedOperations bitfield: a real one when the request asked
 /// for it, the MIN_VALUE sentinel when it did not.
-fn fake_authorized_operations(requested : Bool) -> Int {
+fn fake_authorized_operations(requested : Bool) -> Int32 {
   if requested {
     4094
   } else {
@@ -2518,7 +2522,7 @@ fn fake_describe_groups_response(
 /// tag buffer.
 fn fake_write_group_assignment(
   e : @buf.Encoder,
-  assignment : Array[(Bytes, String, Array[Int])],
+  assignment : Array[(Bytes, String, Array[Int32])],
 ) -> Unit {
   e.write_compact_len(assignment.length())
   for entry in assignment {
@@ -2611,7 +2615,7 @@ fn fake_consumer_group_describe_response(
 /// instance id, subscribed regex).
 fn fake_consumer_group_heartbeat_request(
   rest : Bytes,
-) -> (String, String, Int, String?, String?) raise {
+) -> (String, String, Int32, String?, String?) raise {
   let d = @buf.Decoder::new(rest)
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
@@ -2648,10 +2652,10 @@ fn fake_consumer_group_heartbeat_request(
 /// ConsumerGroupHeartbeat response body: the confirmed identity, the
 /// next epoch, a 20ms heartbeat interval, and the configured assignment.
 fn fake_consumer_group_heartbeat_response(
-  error_code : Int,
+  error_code : Int32,
   member_id : String,
-  member_epoch : Int,
-  partitions : Array[Int],
+  member_epoch : Int32,
+  partitions : Array[Int32],
 ) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(0) // throttle
@@ -2680,7 +2684,7 @@ fn fake_consumer_group_heartbeat_response(
 ///|
 /// Isolation level of a Fetch request (0 read_uncommitted, 1
 /// read_committed).
-fn fake_fetch_request_isolation(rest : Bytes) -> Int raise {
+fn fake_fetch_request_isolation(rest : Bytes) -> Int32 raise {
   let d = @buf.Decoder::new(rest)
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
@@ -2699,8 +2703,8 @@ fn fake_fetch_request_isolation(rest : Bytes) -> Int raise {
 /// 42 — read_committed consumers must filter both out.
 fn fake_fetch_response_committed(
   topic : String,
-  version : Int,
-  session_id : Int,
+  version : Int32,
+  session_id : Int32,
 ) -> Bytes {
   let builder = @moonkafka.RecordBatchBuilder::new(base_offset=42L)
   builder.set_idempotence(500L, 0, 0)
@@ -2758,7 +2762,7 @@ fn fake_offset_for_leader_epoch_response(end_offset : Int64) -> Bytes {
 
 ///|
 /// Partition index of the first requested partition.
-fn fake_fetch_request_first_partition(rest : Bytes) -> Int raise {
+fn fake_fetch_request_first_partition(rest : Bytes) -> Int32 raise {
   let d = @buf.Decoder::new(rest)
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
@@ -2807,10 +2811,10 @@ fn fake_fetch_request_first_offset(rest : Bytes) -> Int64 raise {
 /// base offset is patched after encoding (it is outside the CRC).
 fn fake_fetch_response(
   topic : String,
-  version : Int,
-  session_id : Int,
-  error_code? : Int = 0,
-  partition_index? : Int = 0,
+  version : Int32,
+  session_id : Int32,
+  error_code~ : Int32 = 0,
+  partition_index~ : Int32 = 0,
 ) -> Bytes {
   let batch = @moonkafka.encode_record_batch([
     {
@@ -2894,9 +2898,9 @@ fn fake_dtp_request_cursor(
 /// partitions plus an optional resume cursor.
 fn fake_describe_topic_partitions_response(
   topic : String,
-  partitions : Array[Int],
+  partitions : Array[Int32],
   next_cursor : @moonkafka.TopicPartitionCursor?,
-  error_code? : Int = 0,
+  error_code~ : Int32 = 0,
 ) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(0) // throttle
@@ -2938,7 +2942,7 @@ fn fake_describe_topic_partitions_response(
 /// (transactional id, producer id, epoch, topics with partitions).
 fn fake_add_partitions_to_txn_request(
   rest : Bytes,
-) -> (String, Int64, Int, Array[(String, Array[Int])]) raise {
+) -> (String, Int64, Int32, Array[(String, Array[Int32])]) raise {
   let d = @buf.Decoder::new(rest)
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
@@ -2949,11 +2953,11 @@ fn fake_add_partitions_to_txn_request(
   let producer_id = d.read_i64()
   let producer_epoch = d.read_i16()
   let n = d.read_compact_len()
-  let topics : Array[(String, Array[Int])] = []
+  let topics : Array[(String, Array[Int32])] = []
   for _ in 0..<n {
     let name = d.read_compact_string()
     let parts = d.read_compact_len()
-    let partitions : Array[Int] = []
+    let partitions : Array[Int32] = []
     for _ in 0..<parts {
       partitions.push(d.read_i32())
     }
@@ -2967,8 +2971,8 @@ fn fake_add_partitions_to_txn_request(
 /// AddPartitionsToTxn v3 response body: per-partition results under the
 /// v3-and-below topic array.
 fn fake_add_partitions_to_txn_response(
-  topics : Array[(String, Array[Int])],
-  error_code : Int,
+  topics : Array[(String, Array[Int32])],
+  error_code : Int32,
 ) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(0) // throttle
@@ -2993,7 +2997,7 @@ fn fake_add_partitions_to_txn_response(
 /// (transactional id, producer id, epoch, group id).
 fn fake_add_offsets_to_txn_request(
   rest : Bytes,
-) -> (String, Int64, Int, String) raise {
+) -> (String, Int64, Int32, String) raise {
   let d = @buf.Decoder::new(rest)
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
@@ -3009,7 +3013,7 @@ fn fake_add_offsets_to_txn_request(
 
 ///|
 /// AddOffsetsToTxn v4 response body.
-fn fake_add_offsets_to_txn_response(error_code : Int) -> Bytes {
+fn fake_add_offsets_to_txn_response(error_code : Int32) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(0) // throttle
   e.write_i16(error_code)
@@ -3022,7 +3026,7 @@ fn fake_add_offsets_to_txn_response(error_code : Int) -> Bytes {
 /// producer id, epoch, committed (partition, offset) pairs).
 fn fake_txn_offset_commit_request(
   rest : Bytes,
-) -> (String, String, Int64, Int, Array[(Int, Int64)]) raise {
+) -> (String, String, Int64, Int32, Array[(Int32, Int64)]) raise {
   let d = @buf.Decoder::new(rest)
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
@@ -3037,7 +3041,7 @@ fn fake_txn_offset_commit_request(
   ignore(d.read_compact_string()) // member id
   ignore(d.read_compact_nullable_string()) // group instance id
   let n = d.read_compact_len()
-  let offsets : Array[(Int, Int64)] = []
+  let offsets : Array[(Int32, Int64)] = []
   for _ in 0..<n {
     ignore(d.read_compact_string()) // topic name
     let parts = d.read_compact_len()
@@ -3057,8 +3061,8 @@ fn fake_txn_offset_commit_request(
 ///|
 /// TxnOffsetCommit v4 response body.
 fn fake_txn_offset_commit_response(
-  offsets : Array[(Int, Int64)],
-  error_code : Int,
+  offsets : Array[(Int32, Int64)],
+  error_code : Int32,
 ) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(0) // throttle
@@ -3079,7 +3083,7 @@ fn fake_txn_offset_commit_response(
 ///|
 /// Parse an EndTxn v5 request:
 /// (transactional id, producer id, epoch, committed).
-fn fake_end_txn_request(rest : Bytes) -> (String, Int64, Int, Bool) raise {
+fn fake_end_txn_request(rest : Bytes) -> (String, Int64, Int32, Bool) raise {
   let d = @buf.Decoder::new(rest)
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
@@ -3098,9 +3102,9 @@ fn fake_end_txn_request(rest : Bytes) -> (String, Int64, Int, Bool) raise {
 /// post-transaction identity (the fake bumps the epoch like a v2
 /// transaction coordinator).
 fn fake_end_txn_response(
-  error_code : Int,
+  error_code : Int32,
   producer_id : Int64,
-  producer_epoch : Int,
+  producer_epoch : Int32,
 ) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(0) // throttle
@@ -3116,7 +3120,7 @@ fn fake_end_txn_response(
 /// generation/epoch, member id, (partition, offset) commits).
 fn fake_offset_commit_request(
   rest : Bytes,
-) -> (String, Int, String, Array[(Int, Int64)]) raise {
+) -> (String, Int32, String, Array[(Int32, Int64)]) raise {
   let d = @buf.Decoder::new(rest)
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
@@ -3127,7 +3131,7 @@ fn fake_offset_commit_request(
   let generation = d.read_i32()
   let member_id = d.read_compact_string()
   ignore(d.read_compact_nullable_string()) // group instance id
-  let commits : Array[(Int, Int64)] = []
+  let commits : Array[(Int32, Int64)] = []
   let n = d.read_compact_len()
   for _ in 0..<n {
     d.skip(16) // topic id
@@ -3149,8 +3153,8 @@ fn fake_offset_commit_request(
 /// OffsetCommit v10 response body: one topic entry with the given
 /// per-partition error code.
 fn fake_offset_commit_response(
-  commits : Array[(Int, Int64)],
-  error_code : Int,
+  commits : Array[(Int32, Int64)],
+  error_code : Int32,
 ) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(0) // throttle
@@ -3170,7 +3174,7 @@ fn fake_offset_commit_response(
 
 ///|
 /// Parse an OffsetFetch v10 request: (group id, wanted partitions).
-fn fake_offset_fetch_request(rest : Bytes) -> (String, Array[Int]) raise {
+fn fake_offset_fetch_request(rest : Bytes) -> (String, Array[Int32]) raise {
   let d = @buf.Decoder::new(rest)
   ignore(d.read_i16()) // api key
   ignore(d.read_i16()) // api version
@@ -3181,7 +3185,7 @@ fn fake_offset_fetch_request(rest : Bytes) -> (String, Array[Int]) raise {
   let group_id = d.read_compact_string()
   ignore(d.read_compact_nullable_string()) // member id
   ignore(d.read_i32()) // member epoch
-  let partitions : Array[Int] = []
+  let partitions : Array[Int32] = []
   let n = d.read_compact_len()
   for _ in 0..<n {
     d.skip(16) // topic id
@@ -3200,8 +3204,8 @@ fn fake_offset_fetch_request(rest : Bytes) -> (String, Array[Int]) raise {
 /// fake's store (-1 when none).
 fn fake_offset_fetch_response(
   group_id : String,
-  partitions : Array[Int],
-  committed : Map[Int, Int64],
+  partitions : Array[Int32],
+  committed : Map[Int32, Int64],
 ) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(0) // throttle
@@ -3231,48 +3235,48 @@ fn fake_offset_fetch_response(
 async fn fake_serve_conn(
   stream : @moonkafka.BrokerStream,
   topic : String,
-  broker_port : Int,
-  api_throttle_ms? : Int = 0,
-  sasl_ok? : Bool = true,
-  scram_password? : String = "secret",
-  scram_sha512? : Bool = false,
-  fetch_epochs? : Array[Int] = [],
-  produce_partitions? : Array[Int] = [],
-  produce_record_counts? : Array[Int] = [],
-  metadata_requests? : Array[Int] = [],
-  produce_error_rounds? : Int = 0,
-  produce_identities? : Array[(Int64, Int, Int)] = [],
-  unknown_producer_at? : Int = 0,
-  add_txn_requests? : Array[(String, Array[(String, Array[Int])])] = [],
-  add_offsets_requests? : Array[(String, String)] = [],
-  txn_offset_requests? : Array[(String, String, Array[(Int, Int64)])] = [],
-  end_txn_requests? : Array[(String, Int64, Int, Bool)] = [],
-  txn_error_code? : Int = 0,
-  end_txn_error_code? : Int = 0,
-  end_txn_error_rounds? : Int = 0,
-  produce_error_code? : Int = 0,
-  offset_commit_requests? : Array[(String, Int, Int64)] = [],
-  committed_store? : Map[Int, Int64] = Map([]),
-  offset_commit_error_rounds? : Int = 0,
-  fetch_offsets? : Array[Int64] = [],
-  fetch_error_rounds? : Int = 0,
-  fetch_error_code? : Int = 0,
-  epoch_end_offset? : Int64 = 42L,
-  heartbeat_requests? : Array[(String, String, Int, String?)] = [],
-  heartbeat_regexes? : Array[String?] = [],
-  heartbeat_errors? : Array[Int] = [],
-  heartbeat_partitions? : Array[Int] = [0],
-  coordinator? : FakeCoordinator? = None,
-  metadata_partitions? : Int = 1,
-  hide_apis? : Array[Int] = [],
-  dtp_requests? : Array[Int] = [],
-  dtp_error_rounds? : Int = 0,
-  create_topics? : Array[(String, Bytes)] = [],
-  delete_topics? : Array[(String?, Bytes)] = [],
-  create_partitions? : Array[(String, Int)] = [],
-  delete_records? : Array[(String, Int, Int64)] = [],
-  offset_deletes? : Array[(String, String, Int)] = [],
-  cluster_ops? : FakeClusterOps = FakeClusterOps::new(),
+  broker_port : Int32,
+  api_throttle_ms~ : Int32 = 0,
+  sasl_ok~ : Bool = true,
+  scram_password~ : String = "secret",
+  scram_sha512~ : Bool = false,
+  fetch_epochs~ : Array[Int32] = [],
+  produce_partitions~ : Array[Int32] = [],
+  produce_record_counts~ : Array[Int32] = [],
+  metadata_requests~ : Array[Int32] = [],
+  produce_error_rounds~ : Int32 = 0,
+  produce_identities~ : Array[(Int64, Int32, Int32)] = [],
+  unknown_producer_at~ : Int32 = 0,
+  add_txn_requests~ : Array[(String, Array[(String, Array[Int32])])] = [],
+  add_offsets_requests~ : Array[(String, String)] = [],
+  txn_offset_requests~ : Array[(String, String, Array[(Int32, Int64)])] = [],
+  end_txn_requests~ : Array[(String, Int64, Int32, Bool)] = [],
+  txn_error_code~ : Int32 = 0,
+  end_txn_error_code~ : Int32 = 0,
+  end_txn_error_rounds~ : Int32 = 0,
+  produce_error_code~ : Int32 = 0,
+  offset_commit_requests~ : Array[(String, Int32, Int64)] = [],
+  committed_store~ : Map[Int32, Int64] = Map([]),
+  offset_commit_error_rounds~ : Int32 = 0,
+  fetch_offsets~ : Array[Int64] = [],
+  fetch_error_rounds~ : Int32 = 0,
+  fetch_error_code~ : Int32 = 0,
+  epoch_end_offset~ : Int64 = 42L,
+  heartbeat_requests~ : Array[(String, String, Int32, String?)] = [],
+  heartbeat_regexes~ : Array[String?] = [],
+  heartbeat_errors~ : Array[Int32] = [],
+  heartbeat_partitions~ : Array[Int32] = [0],
+  coordinator~ : FakeCoordinator? = None,
+  metadata_partitions~ : Int32 = 1,
+  hide_apis~ : Array[Int32] = [],
+  dtp_requests~ : Array[Int32] = [],
+  dtp_error_rounds~ : Int32 = 0,
+  create_topics~ : Array[(String, Bytes)] = [],
+  delete_topics~ : Array[(String?, Bytes)] = [],
+  create_partitions~ : Array[(String, Int32)] = [],
+  delete_records~ : Array[(String, Int32, Int64)] = [],
+  offset_deletes~ : Array[(String, String, Int32)] = [],
+  cluster_ops~ : FakeClusterOps = FakeClusterOps::new(),
 ) -> Unit {
   // per-connection SASL state
   let mut dtp_frames = 0
@@ -3415,7 +3419,7 @@ async fn fake_serve_conn(
       }
       19 => {
         let (topics, _) = fake_create_topics_request(rest)
-        let results : Array[(String, Bytes, Int, String?)] = []
+        let results : Array[(String, Bytes, Int32, String?)] = []
         let mut next_id = 1
         for entry in topics {
           let (name, _, _) = entry
@@ -3438,7 +3442,7 @@ async fn fake_serve_conn(
       }
       21 => {
         let (topics, _) = fake_delete_records_request(rest)
-        let results : Array[(Int, Int64, Int)] = []
+        let results : Array[(Int32, Int64, Int32)] = []
         for entry in topics {
           let (name, partitions) = entry
           for part in partitions {
@@ -3451,7 +3455,7 @@ async fn fake_serve_conn(
       }
       37 => {
         let (topics, _) = fake_create_partitions_request(rest)
-        let results : Array[(String, Int, String?)] = []
+        let results : Array[(String, Int32, String?)] = []
         for entry in topics {
           let (name, count, _) = entry
           create_partitions.push((name, count))
@@ -3461,7 +3465,7 @@ async fn fake_serve_conn(
       }
       47 => {
         let (group, topics) = fake_offset_delete_request(rest)
-        let results : Array[(String, Int, Int)] = []
+        let results : Array[(String, Int32, Int32)] = []
         for entry in topics {
           let (name, partitions) = entry
           for part in partitions {
@@ -3879,48 +3883,48 @@ async fn fake_broker(
   root : @async.TaskGroup[Unit],
   topic : String,
   accepted : Array[@socket.Tcp],
-  api_throttle_ms? : Int = 0,
-  sasl_ok? : Bool = true,
-  scram_password? : String = "secret",
-  scram_sha512? : Bool = false,
-  wrap_tls? : Bool = false,
-  fetch_epochs? : Array[Int] = [],
-  produce_partitions? : Array[Int] = [],
-  produce_record_counts? : Array[Int] = [],
-  metadata_requests? : Array[Int] = [],
-  produce_error_rounds? : Int = 0,
-  produce_identities? : Array[(Int64, Int, Int)] = [],
-  unknown_producer_at? : Int = 0,
-  add_txn_requests? : Array[(String, Array[(String, Array[Int])])] = [],
-  add_offsets_requests? : Array[(String, String)] = [],
-  txn_offset_requests? : Array[(String, String, Array[(Int, Int64)])] = [],
-  end_txn_requests? : Array[(String, Int64, Int, Bool)] = [],
-  txn_error_code? : Int = 0,
-  end_txn_error_code? : Int = 0,
-  end_txn_error_rounds? : Int = 0,
-  produce_error_code? : Int = 0,
-  offset_commit_requests? : Array[(String, Int, Int64)] = [],
-  committed_store? : Map[Int, Int64] = Map([]),
-  offset_commit_error_rounds? : Int = 0,
-  fetch_offsets? : Array[Int64] = [],
-  fetch_error_rounds? : Int = 0,
-  fetch_error_code? : Int = 0,
-  epoch_end_offset? : Int64 = 42L,
-  heartbeat_requests? : Array[(String, String, Int, String?)] = [],
-  heartbeat_regexes? : Array[String?] = [],
-  heartbeat_errors? : Array[Int] = [],
-  heartbeat_partitions? : Array[Int] = [0],
-  coordinator? : FakeCoordinator? = None,
-  metadata_partitions? : Int = 1,
-  hide_apis? : Array[Int] = [],
-  dtp_requests? : Array[Int] = [],
-  dtp_error_rounds? : Int = 0,
-  create_topics? : Array[(String, Bytes)] = [],
-  delete_topics? : Array[(String?, Bytes)] = [],
-  create_partitions? : Array[(String, Int)] = [],
-  delete_records? : Array[(String, Int, Int64)] = [],
-  offset_deletes? : Array[(String, String, Int)] = [],
-  cluster_ops? : FakeClusterOps = FakeClusterOps::new(),
+  api_throttle_ms~ : Int32 = 0,
+  sasl_ok~ : Bool = true,
+  scram_password~ : String = "secret",
+  scram_sha512~ : Bool = false,
+  wrap_tls~ : Bool = false,
+  fetch_epochs~ : Array[Int32] = [],
+  produce_partitions~ : Array[Int32] = [],
+  produce_record_counts~ : Array[Int32] = [],
+  metadata_requests~ : Array[Int32] = [],
+  produce_error_rounds~ : Int32 = 0,
+  produce_identities~ : Array[(Int64, Int32, Int32)] = [],
+  unknown_producer_at~ : Int32 = 0,
+  add_txn_requests~ : Array[(String, Array[(String, Array[Int32])])] = [],
+  add_offsets_requests~ : Array[(String, String)] = [],
+  txn_offset_requests~ : Array[(String, String, Array[(Int32, Int64)])] = [],
+  end_txn_requests~ : Array[(String, Int64, Int32, Bool)] = [],
+  txn_error_code~ : Int32 = 0,
+  end_txn_error_code~ : Int32 = 0,
+  end_txn_error_rounds~ : Int32 = 0,
+  produce_error_code~ : Int32 = 0,
+  offset_commit_requests~ : Array[(String, Int32, Int64)] = [],
+  committed_store~ : Map[Int32, Int64] = Map([]),
+  offset_commit_error_rounds~ : Int32 = 0,
+  fetch_offsets~ : Array[Int64] = [],
+  fetch_error_rounds~ : Int32 = 0,
+  fetch_error_code~ : Int32 = 0,
+  epoch_end_offset~ : Int64 = 42L,
+  heartbeat_requests~ : Array[(String, String, Int32, String?)] = [],
+  heartbeat_regexes~ : Array[String?] = [],
+  heartbeat_errors~ : Array[Int32] = [],
+  heartbeat_partitions~ : Array[Int32] = [0],
+  coordinator~ : FakeCoordinator? = None,
+  metadata_partitions~ : Int32 = 1,
+  hide_apis~ : Array[Int32] = [],
+  dtp_requests~ : Array[Int32] = [],
+  dtp_error_rounds~ : Int32 = 0,
+  create_topics~ : Array[(String, Bytes)] = [],
+  delete_topics~ : Array[(String?, Bytes)] = [],
+  create_partitions~ : Array[(String, Int32)] = [],
+  delete_records~ : Array[(String, Int32, Int64)] = [],
+  offset_deletes~ : Array[(String, String, Int32)] = [],
+  cluster_ops~ : FakeClusterOps = FakeClusterOps::new(),
 ) -> Unit {
   for ;; {
     let (tcp, _) = server.accept()
@@ -4075,7 +4079,7 @@ async test "consumer polls over an incremental fetch session" {
   @async.with_task_group() <| root => {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     let accepted : Array[@socket.Tcp] = []
-    let fetch_epochs : Array[Int] = []
+    let fetch_epochs : Array[Int32] = []
     root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
       fake_broker(server, root, "events", accepted, fetch_epochs~)
     }
@@ -4108,7 +4112,7 @@ async test "producer manual partition override reaches the broker" {
   @async.with_task_group() <| root => {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     let accepted : Array[@socket.Tcp] = []
-    let produce_partitions : Array[Int] = []
+    let produce_partitions : Array[Int32] = []
     root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
       fake_broker(server, root, "events", accepted, produce_partitions~)
     }
@@ -4143,8 +4147,8 @@ async test "accumulator coalesces concurrent sends into one batch" {
   @async.with_task_group() <| root => {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     let accepted : Array[@socket.Tcp] = []
-    let produce_partitions : Array[Int] = []
-    let produce_record_counts : Array[Int] = []
+    let produce_partitions : Array[Int32] = []
+    let produce_record_counts : Array[Int32] = []
     root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
       fake_broker(
         server,
@@ -4198,7 +4202,7 @@ async test "cluster client resolves coordinators, pools connections, refreshes o
   @async.with_task_group() <| root => {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     let accepted : Array[@socket.Tcp] = []
-    let metadata_requests : Array[Int] = []
+    let metadata_requests : Array[Int32] = []
     root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
       fake_broker(server, root, "events", accepted, metadata_requests~)
     }
@@ -4243,7 +4247,7 @@ async test "sender retries retriable produce errors within the delivery window" 
   @async.with_task_group() <| root => {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     let accepted : Array[@socket.Tcp] = []
-    let produce_partitions : Array[Int] = []
+    let produce_partitions : Array[Int32] = []
     root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
       fake_broker(
         server,
@@ -4277,8 +4281,8 @@ async test "sender writes acks=0 produce without reading a response" {
   @async.with_task_group() <| root => {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     let accepted : Array[@socket.Tcp] = []
-    let produce_partitions : Array[Int] = []
-    let produce_record_counts : Array[Int] = []
+    let produce_partitions : Array[Int32] = []
+    let produce_record_counts : Array[Int32] = []
     root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
       fake_broker(
         server,
@@ -4329,7 +4333,7 @@ async test "send handles await, batch, cancel, and call back" {
   @async.with_task_group() <| root => {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     let accepted : Array[@socket.Tcp] = []
-    let produce_record_counts : Array[Int] = []
+    let produce_record_counts : Array[Int32] = []
     root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
       fake_broker(server, root, "events", accepted, produce_record_counts~)
     }
@@ -4385,7 +4389,7 @@ async test "idempotent producer stamps pid/epoch/sequence and recovers epoch" {
   @async.with_task_group() <| root => {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     let accepted : Array[@socket.Tcp] = []
-    let produce_identities : Array[(Int64, Int, Int)] = []
+    let produce_identities : Array[(Int64, Int32, Int32)] = []
     root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
       fake_broker(
         server,
@@ -4430,9 +4434,9 @@ async test "transactional producer commits and keeps the identity moving" {
   @async.with_task_group() <| root => {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     let accepted : Array[@socket.Tcp] = []
-    let produce_identities : Array[(Int64, Int, Int)] = []
-    let add_txn_requests : Array[(String, Array[(String, Array[Int])])] = []
-    let end_txn_requests : Array[(String, Int64, Int, Bool)] = []
+    let produce_identities : Array[(Int64, Int32, Int32)] = []
+    let add_txn_requests : Array[(String, Array[(String, Array[Int32])])] = []
+    let end_txn_requests : Array[(String, Int64, Int32, Bool)] = []
     root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
       fake_broker(
         server,
@@ -4505,7 +4509,7 @@ async test "transactional producer aborts discard the records" {
   @async.with_task_group() <| root => {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     let accepted : Array[@socket.Tcp] = []
-    let end_txn_requests : Array[(String, Int64, Int, Bool)] = []
+    let end_txn_requests : Array[(String, Int64, Int32, Bool)] = []
     root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
       fake_broker(server, root, "events", accepted, end_txn_requests~)
     }
@@ -4540,7 +4544,7 @@ async test "failed sends poison the commit; abort still lands" {
   @async.with_task_group() <| root => {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     let accepted : Array[@socket.Tcp] = []
-    let end_txn_requests : Array[(String, Int64, Int, Bool)] = []
+    let end_txn_requests : Array[(String, Int64, Int32, Bool)] = []
     root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
       fake_broker(
         server,
@@ -4590,7 +4594,7 @@ async test "commit retries a moved coordinator and raises on fencing" {
   @async.with_task_group() <| root => {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     let accepted : Array[@socket.Tcp] = []
-    let end_txn_requests : Array[(String, Int64, Int, Bool)] = []
+    let end_txn_requests : Array[(String, Int64, Int32, Bool)] = []
     root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
       fake_broker(
         server,
@@ -4629,9 +4633,9 @@ async test "transactional offset commits register the group and land at it" {
   @async.with_task_group() <| root => {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     let accepted : Array[@socket.Tcp] = []
-    let end_txn_requests : Array[(String, Int64, Int, Bool)] = []
+    let end_txn_requests : Array[(String, Int64, Int32, Bool)] = []
     let add_offsets_requests : Array[(String, String)] = []
-    let txn_offset_requests : Array[(String, String, Array[(Int, Int64)])] = []
+    let txn_offset_requests : Array[(String, String, Array[(Int32, Int64)])] = []
     root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
       fake_broker(
         server,
@@ -4682,8 +4686,8 @@ async test "consumer commits positions and fetches them back" {
   @async.with_task_group() <| root => {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     let accepted : Array[@socket.Tcp] = []
-    let offset_commit_requests : Array[(String, Int, Int64)] = []
-    let committed_store : Map[Int, Int64] = Map([])
+    let offset_commit_requests : Array[(String, Int32, Int64)] = []
+    let committed_store : Map[Int32, Int64] = Map([])
     root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
       fake_broker(
         server,
@@ -4717,7 +4721,7 @@ async test "consumer commits positions and fetches them back" {
     // The coordinator now answers 44 for partition 0.
     assert_eq(consumer.committed().get(0), Some(44L))
     // An explicit offset map overrides the positions.
-    let manual : Map[Int, Int64] = Map([(0, 30L)])
+    let manual : Map[Int32, Int64] = Map([(0, 30L)])
     consumer.commit(offsets=manual)
     assert_eq(offset_commit_requests.length(), 2)
     assert_eq(offset_commit_requests[1], ("gid-1", 0, 30L))
@@ -4730,8 +4734,8 @@ async test "commit retries coordinator load and async commit calls back" {
   @async.with_task_group() <| root => {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     let accepted : Array[@socket.Tcp] = []
-    let offset_commit_requests : Array[(String, Int, Int64)] = []
-    let committed_store : Map[Int, Int64] = Map([])
+    let offset_commit_requests : Array[(String, Int32, Int64)] = []
+    let committed_store : Map[Int32, Int64] = Map([])
     root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
       fake_broker(
         server,
@@ -4838,8 +4842,8 @@ async test "autocommit commits on the interval and on close" {
   @async.with_task_group() <| root => {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     let accepted : Array[@socket.Tcp] = []
-    let offset_commit_requests : Array[(String, Int, Int64)] = []
-    let committed_store : Map[Int, Int64] = Map([])
+    let offset_commit_requests : Array[(String, Int32, Int64)] = []
+    let committed_store : Map[Int32, Int64] = Map([])
     root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
       fake_broker(
         server,
@@ -5034,9 +5038,9 @@ async test "KIP-848 member joins, reconciles assignment, and leaves" {
   @async.with_task_group() <| root => {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     let accepted : Array[@socket.Tcp] = []
-    let heartbeat_requests : Array[(String, String, Int, String?)] = []
-    let assigned : Array[(String, Int)] = []
-    let revoked : Array[(String, Int)] = []
+    let heartbeat_requests : Array[(String, String, Int32, String?)] = []
+    let assigned : Array[(String, Int32)] = []
+    let revoked : Array[(String, Int32)] = []
     root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
       fake_broker(server, root, "events", accepted, heartbeat_requests~)
     }
@@ -5113,8 +5117,8 @@ async test "fenced member epoch restarts the join" {
   @async.with_task_group() <| root => {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     let accepted : Array[@socket.Tcp] = []
-    let heartbeat_requests : Array[(String, String, Int, String?)] = []
-    let assigned : Array[(String, Int)] = []
+    let heartbeat_requests : Array[(String, String, Int32, String?)] = []
+    let assigned : Array[(String, Int32)] = []
     root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
       fake_broker(
         server,
@@ -5169,8 +5173,8 @@ async test "static membership rides the instance id" {
   @async.with_task_group() <| root => {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     let accepted : Array[@socket.Tcp] = []
-    let heartbeat_requests : Array[(String, String, Int, String?)] = []
-    let assigned : Array[(String, Int)] = []
+    let heartbeat_requests : Array[(String, String, Int32, String?)] = []
+    let assigned : Array[(String, Int32)] = []
     root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
       fake_broker(server, root, "events", accepted, heartbeat_requests~)
     }
@@ -5218,9 +5222,9 @@ async test "regex subscription rides the heartbeat and expands locally" {
   @async.with_task_group() <| root => {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     let accepted : Array[@socket.Tcp] = []
-    let heartbeat_requests : Array[(String, String, Int, String?)] = []
+    let heartbeat_requests : Array[(String, String, Int32, String?)] = []
     let heartbeat_regexes : Array[String?] = []
-    let assigned : Array[(String, Int)] = []
+    let assigned : Array[(String, Int32)] = []
     root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
       fake_broker(
         server,
@@ -5275,7 +5279,7 @@ async test "classic member joins, syncs the range assignment, and leaves" {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     let accepted : Array[@socket.Tcp] = []
     let coord = FakeCoordinator::new()
-    let assigned : Array[(String, Int)] = []
+    let assigned : Array[(String, Int32)] = []
     root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
       fake_broker(server, root, "events", accepted, coordinator=Some(coord))
     }
@@ -5339,9 +5343,9 @@ async test "two classic members split partitions and rebalance on join" {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     let accepted : Array[@socket.Tcp] = []
     let coord = FakeCoordinator::new()
-    let assigned_a : Array[(String, Int)] = []
-    let revoked_a : Array[(String, Int)] = []
-    let assigned_b : Array[(String, Int)] = []
+    let assigned_a : Array[(String, Int32)] = []
+    let revoked_a : Array[(String, Int32)] = []
+    let assigned_b : Array[(String, Int32)] = []
     root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
       fake_broker(
         server,
@@ -5353,7 +5357,7 @@ async test "two classic members split partitions and rebalance on join" {
       )
     }
     let listener = fn(
-      on_assign : Array[((String, Int)) -> Unit],
+      on_assign : Array[((String, Int32)) -> Unit],
     ) -> @moonkafka.RebalanceListener {
       ignore(on_assign)
       @moonkafka.RebalanceListener::default()
@@ -5456,9 +5460,9 @@ async test "cooperative sticky revokes first and assigns in a second round" {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     let accepted : Array[@socket.Tcp] = []
     let coord = FakeCoordinator::new()
-    let assigned_a : Array[(String, Int)] = []
-    let revoked_a : Array[(String, Int)] = []
-    let assigned_b : Array[(String, Int)] = []
+    let assigned_a : Array[(String, Int32)] = []
+    let revoked_a : Array[(String, Int32)] = []
+    let assigned_b : Array[(String, Int32)] = []
     root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
       fake_broker(
         server,
@@ -5604,7 +5608,7 @@ async test "group metadata tracks the member identity" {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     let accepted : Array[@socket.Tcp] = []
     let coord = FakeCoordinator::new()
-    let assigned : Array[(String, Int)] = []
+    let assigned : Array[(String, Int32)] = []
     root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
       fake_broker(server, root, "events", accepted, coordinator=Some(coord))
     }
@@ -5651,7 +5655,7 @@ async test "poll gap past max_poll_interval leaves the group and raises" {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     let accepted : Array[@socket.Tcp] = []
     let coord = FakeCoordinator::new()
-    let assigned : Array[(String, Int)] = []
+    let assigned : Array[(String, Int32)] = []
     root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
       fake_broker(server, root, "events", accepted, coordinator=Some(coord))
     }
@@ -5730,7 +5734,7 @@ async test "group_protocol classic routes subscribe through JoinGroup" {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     let accepted : Array[@socket.Tcp] = []
     let coord = FakeCoordinator::new()
-    let _assigned : Array[(String, Int)] = []
+    let _assigned : Array[(String, Int32)] = []
     root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
       fake_broker(server, root, "events", accepted, coordinator=Some(coord))
     }
@@ -5768,8 +5772,8 @@ async test "fallback prefers consumer and degrades to classic" {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     let accepted : Array[@socket.Tcp] = []
     let coord = FakeCoordinator::new()
-    let heartbeat_requests : Array[(String, String, Int, String?)] = []
-    let _assigned : Array[(String, Int)] = []
+    let heartbeat_requests : Array[(String, String, Int32, String?)] = []
+    let _assigned : Array[(String, Int32)] = []
     root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
       fake_broker(server, root, "events", accepted, coordinator=Some(coord), hide_apis=[
         68,
@@ -5810,8 +5814,8 @@ async test "fallback prefers consumer over an advertising broker" {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     let accepted : Array[@socket.Tcp] = []
     let coord = FakeCoordinator::new()
-    let heartbeat_requests : Array[(String, String, Int, String?)] = []
-    let _assigned : Array[(String, Int)] = []
+    let heartbeat_requests : Array[(String, String, Int32, String?)] = []
+    let _assigned : Array[(String, Int32)] = []
     root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
       fake_broker(
         server,
@@ -5906,7 +5910,7 @@ async test "admin retries retriable topic errors under the policy" {
   @async.with_task_group() <| root => {
     let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
     let accepted : Array[@socket.Tcp] = []
-    let dtp_requests : Array[Int] = []
+    let dtp_requests : Array[Int32] = []
     root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
       fake_broker(
         server,
@@ -5939,9 +5943,9 @@ async test "admin topic lifecycle: create, grow, truncate, delete offsets, delet
     let accepted : Array[@socket.Tcp] = []
     let create_topics : Array[(String, Bytes)] = []
     let delete_topics : Array[(String?, Bytes)] = []
-    let create_partitions : Array[(String, Int)] = []
-    let delete_records : Array[(String, Int, Int64)] = []
-    let offset_deletes : Array[(String, String, Int)] = []
+    let create_partitions : Array[(String, Int32)] = []
+    let delete_records : Array[(String, Int32, Int64)] = []
+    let offset_deletes : Array[(String, String, Int32)] = []
     root.spawn_bg(no_wait=true, allow_failure=true) <| () => {
       fake_broker(
         server,

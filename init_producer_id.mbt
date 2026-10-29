@@ -8,8 +8,8 @@
 ///|
 pub struct InitProducerIdResult {
   producer_id : Int64
-  producer_epoch : Int
-  error_code : Int
+  producer_epoch : Int32
+  error_code : Int32
 } derive(@debug.Debug)
 
 ///|
@@ -18,9 +18,9 @@ pub struct InitProducerIdResult {
 /// bump the epoch for the existing identity.
 pub fn encode_init_producer_id_request(
   transactional_id : String?,
-  transaction_timeout_ms : Int,
+  transaction_timeout_ms : Int32,
   producer_id : Int64,
-  producer_epoch : Int,
+  producer_epoch : Int32,
 ) -> Bytes {
   let body = @buf.Encoder::new()
   body.write_compact_nullable_string(transactional_id)
@@ -36,7 +36,7 @@ pub fn encode_init_producer_id_request(
 /// producer identity plus the throttle hint.
 pub fn decode_init_producer_id_response(
   d : @buf.Decoder,
-) -> (InitProducerIdResult, Int) raise {
+) -> (InitProducerIdResult, Int32) raise {
   let throttle = d.read_i32()
   let error_code = d.read_i16()
   let producer_id = d.read_i64()
@@ -48,11 +48,11 @@ pub fn decode_init_producer_id_response(
 ///|
 pub async fn BrokerConnection::init_producer_id(
   self : BrokerConnection,
-  transactional_id? : String? = None,
-  transaction_timeout_ms? : Int = 60000,
-  producer_id? : Int64 = -1L,
-  producer_epoch? : Int = -1,
-  timeout_ms? : Int = 30000,
+  transactional_id~ : String? = None,
+  transaction_timeout_ms~ : Int32 = 60000,
+  producer_id~ : Int64 = -1L,
+  producer_epoch~ : Int32 = -1,
+  timeout_ms~ : Int32 = 30000,
 ) -> InitProducerIdResult {
   let version = self.api_version(API_INIT_PRODUCER_ID)
   let d = self.request(

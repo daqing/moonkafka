@@ -3,7 +3,7 @@
 // into PartitionRouter/StickyPartitioner directly, without a connection.
 
 ///|
-fn router_raises(f : () -> Int raise) -> Bool {
+fn router_raises(f : () -> Int32 raise) -> Bool {
   let _ = f() catch { _ => return true }
   false
 }

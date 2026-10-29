@@ -13,18 +13,18 @@
 pub struct AdminConfig {
   common : CommonConfig
   /// How often a retriable admin result is re-issued.
-  admin_retries : Int
+  admin_retries : Int32
 } derive(@debug.Debug)
 
 ///|
 pub fn AdminConfig::new(
   bootstrap_servers : Array[String],
-  request_timeout_ms? : Int = 30000,
-  security_protocol? : SecurityProtocol = Plaintext,
-  sasl? : SaslConfig? = None,
-  tls? : TlsClientOptions? = None,
-  metadata_max_age_ms? : Int = 300000,
-  admin_retries? : Int = 5,
+  request_timeout_ms~ : Int32 = 30000,
+  security_protocol~ : SecurityProtocol = Plaintext,
+  sasl~ : SaslConfig? = None,
+  tls~ : TlsClientOptions? = None,
+  metadata_max_age_ms~ : Int32 = 300000,
+  admin_retries~ : Int32 = 5,
 ) -> AdminConfig raise {
   if admin_retries < 0 {
     raise ProtocolError::ProtocolError(
@@ -46,11 +46,11 @@ pub fn AdminConfig::new(
 
 ///|
 pub struct Admin {
-  request_timeout_ms : Int
+  request_timeout_ms : Int32
   /// The retriable-result retry budget (the policy knob).
-  admin_retries : Int
-  retry_backoff_ms : Int
-  retry_backoff_max_ms : Int
+  admin_retries : Int32
+  retry_backoff_ms : Int32
+  retry_backoff_max_ms : Int32
   priv cluster : ClusterClient
   mut closed : Bool
 }
@@ -60,7 +60,7 @@ pub struct Admin {
 /// like the other clients. Ops run on any broker or on the controller
 /// as each API requires. Admin runs no background tasks of its own, so
 /// it takes no task group (unlike the producer/consumer clients).
-pub async fn Admin::connect(host~ : String, port~ : Int) -> Admin {
+pub async fn Admin::connect(host~ : String, port~ : Int32) -> Admin {
   let config = AdminConfig::new(["\{host}:\{port}"])
   Admin::connect_with_config(config)
 }
@@ -158,7 +158,7 @@ async fn[T] Admin::with_retries(
 ///|
 /// True when the broker marks this error as retriable (the shared
 /// classification drives the admin retry policy).
-fn admin_error_retriable(code : Int) -> Bool {
+fn admin_error_retriable(code : Int32) -> Bool {
   error_retriable(code)
 }
 
@@ -166,7 +166,7 @@ fn admin_error_retriable(code : Int) -> Bool {
 /// One topic's DescribeTopicPartitions result (error codes as values).
 pub struct AdminTopicDescription {
   name : String
-  error_code : Int
+  error_code : Int32
   topic_id : Uuid
   partitions : Array[PartitionInfo]
 } derive(@debug.Debug)

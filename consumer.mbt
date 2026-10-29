@@ -18,9 +18,9 @@ struct PartitionState {
 ///|
 /// True when the manual assignment list contains (topic, partition).
 fn manual_has(
-  parts : Array[(String, Int)],
+  parts : Array[(String, Int32)],
   topic : String,
-  partition : Int,
+  partition : Int32,
 ) -> Bool {
   for pair in parts {
     if pair.0 == topic && pair.1 == partition {
@@ -43,53 +43,53 @@ priv enum PollOutcome {
 pub struct Consumer {
   topic : String
   start_from : StartFrom
-  request_timeout_ms : Int
-  retries : Int
-  retry_backoff_ms : Int
-  retry_backoff_max_ms : Int
+  request_timeout_ms : Int32
+  retries : Int32
+  retry_backoff_ms : Int32
+  retry_backoff_max_ms : Int32
   /// The user's task group; hosts the autocommit loop, which the group
   /// joins on exit (close lets the final commit land first).
   group : @async.TaskGroup[Unit]
   /// Set when the consumer can commit offsets; the group coordinator
   /// node id is cached next to it until NOT_COORDINATOR.
   priv group_id : String?
-  priv mut group_coordinator : Int?
+  priv mut group_coordinator : Int32?
   enable_auto_commit : Bool
-  auto_commit_interval_ms : Int
+  auto_commit_interval_ms : Int32
   auto_offset_reset : AutoOffsetReset
-  max_poll_records : Int
-  max_partition_fetch_bytes : Int
+  max_poll_records : Int32
+  max_partition_fetch_bytes : Int32
   enable_read_committed : Bool
   /// Last known committed offset per partition (-1 = none), refreshed
   /// by commit() and committed().
-  priv committed_offsets : Map[Int, Int64]
+  priv committed_offsets : Map[Int32, Int64]
   /// KIP-848 membership state, owned by the heartbeat loop.
   priv group_instance_id : String?
   priv mut member_id : String
-  priv mut member_epoch : Int
+  priv mut member_epoch : Int32
   priv mut subscribed_names : Array[String]?
   priv mut subscribed_regex : String?
-  priv mut assignment : Array[(String, Int)]
-  mut heartbeat_interval_ms : Int
-  session_timeout_ms : Int
+  priv mut assignment : Array[(String, Int32)]
+  mut heartbeat_interval_ms : Int32
+  session_timeout_ms : Int32
   priv mut member_active : Bool
   priv mut member_spawned : Bool
   priv mut member_left : Bool
   priv mut member_error : String?
   /// Manual assignment (assign()); None while group-driven.
-  priv mut manual_assignment : Array[(String, Int)]?
+  priv mut manual_assignment : Array[(String, Int32)]?
   mut last_poll_ms : Int64
-  max_poll_interval_ms : Int
+  max_poll_interval_ms : Int32
   group_protocol : GroupProtocol
   /// Classic-protocol membership state.
-  priv mut generation_id : Int
+  priv mut generation_id : Int32
   priv mut classic_assignors : Array[Assignor]
   priv mut member_kind : MemberKind
   priv mut rebalance_listener : RebalanceListener?
   priv cluster : ClusterClient
   mut topic_id : Uuid
   /// Fetch session per leader, driving incremental fetches.
-  fetch_sessions : Map[Int, FetchSession]
+  fetch_sessions : Map[Int32, FetchSession]
   partitions : Array[PartitionState]
   mut closed : Bool
 }
@@ -101,9 +101,9 @@ pub struct Consumer {
 pub async fn Consumer::connect(
   group~ : @async.TaskGroup[Unit],
   host~ : String,
-  port~ : Int,
+  port~ : Int32,
   topic~ : String,
-  start_from? : StartFrom = Earliest,
+  start_from~ : StartFrom = Earliest,
 ) -> Consumer {
   let config = ConsumerConfig::new(["\{host}:\{port}"], topic, start_from~)
   Consumer::connect_with_config(group~, config)
@@ -228,7 +228,7 @@ async fn Consumer::refresh_metadata(self : Consumer) -> Unit {
   // A refresh after a reconnect must keep read positions; fresh connects
   // start from zero and are overwritten by reset_offsets anyway.
   self.topic_id = topic_meta.topic_id
-  let old : Map[Int, (Int64, Bool)] = Map([])
+  let old : Map[Int32, (Int64, Bool)] = Map([])
   for p in self.partitions {
     old[p.info.index] = (p.next_offset, p.paused)
   }
@@ -289,13 +289,13 @@ async fn Consumer::reset_offsets(self : Consumer) -> Unit {
 /// markers and aborted ranges are never re-fetched.
 pub async fn Consumer::poll(
   self : Consumer,
-  max_wait_ms? : Int = 500,
-  max_bytes? : Int = 1048576,
+  max_wait_ms~ : Int32 = 500,
+  max_bytes~ : Int32 = 1048576,
 ) -> Array[Record] {
   self.enforce_poll_interval()
   // Group unpauseed partitions by leader so each leader connection gets
   // one concurrent fetch.
-  let by_leader : Map[Int, Map[Int, (Int64, Int)]] = Map([])
+  let by_leader : Map[Int32, Map[Int32, (Int64, Int32)]] = Map([])
   for p in self.partitions {
     if p.paused {
       continue
@@ -442,9 +442,9 @@ async fn Consumer::enforce_poll_interval(self : Consumer) -> Unit {
 /// One leader's fetch exchange with session-eviction retry.
 async fn Consumer::poll_leader(
   self : Consumer,
-  wanted : Map[Int, (Int64, Int)],
-  max_wait_ms : Int,
-  max_bytes : Int,
+  wanted : Map[Int32, (Int64, Int32)],
+  max_wait_ms : Int32,
+  max_bytes : Int32,
 ) -> PollOutcome {
   let leader = self.leader_of_any(wanted)
   let conn = self.cluster.connection(leader)
@@ -468,8 +468,8 @@ async fn Consumer::poll_leader(
 /// entries share the topic's leader mapping).
 fn Consumer::leader_of_any(
   self : Consumer,
-  wanted : Map[Int, (Int64, Int)],
-) -> Int raise {
+  wanted : Map[Int32, (Int64, Int32)],
+) -> Int32 raise {
   for p in self.partitions {
     if wanted.contains(p.info.index) {
       return p.info.leader
@@ -484,7 +484,7 @@ fn Consumer::leader_of_any(
 /// failure leaves recovery to the metadata refresh.
 async fn Consumer::validate_leader_epoch(
   self : Consumer,
-  partition : Int,
+  partition : Int32,
 ) -> Unit {
   let mut info : PartitionInfo? = None
   for p in self.partitions {
@@ -512,7 +512,7 @@ async fn Consumer::validate_leader_epoch(
 }
 
 ///|
-fn Consumer::position_of(self : Consumer, partition : Int) -> Int64 {
+fn Consumer::position_of(self : Consumer, partition : Int32) -> Int64 {
   for p in self.partitions {
     if p.info.index == partition {
       return p.next_offset
@@ -531,10 +531,10 @@ async fn Consumer::fetch_from_leader(
   self : Consumer,
   conn : BrokerConnection,
   session : FetchSession,
-  wanted : Map[Int, (Int64, Int)],
-  max_wait_ms : Int,
-  max_bytes : Int,
-  partition_max_bytes : Int,
+  wanted : Map[Int32, (Int64, Int32)],
+  max_wait_ms : Int32,
+  max_bytes : Int32,
+  partition_max_bytes : Int32,
 ) -> FetchResult {
   let request = session.prepare(
     self.topic,
@@ -568,8 +568,8 @@ async fn Consumer::send_fetch(
   self : Consumer,
   conn : BrokerConnection,
   request : FetchSessionReq,
-  max_wait_ms : Int,
-  max_bytes : Int,
+  max_wait_ms : Int32,
+  max_bytes : Int32,
 ) -> FetchResult {
   conn.fetch(
     [
@@ -590,7 +590,7 @@ async fn Consumer::send_fetch(
 ///|
 fn Consumer::set_next_offset(
   self : Consumer,
-  partition : Int,
+  partition : Int32,
   offset : Int64,
 ) -> Unit {
   for p in self.partitions {
@@ -605,7 +605,7 @@ fn Consumer::set_next_offset(
 /// (the auto-reset policy's earliest/latest).
 async fn Consumer::reset_partition_offset(
   self : Consumer,
-  partition : Int,
+  partition : Int32,
   sentinel : Int64,
 ) -> Unit {
   for p in self.partitions {
@@ -629,7 +629,7 @@ async fn Consumer::reset_partition_offset(
 ///|
 /// Pause fetching from the given partitions (default: all). Paused
 /// partitions keep their positions; poll skips them until resume.
-pub fn Consumer::pause(self : Consumer, partitions? : Array[Int]) -> Unit {
+pub fn Consumer::pause(self : Consumer, partitions? : Array[Int32]) -> Unit {
   for p in self.partitions {
     if self.pause_wanted(partitions, p.info.index) {
       p.paused = true
@@ -639,7 +639,7 @@ pub fn Consumer::pause(self : Consumer, partitions? : Array[Int]) -> Unit {
 
 ///|
 /// Resume fetching from the given partitions (default: all).
-pub fn Consumer::unpause(self : Consumer, partitions? : Array[Int]) -> Unit {
+pub fn Consumer::unpause(self : Consumer, partitions? : Array[Int32]) -> Unit {
   for p in self.partitions {
     if self.pause_wanted(partitions, p.info.index) {
       p.paused = false
@@ -649,8 +649,8 @@ pub fn Consumer::unpause(self : Consumer, partitions? : Array[Int]) -> Unit {
 
 ///|
 /// The partitions currently paused.
-pub fn Consumer::paused(self : Consumer) -> Array[Int] {
-  let out : Array[Int] = []
+pub fn Consumer::paused(self : Consumer) -> Array[Int32] {
+  let out : Array[Int32] = []
   for p in self.partitions {
     if p.paused {
       out.push(p.info.index)
@@ -662,8 +662,8 @@ pub fn Consumer::paused(self : Consumer) -> Array[Int] {
 ///|
 fn Consumer::pause_wanted(
   _self : Consumer,
-  partitions : Array[Int]?,
-  index : Int,
+  partitions : Array[Int32]?,
+  index : Int32,
 ) -> Bool {
   match partitions {
     None => true

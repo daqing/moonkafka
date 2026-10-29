@@ -8,14 +8,14 @@
 
 ///|
 pub(all) struct ProduceRecordError {
-  batch_index : Int
+  batch_index : Int32
   message : String?
 } derive(@debug.Debug)
 
 ///|
 pub struct ProducePartitionResult {
-  partition : Int
-  error_code : Int
+  partition : Int32
+  error_code : Int32
   base_offset : Int64
   log_append_time : Int64
   log_start_offset : Int64
@@ -29,13 +29,13 @@ pub struct ProducePartitionResult {
 /// would mean "unknown" to the broker, so it raises). `transactional_id`
 /// is None for the non-transactional producer.
 pub fn encode_produce_request(
-  version : Int,
+  version : Int32,
   topic : String,
   topic_id : Uuid,
-  partitions : Array[(Int, Bytes)],
-  transactional_id? : String? = None,
-  acks~ : Int,
-  timeout_ms~ : Int,
+  partitions : Array[(Int32, Bytes)],
+  transactional_id~ : String? = None,
+  acks~ : Int32,
+  timeout_ms~ : Int32,
 ) -> Bytes raise {
   if version != 12 && version != 13 {
     raise ProtocolError::ProtocolError(
@@ -81,9 +81,9 @@ pub fn encode_produce_request(
 /// id; everything else matches, including per-record errors (KIP-467).
 /// Returns the per-partition results plus the throttle hint.
 pub fn decode_produce_response(
-  version : Int,
+  version : Int32,
   d : @buf.Decoder,
-) -> (Array[ProducePartitionResult], Int) raise {
+) -> (Array[ProducePartitionResult], Int32) raise {
   if version != 12 && version != 13 {
     raise ProtocolError::ProtocolError(
       "moonkafka implements Produce v12-v13, got v\{version}",

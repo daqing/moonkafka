@@ -18,7 +18,7 @@
 pub fn Consumer::subscribe_classic(
   self : Consumer,
   topics : Array[String],
-  assignors? : Array[Assignor] = [RangeAssignor],
+  assignors~ : Array[Assignor] = [RangeAssignor],
   listener? : RebalanceListener?,
 ) -> Unit raise {
   self.guard_group_subscription()
@@ -46,9 +46,9 @@ pub fn Consumer::subscribe_classic(
 /// owned partitions reported in userData for cooperative stickiness.
 fn Consumer::classic_protocols(self : Consumer) -> Array[JoinGroupProtocol] {
   let topics = self.expanded_subscription()
-  let owned : Array[(String, Array[Int])] = []
+  let owned : Array[(String, Array[Int32])] = []
   // Group this member's current assignment per topic for the userData.
-  let per_topic : Map[String, Array[Int]] = Map([])
+  let per_topic : Map[String, Array[Int32]] = Map([])
   for pair in self.assignment_pairs() {
     let partitions = per_topic.get_or_init(pair.0, fn() { [] })
     partitions.push(pair.1)
@@ -72,7 +72,7 @@ fn Consumer::classic_protocols(self : Consumer) -> Array[JoinGroupProtocol] {
 /// an interop caveat against Java's private userData format).
 fn encode_cooperative_subscription(
   topics : Array[String],
-  owned : Array[(String, Array[Int])],
+  owned : Array[(String, Array[Int32])],
 ) -> Bytes {
   let body = @buf.Encoder::new()
   body.write_i16(CONSUMER_PROTOCOL_SUBSCRIPTION_VERSION)
@@ -93,7 +93,7 @@ fn encode_cooperative_subscription(
 /// partitions (cooperative userData).
 fn decode_subscription_metadata(
   metadata : Bytes,
-) -> (Array[String], Array[(String, Array[Int])]) raise {
+) -> (Array[String], Array[(String, Array[Int32])]) raise {
   let d = @buf.Decoder::new(metadata)
   let version = d.read_i16()
   guard 0 <= version && version <= CONSUMER_PROTOCOL_MAX_VERSION else {
@@ -107,7 +107,7 @@ fn decode_subscription_metadata(
     let len = d.read_i16()
     topics.push(@utf8.decode_lossy(d.read_bytes(len)[:]))
   }
-  let mut owned : Array[(String, Array[Int])] = []
+  let mut owned : Array[(String, Array[Int32])] = []
   let user_len = d.read_i32()
   if user_len > 0 {
     owned = decode_consumer_protocol_assignment(d.read_bytes(user_len))
@@ -142,7 +142,7 @@ async fn Consumer::classic_loop(self : Consumer) -> Unit {
         // Heartbeat until the group rebalances or we are done.
         let mut leave_now = false
         for ;; {
-          let wait = Int::max(1, self.heartbeat_interval_ms / SENDER_TICK_MS)
+          let wait = Int32::max(1, self.heartbeat_interval_ms / SENDER_TICK_MS)
           for _ in 0..<wait {
             if self.closed || !self.member_active {
               break
@@ -153,7 +153,7 @@ async fn Consumer::classic_loop(self : Consumer) -> Unit {
             leave_now = true
             break
           }
-          let code : Result[Int, Error] = try
+          let code : Result[Int32, Error] = try
             self
             .group_coordinator_conn()
             .group_heartbeat(
@@ -273,11 +273,11 @@ async fn Consumer::classic_join_round(self : Consumer) -> ClassicRound {
   }
   // Leader: compute the assignment over every member's subscription.
   let assignments : Array[SyncGroupAssignment] = []
-  let mut target : Map[String, Array[(String, Int)]] = Map([])
+  let mut target : Map[String, Array[(String, Int32)]] = Map([])
   let mut cooperative = assignor is CooperativeStickyAssignor
   if join.member_id == join.leader_id && !join.members.is_empty() {
     let members : Array[Assignee] = []
-    let owned : Map[String, Array[(String, Int)]] = Map([])
+    let owned : Map[String, Array[(String, Int32)]] = Map([])
     let topics : Array[String] = []
     for m in join.members {
       let (subscribed, member_owned) = decode_subscription_metadata(m.metadata)
@@ -297,7 +297,7 @@ async fn Consumer::classic_join_round(self : Consumer) -> ClassicRound {
     }
     // Partition counts from fresh metadata for every subscribed topic.
     let _ = self.cluster.refresh_metadata(Some(topics)) catch { _ => () }
-    let counts : Map[String, Int] = Map([])
+    let counts : Map[String, Int32] = Map([])
     for topic in topics {
       let count = match self.cluster.topic(topic) {
         Some(meta) => meta.partitions.length()
@@ -324,7 +324,7 @@ async fn Consumer::classic_join_round(self : Consumer) -> ClassicRound {
       for m in members {
         let owned_pairs = owned.get(m.member_id).unwrap_or([])
         let target_pairs = target.get(m.member_id).unwrap_or([])
-        let keep : Array[(String, Int)] = []
+        let keep : Array[(String, Int32)] = []
         for pair in owned_pairs {
           if any_pair(target_pairs, pair.0, pair.1) {
             keep.push(pair)
@@ -372,7 +372,7 @@ async fn Consumer::classic_join_round(self : Consumer) -> ClassicRound {
     code => return ClassicFatal("SyncGroup failed: \{error_name(code)}")
   }
   let before = self.assignment_pairs()
-  let pairs : Array[(String, Int)] = []
+  let pairs : Array[(String, Int32)] = []
   for entry in decode_consumer_protocol_assignment(sync.assignment) {
     let (topic, partitions) = entry
     for partition in partitions {
@@ -416,9 +416,9 @@ async fn Consumer::classic_leave(self : Consumer) -> Unit {
 ///|
 /// How many (topic, partition) pairs of `before` are missing from `after`.
 fn count_lost(
-  before : Array[(String, Int)],
-  after : Array[(String, Int)],
-) -> Int {
+  before : Array[(String, Int32)],
+  after : Array[(String, Int32)],
+) -> Int32 {
   let mut lost = 0
   for pair in before {
     if !any_pair(after, pair.0, pair.1) {
@@ -431,9 +431,9 @@ fn count_lost(
 ///|
 /// Group (topic, partition) pairs per topic for the assignment encoding.
 fn group_pairs_by_topic(
-  pairs : Array[(String, Int)],
-) -> Array[(String, Array[Int])] {
-  let per_topic : Map[String, Array[Int]] = Map([])
+  pairs : Array[(String, Int32)],
+) -> Array[(String, Array[Int32])] {
+  let per_topic : Map[String, Array[Int32]] = Map([])
   let order : Array[String] = []
   for pair in pairs {
     let partitions = per_topic.get_or_init(pair.0, fn() {
@@ -442,7 +442,7 @@ fn group_pairs_by_topic(
     })
     partitions.push(pair.1)
   }
-  let out : Array[(String, Array[Int])] = []
+  let out : Array[(String, Array[Int32])] = []
   for topic in order {
     match per_topic.get(topic) {
       Some(partitions) => out.push((topic, partitions))
@@ -454,8 +454,10 @@ fn group_pairs_by_topic(
 
 ///|
 /// Flatten (topic, partitions) entries into (topic, partition) pairs.
-fn flatten_pairs(entries : Array[(String, Array[Int])]) -> Array[(String, Int)] {
-  let out : Array[(String, Int)] = []
+fn flatten_pairs(
+  entries : Array[(String, Array[Int32])],
+) -> Array[(String, Int32)] {
+  let out : Array[(String, Int32)] = []
   for entry in entries {
     let (topic, partitions) = entry
     for partition in partitions {

@@ -12,9 +12,9 @@
 /// config overrides.
 pub(all) struct CreatableTopic {
   name : String
-  num_partitions : Int
-  replication_factor : Int
-  assignments : Array[(Int, Array[Int])]
+  num_partitions : Int32
+  replication_factor : Int32
+  assignments : Array[(Int32, Array[Int32])]
   configs : Array[(String, String?)]
 } derive(@debug.Debug)
 
@@ -22,7 +22,7 @@ pub(all) struct CreatableTopic {
 pub struct CreateTopicsResult {
   name : String
   topic_id : Uuid
-  error_code : Int
+  error_code : Int32
   error_message : String?
 } derive(@debug.Debug)
 
@@ -30,7 +30,7 @@ pub struct CreateTopicsResult {
 /// Encode a CreateTopics v7 request body.
 pub fn encode_create_topics_request(
   topics : Array[CreatableTopic],
-  timeout_ms : Int,
+  timeout_ms : Int32,
   validate_only : Bool,
 ) -> Bytes {
   let body = @buf.Encoder::new()
@@ -70,7 +70,7 @@ pub fn encode_create_topics_request(
 /// DescribeConfigs).
 pub fn decode_create_topics_response(
   d : @buf.Decoder,
-) -> (Array[CreateTopicsResult], Int) raise {
+) -> (Array[CreateTopicsResult], Int32) raise {
   let throttle = d.read_i32()
   let out : Array[CreateTopicsResult] = []
   let n = d.read_compact_len()
@@ -102,8 +102,8 @@ pub fn decode_create_topics_response(
 pub async fn BrokerConnection::create_topics(
   self : BrokerConnection,
   topics : Array[CreatableTopic],
-  timeout_ms : Int,
-  validate_only? : Bool = false,
+  timeout_ms : Int32,
+  validate_only~ : Bool = false,
 ) -> Array[CreateTopicsResult] {
   let version = self.api_version(API_CREATE_TOPICS)
   let d = self.request(
@@ -121,7 +121,7 @@ pub async fn BrokerConnection::create_topics(
 pub struct DeleteTopicsResult {
   name : String?
   topic_id : Uuid
-  error_code : Int
+  error_code : Int32
   error_message : String?
 } derive(@debug.Debug)
 
@@ -132,7 +132,7 @@ pub struct DeleteTopicsResult {
 pub fn encode_delete_topics_request(
   names : Array[String],
   topic_ids : Array[Uuid],
-  timeout_ms : Int,
+  timeout_ms : Int32,
 ) -> Bytes {
   let body = @buf.Encoder::new()
   body.write_compact_len(names.length() + topic_ids.length())
@@ -155,7 +155,7 @@ pub fn encode_delete_topics_request(
 /// Decode a DeleteTopics v6 response body.
 pub fn decode_delete_topics_response(
   d : @buf.Decoder,
-) -> (Array[DeleteTopicsResult], Int) raise {
+) -> (Array[DeleteTopicsResult], Int32) raise {
   let throttle = d.read_i32()
   let out : Array[DeleteTopicsResult] = []
   let n = d.read_compact_len()
@@ -176,7 +176,7 @@ pub async fn BrokerConnection::delete_topics(
   self : BrokerConnection,
   names : Array[String],
   topic_ids : Array[Uuid],
-  timeout_ms : Int,
+  timeout_ms : Int32,
 ) -> Array[DeleteTopicsResult] {
   let version = self.api_version(API_DELETE_TOPICS)
   let d = self.request(
@@ -195,16 +195,16 @@ pub async fn BrokerConnection::delete_topics(
 /// assignments for the new partitions (new-assignments-first order).
 pub(all) struct CreatePartitionsSpec {
   name : String
-  count : Int
+  count : Int32
   /// Replica broker lists for each NEW partition, or None for
   /// broker-assigned placement.
-  assignments : Array[Array[Int]]?
+  assignments : Array[Array[Int32]]?
 } derive(@debug.Debug)
 
 ///|
 pub struct CreatePartitionsResult {
   name : String
-  error_code : Int
+  error_code : Int32
   error_message : String?
 } derive(@debug.Debug)
 
@@ -212,7 +212,7 @@ pub struct CreatePartitionsResult {
 /// Encode a CreatePartitions v3 request body.
 pub fn encode_create_partitions_request(
   topics : Array[CreatePartitionsSpec],
-  timeout_ms : Int,
+  timeout_ms : Int32,
   validate_only : Bool,
 ) -> Bytes {
   let body = @buf.Encoder::new()
@@ -245,7 +245,7 @@ pub fn encode_create_partitions_request(
 /// Decode a CreatePartitions v3 response body.
 pub fn decode_create_partitions_response(
   d : @buf.Decoder,
-) -> (Array[CreatePartitionsResult], Int) raise {
+) -> (Array[CreatePartitionsResult], Int32) raise {
   let throttle = d.read_i32()
   let out : Array[CreatePartitionsResult] = []
   let n = d.read_compact_len()
@@ -264,8 +264,8 @@ pub fn decode_create_partitions_response(
 pub async fn BrokerConnection::create_partitions(
   self : BrokerConnection,
   topics : Array[CreatePartitionsSpec],
-  timeout_ms : Int,
-  validate_only? : Bool = false,
+  timeout_ms : Int32,
+  validate_only~ : Bool = false,
 ) -> Array[CreatePartitionsResult] {
   let version = self.api_version(API_CREATE_PARTITIONS)
   let d = self.request(
@@ -283,9 +283,9 @@ pub async fn BrokerConnection::create_partitions(
 /// One deleted-records result: the new low watermark, or the error.
 pub struct DeleteRecordsResult {
   topic : String
-  partition : Int
+  partition : Int32
   low_watermark : Int64
-  error_code : Int
+  error_code : Int32
 } derive(@debug.Debug)
 
 ///|
@@ -293,8 +293,8 @@ pub struct DeleteRecordsResult {
 /// including) each offset are deleted; OFFSET_START/-1 means "delete
 /// everything".
 pub fn encode_delete_records_request(
-  topics : Array[(String, Array[(Int, Int64)])],
-  timeout_ms : Int,
+  topics : Array[(String, Array[(Int32, Int64)])],
+  timeout_ms : Int32,
 ) -> Bytes {
   let body = @buf.Encoder::new()
   body.write_compact_len(topics.length())
@@ -319,7 +319,7 @@ pub fn encode_delete_records_request(
 /// Decode a DeleteRecords v2 response body.
 pub fn decode_delete_records_response(
   d : @buf.Decoder,
-) -> (Array[DeleteRecordsResult], Int) raise {
+) -> (Array[DeleteRecordsResult], Int32) raise {
   let throttle = d.read_i32()
   let out : Array[DeleteRecordsResult] = []
   let n = d.read_compact_len()
@@ -342,8 +342,8 @@ pub fn decode_delete_records_response(
 ///|
 pub async fn BrokerConnection::delete_records(
   self : BrokerConnection,
-  topics : Array[(String, Array[(Int, Int64)])],
-  timeout_ms : Int,
+  topics : Array[(String, Array[(Int32, Int64)])],
+  timeout_ms : Int32,
 ) -> Array[DeleteRecordsResult] {
   let version = self.api_version(API_DELETE_RECORDS)
   let d = self.request(
@@ -360,15 +360,15 @@ pub async fn BrokerConnection::delete_records(
 ///|
 pub struct OffsetDeleteResult {
   /// The group-level error, or 0.
-  error_code : Int
+  error_code : Int32
   partitions : Array[OffsetDeletePartitionResult]
 } derive(@debug.Debug)
 
 ///|
 pub struct OffsetDeletePartitionResult {
   topic : String
-  partition : Int
-  error_code : Int
+  partition : Int32
+  error_code : Int32
 } derive(@debug.Debug)
 
 ///|
@@ -376,7 +376,7 @@ pub struct OffsetDeletePartitionResult {
 /// delete for a group. v0 is not flexible — header v0 framing.
 pub fn encode_offset_delete_request(
   group_id : String,
-  topics : Array[(String, Array[Int])],
+  topics : Array[(String, Array[Int32])],
 ) -> Bytes {
   // Non-flexible strings: int16 length + UTF-8 bytes.
   let body = @buf.Encoder::new()
@@ -402,7 +402,7 @@ pub fn encode_offset_delete_request(
 /// buffers anywhere).
 pub fn decode_offset_delete_response(
   d : @buf.Decoder,
-) -> (OffsetDeleteResult, Int) raise {
+) -> (OffsetDeleteResult, Int32) raise {
   let error_code = d.read_i16()
   let throttle = d.read_i32()
   let partitions : Array[OffsetDeletePartitionResult] = []
@@ -424,8 +424,8 @@ pub fn decode_offset_delete_response(
 pub async fn BrokerConnection::offset_delete(
   self : BrokerConnection,
   group_id : String,
-  topics : Array[(String, Array[Int])],
-  timeout_ms : Int,
+  topics : Array[(String, Array[Int32])],
+  timeout_ms : Int32,
 ) -> OffsetDeleteResult {
   // OffsetDelete v0 is not flexible: header v0 framing on both sides.
   let d = self.request_raw(
@@ -446,7 +446,7 @@ pub async fn BrokerConnection::offset_delete(
 pub async fn Admin::create_topics(
   self : Admin,
   topics : Array[CreatableTopic],
-  validate_only? : Bool = false,
+  validate_only~ : Bool = false,
 ) -> Array[CreateTopicsResult] {
   self.with_retries(
     fn(results : Array[CreateTopicsResult]) {
@@ -496,7 +496,7 @@ pub async fn Admin::delete_topics(
 pub async fn Admin::create_partitions(
   self : Admin,
   topics : Array[CreatePartitionsSpec],
-  validate_only? : Bool = false,
+  validate_only~ : Bool = false,
 ) -> Array[CreatePartitionsResult] {
   self.with_retries(
     fn(results : Array[CreatePartitionsResult]) {
@@ -520,7 +520,7 @@ pub async fn Admin::create_partitions(
 /// watermarks.
 pub async fn Admin::delete_records(
   self : Admin,
-  topics : Array[(String, Array[(Int, Int64)])],
+  topics : Array[(String, Array[(Int32, Int64)])],
 ) -> Array[DeleteRecordsResult] {
   self.with_retries(
     fn(results : Array[DeleteRecordsResult]) {
@@ -545,7 +545,7 @@ pub async fn Admin::delete_records(
 pub async fn Admin::offset_delete(
   self : Admin,
   group_id : String,
-  topics : Array[(String, Array[Int])],
+  topics : Array[(String, Array[Int32])],
 ) -> OffsetDeleteResult {
   self.with_retries(
     fn(result : OffsetDeleteResult) { admin_error_retriable(result.error_code) },

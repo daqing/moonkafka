@@ -11,7 +11,7 @@
 pub struct SendHandle {
   priv producer : Producer
   priv batch : ProducerBatch
-  priv index : Int
+  priv index : Int32
   priv mut waiter : @async.Semaphore?
   priv mut cancelled : Bool
 }
@@ -96,8 +96,8 @@ pub async fn Producer::send_handle(
   key? : Bytes,
   value? : Bytes,
   timestamp? : Int64,
-  partition? : Int,
-  headers? : Array[(Bytes, Bytes)] = [],
+  partition? : Int32,
+  headers~ : Array[(Bytes, Bytes)] = [],
 ) -> SendHandle {
   let (batch, index) = self.append_record(
     key, value, timestamp, partition, headers,
@@ -112,8 +112,8 @@ pub async fn Producer::send(
   key? : Bytes,
   value? : Bytes,
   timestamp? : Int64,
-  partition? : Int,
-  headers? : Array[(Bytes, Bytes)] = [],
+  partition? : Int32,
+  headers~ : Array[(Bytes, Bytes)] = [],
 ) -> Int64 {
   let (batch, index) = self.append_record(
     key, value, timestamp, partition, headers,
@@ -135,7 +135,7 @@ pub(all) struct SendRecord {
   value : Bytes?
   /// None stamps the record with the current wall clock.
   timestamp : Int64?
-  partition : Int?
+  partition : Int32?
   headers : Array[(Bytes, Bytes)]
 }
 
@@ -181,9 +181,9 @@ async fn Producer::append_record(
   key : Bytes?,
   value : Bytes?,
   timestamp : Int64?,
-  partition : Int?,
+  partition : Int32?,
   headers : Array[(Bytes, Bytes)],
-) -> (ProducerBatch, Int) {
+) -> (ProducerBatch, Int32) {
   if self.closed {
     raise ProtocolError::ProtocolError("producer is closed")
   }

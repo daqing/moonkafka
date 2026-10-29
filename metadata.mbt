@@ -7,16 +7,16 @@
 
 ///|
 pub struct BrokerInfo {
-  node_id : Int
+  node_id : Int32
   host : String
-  port : Int
+  port : Int32
 }
 
 ///|
 pub struct PartitionInfo {
-  index : Int
-  leader : Int
-  leader_epoch : Int
+  index : Int32
+  leader : Int32
+  leader_epoch : Int32
 } derive(@debug.Debug)
 
 ///|
@@ -24,7 +24,7 @@ pub struct TopicMetadata {
   name : String
   /// The broker's per-topic error code (0 = present); admin callers
   /// treat codes as values, the metadata path raises on non-zero.
-  error_code : Int
+  error_code : Int32
   topic_id : Uuid
   is_internal : Bool
   partitions : Array[PartitionInfo]
@@ -32,9 +32,9 @@ pub struct TopicMetadata {
 
 ///|
 pub struct Metadata {
-  brokers : Map[Int, BrokerInfo]
+  brokers : Map[Int32, BrokerInfo]
   /// The controller's node id (controller-routed admin ops).
-  controller_id : Int
+  controller_id : Int32
   topics : Array[TopicMetadata]
 }
 
@@ -76,9 +76,9 @@ pub fn encode_metadata_request(topics : Array[String]?) -> Bytes {
 /// error code after the topics array. Returns the metadata plus the
 /// throttle hint in milliseconds.
 pub fn decode_metadata_response(
-  version : Int,
+  version : Int32,
   d : @buf.Decoder,
-) -> (Metadata, Int) raise {
+) -> (Metadata, Int32) raise {
   if version < 12 || version > 13 {
     raise ProtocolError::ProtocolError(
       "moonkafka implements Metadata v12-v13, got v\{version}",
@@ -86,7 +86,7 @@ pub fn decode_metadata_response(
   }
   let throttle = d.read_i32() // throttle_time_ms
   let broker_count = d.read_compact_len()
-  let brokers : Map[Int, BrokerInfo] = Map([])
+  let brokers : Map[Int32, BrokerInfo] = Map([])
   for _ in 0..<broker_count {
     let node_id = d.read_i32()
     let host = d.read_compact_string()
@@ -144,7 +144,7 @@ pub fn decode_metadata_response(
 /// partition index the next request resumes from.
 pub(all) struct TopicPartitionCursor {
   topic_name : String
-  partition_index : Int
+  partition_index : Int32
 } derive(@debug.Debug)
 
 ///|
@@ -162,8 +162,8 @@ pub struct DescribeTopicPartitions {
 /// signed byte marker, -1 = null, 1 = present (per the Java generator).
 pub fn encode_describe_topic_partitions_request(
   topics : Array[String],
-  response_partition_limit : Int,
-  cursor? : TopicPartitionCursor? = None,
+  response_partition_limit : Int32,
+  cursor~ : TopicPartitionCursor? = None,
 ) -> Bytes {
   let body = @buf.Encoder::new()
   body.write_compact_len(topics.length())
@@ -191,7 +191,7 @@ pub fn encode_describe_topic_partitions_request(
 /// listing is complete. Returns the page plus the throttle hint.
 pub fn decode_describe_topic_partitions_response(
   d : @buf.Decoder,
-) -> (DescribeTopicPartitions, Int) raise {
+) -> (DescribeTopicPartitions, Int32) raise {
   let throttle = d.read_i32() // throttle_time_ms
   let topic_count = d.read_compact_len()
   let topics : Array[TopicMetadata] = []

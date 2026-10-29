@@ -9,208 +9,208 @@
 ///|
 // API keys are pinned from the 4.3 protocol guide as each codec lands;
 // they are stable across 4.x.
-pub const API_PRODUCE : Int = 0
+pub const API_PRODUCE : Int32 = 0
 
 ///|
-pub const API_FETCH : Int = 1
+pub const API_FETCH : Int32 = 1
 
 ///|
-pub const API_OFFSET_COMMIT : Int = 8
+pub const API_OFFSET_COMMIT : Int32 = 8
 
 ///|
-pub const API_OFFSET_FETCH : Int = 9
+pub const API_OFFSET_FETCH : Int32 = 9
 
 ///|
-pub const API_OFFSET_FOR_LEADER_EPOCH : Int = 23
+pub const API_OFFSET_FOR_LEADER_EPOCH : Int32 = 23
 
 ///|
-pub const API_CONSUMER_GROUP_HEARTBEAT : Int = 68
+pub const API_CONSUMER_GROUP_HEARTBEAT : Int32 = 68
 
 ///|
-pub const API_JOIN_GROUP : Int = 11
+pub const API_JOIN_GROUP : Int32 = 11
 
 ///|
-pub const API_SYNC_GROUP : Int = 14
+pub const API_SYNC_GROUP : Int32 = 14
 
 ///|
-pub const API_HEARTBEAT : Int = 12
+pub const API_HEARTBEAT : Int32 = 12
 
 ///|
-pub const API_LEAVE_GROUP : Int = 13
+pub const API_LEAVE_GROUP : Int32 = 13
 
 ///|
-pub const API_DESCRIBE_GROUPS : Int = 15
+pub const API_DESCRIBE_GROUPS : Int32 = 15
 
 ///|
-pub const API_CONSUMER_GROUP_DESCRIBE : Int = 69
+pub const API_CONSUMER_GROUP_DESCRIBE : Int32 = 69
 
 ///|
-pub const API_LIST_GROUPS : Int = 16
+pub const API_LIST_GROUPS : Int32 = 16
 
 ///|
-pub const API_DELETE_GROUPS : Int = 42
+pub const API_DELETE_GROUPS : Int32 = 42
 
 ///|
-pub const API_CREATE_TOPICS : Int = 19
+pub const API_CREATE_TOPICS : Int32 = 19
 
 ///|
-pub const API_DELETE_TOPICS : Int = 20
+pub const API_DELETE_TOPICS : Int32 = 20
 
 ///|
-pub const API_DELETE_RECORDS : Int = 21
+pub const API_DELETE_RECORDS : Int32 = 21
 
 ///|
-pub const API_CREATE_PARTITIONS : Int = 37
+pub const API_CREATE_PARTITIONS : Int32 = 37
 
 ///|
-pub const API_OFFSET_DELETE : Int = 47
+pub const API_OFFSET_DELETE : Int32 = 47
 
 ///|
-pub const API_LIST_OFFSETS : Int = 2
+pub const API_LIST_OFFSETS : Int32 = 2
 
 ///|
-pub const API_METADATA : Int = 3
+pub const API_METADATA : Int32 = 3
 
 ///|
-pub const API_FIND_COORDINATOR : Int = 10
+pub const API_FIND_COORDINATOR : Int32 = 10
 
 ///|
-pub const API_INIT_PRODUCER_ID : Int = 22
+pub const API_INIT_PRODUCER_ID : Int32 = 22
 
 ///|
-pub const API_ADD_PARTITIONS_TO_TXN : Int = 24
+pub const API_ADD_PARTITIONS_TO_TXN : Int32 = 24
 
 ///|
-pub const API_ADD_OFFSETS_TO_TXN : Int = 25
+pub const API_ADD_OFFSETS_TO_TXN : Int32 = 25
 
 ///|
-pub const API_END_TXN : Int = 26
+pub const API_END_TXN : Int32 = 26
 
 ///|
-pub const API_TXN_OFFSET_COMMIT : Int = 28
+pub const API_TXN_OFFSET_COMMIT : Int32 = 28
 
 ///|
-pub const API_DESCRIBE_PRODUCERS : Int = 61
+pub const API_DESCRIBE_PRODUCERS : Int32 = 61
 
 ///|
-pub const API_DESCRIBE_TRANSACTIONS : Int = 65
+pub const API_DESCRIBE_TRANSACTIONS : Int32 = 65
 
 ///|
-pub const API_LIST_TRANSACTIONS : Int = 66
+pub const API_LIST_TRANSACTIONS : Int32 = 66
 
 ///|
-pub const API_DESCRIBE_TOPIC_PARTITIONS : Int = 75
+pub const API_DESCRIBE_TOPIC_PARTITIONS : Int32 = 75
 
 ///|
-pub const API_DESCRIBE_ACLS : Int = 29
+pub const API_DESCRIBE_ACLS : Int32 = 29
 
 ///|
-pub const API_CREATE_ACLS : Int = 30
+pub const API_CREATE_ACLS : Int32 = 30
 
 ///|
-pub const API_DELETE_ACLS : Int = 31
+pub const API_DELETE_ACLS : Int32 = 31
 
 ///|
-pub const API_DESCRIBE_CLIENT_QUOTAS : Int = 48
+pub const API_DESCRIBE_CLIENT_QUOTAS : Int32 = 48
 
 ///|
-pub const API_ALTER_CLIENT_QUOTAS : Int = 49
+pub const API_ALTER_CLIENT_QUOTAS : Int32 = 49
 
 ///|
-pub const API_DESCRIBE_USER_SCRAM_CREDENTIALS : Int = 50
+pub const API_DESCRIBE_USER_SCRAM_CREDENTIALS : Int32 = 50
 
 ///|
-pub const API_ALTER_USER_SCRAM_CREDENTIALS : Int = 51
+pub const API_ALTER_USER_SCRAM_CREDENTIALS : Int32 = 51
 
 ///|
-pub const API_DESCRIBE_CONFIGS : Int = 32
+pub const API_DESCRIBE_CONFIGS : Int32 = 32
 
 ///|
-pub const API_ALTER_CONFIGS : Int = 33
+pub const API_ALTER_CONFIGS : Int32 = 33
 
 ///|
-pub const API_INCREMENTAL_ALTER_CONFIGS : Int = 44
+pub const API_INCREMENTAL_ALTER_CONFIGS : Int32 = 44
 
 ///|
-pub const API_LIST_CONFIG_RESOURCES : Int = 74
+pub const API_LIST_CONFIG_RESOURCES : Int32 = 74
 
 ///|
-pub const API_DESCRIBE_LOG_DIRS : Int = 35
+pub const API_DESCRIBE_LOG_DIRS : Int32 = 35
 
 ///|
-pub const API_ELECT_LEADERS : Int = 43
+pub const API_ELECT_LEADERS : Int32 = 43
 
 ///|
-pub const API_ALTER_PARTITION_REASSIGNMENTS : Int = 45
+pub const API_ALTER_PARTITION_REASSIGNMENTS : Int32 = 45
 
 ///|
-pub const API_LIST_PARTITION_REASSIGNMENTS : Int = 46
+pub const API_LIST_PARTITION_REASSIGNMENTS : Int32 = 46
 
 ///|
-pub const API_DESCRIBE_CLUSTER : Int = 60
+pub const API_DESCRIBE_CLUSTER : Int32 = 60
 
 ///|
-pub const API_UNREGISTER_BROKER : Int = 64
+pub const API_UNREGISTER_BROKER : Int32 = 64
 
 ///|
-pub const API_DESCRIBE_QUORUM : Int = 55
+pub const API_DESCRIBE_QUORUM : Int32 = 55
 
 ///|
-pub const API_UPDATE_FEATURES : Int = 57
+pub const API_UPDATE_FEATURES : Int32 = 57
 
 ///|
-pub const API_SASL_HANDSHAKE : Int = 17
+pub const API_SASL_HANDSHAKE : Int32 = 17
 
 ///|
-pub const API_API_VERSIONS : Int = 18
+pub const API_API_VERSIONS : Int32 = 18
 
 ///|
-pub const API_SASL_AUTHENTICATE : Int = 36
+pub const API_SASL_AUTHENTICATE : Int32 = 36
 
 ///|
-pub const API_SHARE_GROUP_HEARTBEAT : Int = 76
+pub const API_SHARE_GROUP_HEARTBEAT : Int32 = 76
 
 ///|
-pub const API_SHARE_FETCH : Int = 78
+pub const API_SHARE_FETCH : Int32 = 78
 
 ///|
-pub const API_SHARE_ACKNOWLEDGE : Int = 79
+pub const API_SHARE_ACKNOWLEDGE : Int32 = 79
 
 ///|
-pub const API_DESCRIBE_SHARE_GROUP_OFFSETS : Int = 90
+pub const API_DESCRIBE_SHARE_GROUP_OFFSETS : Int32 = 90
 
 ///|
-pub const API_ALTER_SHARE_GROUP_OFFSETS : Int = 91
+pub const API_ALTER_SHARE_GROUP_OFFSETS : Int32 = 91
 
 ///|
-pub const API_DELETE_SHARE_GROUP_OFFSETS : Int = 92
+pub const API_DELETE_SHARE_GROUP_OFFSETS : Int32 = 92
 
 ///|
-pub const API_GET_TELEMETRY_SUBSCRIPTIONS : Int = 71
+pub const API_GET_TELEMETRY_SUBSCRIPTIONS : Int32 = 71
 
 ///|
-pub const API_PUSH_TELEMETRY : Int = 72
+pub const API_PUSH_TELEMETRY : Int32 = 72
 
 ///|
 // The handshake's own version cannot itself be negotiated: it is the
 // newest version every 4.0+ broker accepts.
-const API_VERSIONS_VERSION : Int = 3
+const API_VERSIONS_VERSION : Int32 = 3
 
 ///|
 /// One row of the driver's version matrix: the contiguous range of
 /// versions whose codecs are implemented for one API.
 pub(all) struct ApiRange {
-  key : Int
+  key : Int32
   name : String
-  min : Int
-  max : Int
+  min : Int32
+  max : Int32
 } derive(@debug.Debug)
 
 ///|
 /// The driver's version matrix. Grow a row's range only when codecs for
 /// the new versions exist — `pick` may return any version inside a row,
 /// and the encoders/decoders must be able to handle what it returns.
-pub fn driver_api_range(api_key : Int) -> ApiRange? {
+pub fn driver_api_range(api_key : Int32) -> ApiRange? {
   match api_key {
     API_PRODUCE =>
       Some({ key: API_PRODUCE, name: "Produce", min: 12, max: 13, })
@@ -554,7 +554,7 @@ pub fn driver_api_range(api_key : Int) -> ApiRange? {
 ///|
 /// The version ranges a broker advertised in its ApiVersions response.
 pub struct BrokerVersions {
-  ranges : Map[Int, (Int, Int)]
+  ranges : Map[Int32, (Int32, Int32)]
 }
 
 ///|
@@ -562,15 +562,15 @@ pub struct BrokerVersions {
 /// `want`, and the broker range [bmin, bmax]. None when they do not
 /// intersect.
 fn pick_common(
-  dmin : Int,
-  dmax : Int,
-  want : Int,
-  bmin : Int,
-  bmax : Int,
-) -> Int? {
-  let top = Int::min(want, dmax)
-  let bottom = Int::max(dmin, bmin)
-  let upper = Int::min(top, bmax)
+  dmin : Int32,
+  dmax : Int32,
+  want : Int32,
+  bmin : Int32,
+  bmax : Int32,
+) -> Int32? {
+  let top = Int32::min(want, dmax)
+  let bottom = Int32::max(dmin, bmin)
+  let upper = Int32::min(top, bmax)
   if upper >= bottom {
     Some(upper)
   } else {
@@ -586,9 +586,9 @@ fn pick_common(
 /// the telltale of a pre-4.0 broker.
 pub fn BrokerVersions::pick(
   self : BrokerVersions,
-  api_key : Int,
-  want? : Int? = None,
-) -> Int raise {
+  api_key : Int32,
+  want~ : Int32? = None,
+) -> Int32 raise {
   guard driver_api_range(api_key) is Some(row) else {
     raise ProtocolError::ProtocolError(
       "moonkafka implements no version of API key \{api_key}",
@@ -613,8 +613,8 @@ pub fn BrokerVersions::pick(
 /// The broker's advertised range for one API, if it advertises the key.
 pub fn BrokerVersions::range(
   self : BrokerVersions,
-  api_key : Int,
-) -> (Int, Int)? {
+  api_key : Int32,
+) -> (Int32, Int32)? {
   self.ranges.get(api_key)
 }
 
@@ -625,9 +625,9 @@ pub fn BrokerVersions::range(
 /// this connection.
 pub fn BrokerConnection::api_version(
   self : BrokerConnection,
-  api_key : Int,
-  want? : Int? = None,
-) -> Int raise {
+  api_key : Int32,
+  want~ : Int32? = None,
+) -> Int32 raise {
   match self.versions {
     Some(versions) => versions.pick(api_key, want~)
     None =>

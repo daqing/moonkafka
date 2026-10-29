@@ -4,7 +4,7 @@
 ///|
 /// Read one full request frame; the correlation id sits at bytes 4..8 of
 /// the remainder (size prefix, then api_key/api_version/correlation).
-async fn fake_read_request(tcp : @socket.Tcp) -> Int {
+async fn fake_read_request(tcp : @socket.Tcp) -> Int32 {
   let size_bytes = tcp.read_exactly(4)
   let size = @buf.Decoder::new(size_bytes).read_i32()
   let rest = tcp.read_exactly(size)
@@ -18,7 +18,7 @@ async fn fake_read_request(tcp : @socket.Tcp) -> Int {
 ///|
 /// Build a response frame: size, correlation, empty v1 header tag buffer,
 /// one payload byte.
-fn fake_response(corr : Int, payload : Int) -> Bytes {
+fn fake_response(corr : Int32, payload : Int32) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(4 + 1 + 1)
   e.write_i32(corr)

@@ -11,26 +11,26 @@
 pub struct ClusterClient {
   bootstrap : BootstrapServers
   client_id : String
-  request_timeout_ms : Int
-  metadata_max_age_ms : Int
-  max_in_flight : Int
+  request_timeout_ms : Int32
+  metadata_max_age_ms : Int32
+  max_in_flight : Int32
   sasl : SaslConfig?
   use_tls : Bool
   tls_options : TlsClientOptions?
   lock : @async.Mutex
   /// Any-broker connection carrying metadata and coordinator requests.
   priv mut control : BrokerConnection
-  mut brokers : Map[Int, BrokerInfo]
+  mut brokers : Map[Int32, BrokerInfo]
   /// Latest metadata per topic name; TopicMetadata carries the topic id.
   mut topics : Map[String, TopicMetadata]
   /// topic id → name (KIP-516); the reverse view of topics.
   mut topic_ids : Map[Uuid, String]
   /// The controller's node id from the last metadata refresh
   /// (controller-routed admin ops).
-  mut controller_id : Int
+  mut controller_id : Int32
   /// Wall-clock ms of the last successful refresh; -1 = never.
   mut refreshed_ms : Int64
-  conns : Map[Int, BrokerConnection]
+  conns : Map[Int32, BrokerConnection]
 }
 
 ///|
@@ -39,13 +39,13 @@ pub struct ClusterClient {
 /// refresh_metadata is on the caller.
 pub async fn ClusterClient::connect(
   bootstrap_addresses : Array[HostPort],
-  client_id? : String = "moonkafka",
-  request_timeout_ms? : Int = 30000,
-  metadata_max_age_ms? : Int = 300000,
-  max_in_flight? : Int = 5,
-  sasl? : SaslConfig? = None,
-  use_tls? : Bool = false,
-  tls? : TlsClientOptions? = None,
+  client_id~ : String = "moonkafka",
+  request_timeout_ms~ : Int32 = 30000,
+  metadata_max_age_ms~ : Int32 = 300000,
+  max_in_flight~ : Int32 = 5,
+  sasl~ : SaslConfig? = None,
+  use_tls~ : Bool = false,
+  tls~ : TlsClientOptions? = None,
 ) -> ClusterClient {
   let bootstrap = BootstrapServers::new(bootstrap_addresses)
   let control = connect_bootstrap(
@@ -155,7 +155,7 @@ pub async fn ClusterClient::refresh_metadata(
 pub async fn ClusterClient::wait_for_topic(
   self : ClusterClient,
   topic : String,
-  timeout_ms? : Int = 30000,
+  timeout_ms~ : Int32 = 30000,
 ) -> TopicMetadata {
   let deadline = Deadline::after_ms(timeout_ms.to_int64())
   let backoff = Backoff::new(base_ms=100, max_ms=1000)
@@ -219,7 +219,7 @@ pub fn ClusterClient::invalidate_metadata(self : ClusterClient) -> Unit {
 /// errors propagate; the pool stays consistent.
 pub async fn ClusterClient::connection(
   self : ClusterClient,
-  node_id : Int,
+  node_id : Int32,
 ) -> BrokerConnection {
   self.lock.acquire()
   defer self.lock.release()
@@ -263,7 +263,7 @@ pub async fn ClusterClient::connection(
 }
 
 ///|
-fn ClusterClient::broker(self : ClusterClient, node_id : Int) -> BrokerInfo? {
+fn ClusterClient::broker(self : ClusterClient, node_id : Int32) -> BrokerInfo? {
   self.brokers.get(node_id)
 }
 
@@ -285,7 +285,10 @@ pub fn ClusterClient::topic_name(self : ClusterClient, id : Uuid) -> String? {
 ///|
 /// Whether the broker advertises the given API key at all (protocol
 /// capability probe for the group-protocol fallback).
-pub fn ClusterClient::supports_api(self : ClusterClient, api_key : Int) -> Bool {
+pub fn ClusterClient::supports_api(
+  self : ClusterClient,
+  api_key : Int32,
+) -> Bool {
   match self.control.versions {
     Some(versions) => versions.range(api_key) is Some(_)
     None => false
@@ -309,8 +312,8 @@ pub fn ClusterClient::topics_snapshot(self : ClusterClient) -> Array[String] {
 /// answers only from the state it holds itself — ListGroups and
 /// ListTransactions — which the client must send to all brokers and merge.
 /// Empty before the first refresh_metadata.
-pub fn ClusterClient::broker_ids(self : ClusterClient) -> Array[Int] {
-  let out : Array[Int] = []
+pub fn ClusterClient::broker_ids(self : ClusterClient) -> Array[Int32] {
+  let out : Array[Int32] = []
   for node_id, _ in self.brokers {
     out.push(node_id)
   }
@@ -321,7 +324,7 @@ pub fn ClusterClient::broker_ids(self : ClusterClient) -> Array[Int] {
 ///|
 /// The cached controller node id (-1 before the first metadata
 /// refresh) for controller-routed admin ops.
-pub fn ClusterClient::controller(self : ClusterClient) -> Int {
+pub fn ClusterClient::controller(self : ClusterClient) -> Int32 {
   self.controller_id
 }
 

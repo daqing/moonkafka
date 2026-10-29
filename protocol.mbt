@@ -18,12 +18,12 @@ pub(all) suberror ProtocolError {
 /// followed by an empty tag buffer, per RequestHeader.json); the rest use
 /// header v1 with a legacy NULLABLE_STRING (SaslHandshake v1 today).
 pub fn encode_request(
-  api_key : Int,
-  api_version : Int,
-  correlation_id : Int,
+  api_key : Int32,
+  api_version : Int32,
+  correlation_id : Int32,
   client_id : String,
   body : Bytes,
-  flexible? : Bool = true,
+  flexible~ : Bool = true,
 ) -> Bytes {
   let header = @buf.Encoder::new()
   header.write_i16(api_key)
@@ -61,13 +61,13 @@ pub fn encode_api_versions_request() -> Bytes {
 /// negotiate against the ranges via BrokerVersions::pick.
 pub fn decode_api_versions_response(
   d : @buf.Decoder,
-) -> (BrokerVersions, Int) raise {
+) -> (BrokerVersions, Int32) raise {
   let error_code = d.read_i16()
   if error_code != 0 {
     raise BrokerError(error_code, "ApiVersions failed")
   }
   let count = d.read_compact_len()
-  let ranges : Map[Int, (Int, Int)] = Map([])
+  let ranges : Map[Int32, (Int32, Int32)] = Map([])
   for _ in 0..<count {
     let key = d.read_i16()
     let min_version = d.read_i16()

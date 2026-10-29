@@ -6,10 +6,10 @@
 // choice, and v1/v2 are the only versions 4.x brokers serve.
 
 ///|
-const SASL_HANDSHAKE_VERSION : Int = 1
+const SASL_HANDSHAKE_VERSION : Int32 = 1
 
 ///|
-const SASL_AUTHENTICATE_VERSION : Int = 2
+const SASL_AUTHENTICATE_VERSION : Int32 = 2
 
 ///|
 /// SaslHandshake v1 body: the mechanism name as a NON-compact string.
@@ -23,7 +23,7 @@ pub fn encode_sasl_handshake_request(mechanism : String) -> Bytes {
 
 ///|
 pub(all) struct SaslHandshakeResult {
-  error_code : Int
+  error_code : Int32
   mechanisms : Array[String]
 }
 
@@ -54,7 +54,7 @@ pub fn encode_sasl_authenticate_request(auth_bytes : Bytes) -> Bytes {
 
 ///|
 pub(all) struct SaslAuthenticateResult {
-  error_code : Int
+  error_code : Int32
   error_message : String?
   auth_bytes : Bytes?
   session_lifetime_ms : Int64
@@ -110,7 +110,7 @@ fn sasl_mechanism_name(mechanism : SaslMechanism) -> String {
 pub async fn BrokerConnection::authenticate(
   self : BrokerConnection,
   sasl : SaslConfig,
-  timeout_ms? : Int = 30000,
+  timeout_ms~ : Int32 = 30000,
 ) -> Unit {
   let mechanism = sasl_mechanism_name(sasl.mechanism)
   let d = self.request_raw(
@@ -141,7 +141,7 @@ pub async fn BrokerConnection::authenticate(
 async fn BrokerConnection::authenticate_plain(
   self : BrokerConnection,
   sasl : SaslConfig,
-  timeout_ms : Int,
+  timeout_ms : Int32,
 ) -> Unit {
   let result = self.sasl_authenticate(plain_auth_bytes(sasl), timeout_ms)
   if result.error_code != 0 {
@@ -158,7 +158,7 @@ async fn BrokerConnection::authenticate_scram(
   self : BrokerConnection,
   sasl : SaslConfig,
   sha512 : Bool,
-  timeout_ms : Int,
+  timeout_ms : Int32,
 ) -> Unit {
   let client_nonce = scram_nonce(self.client_id)
   let client_first_bare = "n=\{scram_escape_username(sasl.username)},r=\{client_nonce}"
@@ -208,7 +208,7 @@ async fn BrokerConnection::authenticate_scram(
 async fn BrokerConnection::authenticate_oauth(
   self : BrokerConnection,
   sasl : SaslConfig,
-  timeout_ms : Int,
+  timeout_ms : Int32,
 ) -> Unit {
   let provider = match sasl.oauth_token_provider {
     Some(provider) => provider
@@ -231,7 +231,7 @@ async fn BrokerConnection::authenticate_oauth(
 async fn BrokerConnection::sasl_authenticate(
   self : BrokerConnection,
   auth_bytes : Bytes,
-  timeout_ms : Int,
+  timeout_ms : Int32,
 ) -> SaslAuthenticateResult {
   let d = self.request_raw(
     API_SASL_AUTHENTICATE,

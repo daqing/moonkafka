@@ -44,7 +44,7 @@ fn next_sticky_seed() -> UInt64 {
 /// previous choice while n > 1 and stays deterministic; only the initial
 /// pick is random (clock-seeded).
 priv struct StickyPartitioner {
-  mut current : Int // -1 = not chosen yet
+  mut current : Int32 // -1 = not chosen yet
   mut seed : UInt64
 }
 
@@ -56,7 +56,7 @@ fn StickyPartitioner::new(seed : UInt64) -> StickyPartitioner {
 ///|
 /// The sticky partition out of n. The first call (or a partition-count
 /// change after metadata refresh) seeds a choice; `on_new_batch` moves it.
-fn StickyPartitioner::partition(self : StickyPartitioner, n : Int) -> Int {
+fn StickyPartitioner::partition(self : StickyPartitioner, n : Int32) -> Int32 {
   if n <= 1 {
     return 0
   }
@@ -70,7 +70,7 @@ fn StickyPartitioner::partition(self : StickyPartitioner, n : Int) -> Int {
 ///|
 /// A batch boundary (batch full or linger expired): step to the next
 /// partition, wrapping to 0.
-fn StickyPartitioner::on_new_batch(self : StickyPartitioner, n : Int) -> Unit {
+fn StickyPartitioner::on_new_batch(self : StickyPartitioner, n : Int32) -> Unit {
   if n > 1 {
     self.current = (self.partition(n) + 1) % n
   }
@@ -83,7 +83,7 @@ fn StickyPartitioner::on_new_batch(self : StickyPartitioner, n : Int) -> Unit {
 priv struct PartitionRouter {
   strategy : Partitioner
   sticky : StickyPartitioner
-  mut round_robin : Int
+  mut round_robin : Int32
 }
 
 ///|
@@ -101,10 +101,10 @@ fn PartitionRouter::new(
 /// 3. unkeyed records go sticky (default) or round-robin per the strategy.
 fn PartitionRouter::pick(
   self : PartitionRouter,
-  n : Int,
+  n : Int32,
   key : Bytes?,
-  override_partition : Int?,
-) -> Int raise ProtocolError {
+  override_partition : Int32?,
+) -> Int32 raise ProtocolError {
   match override_partition {
     Some(p) => {
       if p < 0 || p >= n {
@@ -127,7 +127,10 @@ fn PartitionRouter::pick(
 }
 
 ///|
-fn PartitionRouter::next_round_robin(self : PartitionRouter, n : Int) -> Int {
+fn PartitionRouter::next_round_robin(
+  self : PartitionRouter,
+  n : Int32,
+) -> Int32 {
   if n <= 1 {
     return 0
   }
@@ -140,6 +143,6 @@ fn PartitionRouter::next_round_robin(self : PartitionRouter, n : Int) -> Int {
 /// A batch boundary: the accumulator closed a batch (it filled, or its
 /// flusher took it), so the next unkeyed batch under the Murmur2 strategy
 /// moves to the next partition.
-fn PartitionRouter::on_batch_closed(self : PartitionRouter, n : Int) -> Unit {
+fn PartitionRouter::on_batch_closed(self : PartitionRouter, n : Int32) -> Unit {
   self.sticky.on_new_batch(n)
 }

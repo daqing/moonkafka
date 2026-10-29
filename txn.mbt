@@ -21,23 +21,23 @@
 /// One partition's outcome from AddPartitionsToTxn / TxnOffsetCommit.
 pub struct TxnPartitionResult {
   topic : String
-  partition : Int
-  error_code : Int
+  partition : Int32
+  error_code : Int32
 } derive(@debug.Debug)
 
 ///|
 /// EndTxn v5 outcome: the broker error code plus the (possibly bumped)
 /// producer identity the coordinator returns (v5, KIP-890 part 2).
 pub struct EndTxnResult {
-  error_code : Int
+  error_code : Int32
   producer_id : Int64
-  producer_epoch : Int
+  producer_epoch : Int32
 } derive(@debug.Debug)
 
 ///|
 /// One offset destined for TxnOffsetCommit within a transaction.
 pub(all) struct TxnOffset {
-  partition : Int
+  partition : Int32
   offset : Int64
 } derive(@debug.Debug)
 
@@ -48,8 +48,8 @@ pub(all) struct TxnOffset {
 pub fn encode_add_partitions_to_txn_request(
   transactional_id : String,
   producer_id : Int64,
-  producer_epoch : Int,
-  topics : Array[(String, Array[Int])],
+  producer_epoch : Int32,
+  topics : Array[(String, Array[Int32])],
 ) -> Bytes {
   let body = @buf.Encoder::new()
   body.write_compact_string(transactional_id)
@@ -75,7 +75,7 @@ pub fn encode_add_partitions_to_txn_request(
 /// response for the broker-batch API), plus the throttle hint.
 pub fn decode_add_partitions_to_txn_response(
   d : @buf.Decoder,
-) -> (Array[TxnPartitionResult], Int) raise {
+) -> (Array[TxnPartitionResult], Int32) raise {
   let throttle = d.read_i32()
   let n = d.read_compact_len()
   let out : Array[TxnPartitionResult] = []
@@ -99,9 +99,9 @@ pub async fn BrokerConnection::add_partitions_to_txn(
   self : BrokerConnection,
   transactional_id : String,
   producer_id : Int64,
-  producer_epoch : Int,
-  topics : Array[(String, Array[Int])],
-  timeout_ms? : Int = 30000,
+  producer_epoch : Int32,
+  topics : Array[(String, Array[Int32])],
+  timeout_ms~ : Int32 = 30000,
 ) -> Array[TxnPartitionResult] {
   let version = self.api_version(API_ADD_PARTITIONS_TO_TXN)
   let d = self.request(
@@ -123,7 +123,7 @@ pub async fn BrokerConnection::add_partitions_to_txn(
 pub fn encode_add_offsets_to_txn_request(
   transactional_id : String,
   producer_id : Int64,
-  producer_epoch : Int,
+  producer_epoch : Int32,
   group_id : String,
 ) -> Bytes {
   let body = @buf.Encoder::new()
@@ -138,7 +138,9 @@ pub fn encode_add_offsets_to_txn_request(
 ///|
 /// Decode an AddOffsetsToTxn v4 response body: the top-level error code
 /// plus the throttle hint.
-pub fn decode_add_offsets_to_txn_response(d : @buf.Decoder) -> (Int, Int) raise {
+pub fn decode_add_offsets_to_txn_response(
+  d : @buf.Decoder,
+) -> (Int32, Int32) raise {
   let throttle = d.read_i32()
   let error_code = d.read_i16()
   d.skip_tag_buffer()
@@ -150,10 +152,10 @@ pub async fn BrokerConnection::add_offsets_to_txn(
   self : BrokerConnection,
   transactional_id : String,
   producer_id : Int64,
-  producer_epoch : Int,
+  producer_epoch : Int32,
   group_id : String,
-  timeout_ms? : Int = 30000,
-) -> Int {
+  timeout_ms~ : Int32 = 30000,
+) -> Int32 {
   let version = self.api_version(API_ADD_OFFSETS_TO_TXN)
   let d = self.request(
     API_ADD_OFFSETS_TO_TXN,
@@ -177,8 +179,8 @@ pub fn encode_txn_offset_commit_request(
   transactional_id : String,
   group_id : String,
   producer_id : Int64,
-  producer_epoch : Int,
-  generation_id : Int,
+  producer_epoch : Int32,
+  generation_id : Int32,
   member_id : String,
   topics : Array[(String, Array[TxnOffset])],
 ) -> Bytes {
@@ -213,7 +215,7 @@ pub fn encode_txn_offset_commit_request(
 /// plus the throttle hint.
 pub fn decode_txn_offset_commit_response(
   d : @buf.Decoder,
-) -> (Array[TxnPartitionResult], Int) raise {
+) -> (Array[TxnPartitionResult], Int32) raise {
   let throttle = d.read_i32()
   let n = d.read_compact_len()
   let out : Array[TxnPartitionResult] = []
@@ -238,9 +240,9 @@ pub async fn BrokerConnection::txn_offset_commit(
   transactional_id : String,
   group_id : String,
   producer_id : Int64,
-  producer_epoch : Int,
+  producer_epoch : Int32,
   topics : Array[(String, Array[TxnOffset])],
-  timeout_ms? : Int = 30000,
+  timeout_ms~ : Int32 = 30000,
 ) -> Array[TxnPartitionResult] {
   let version = self.api_version(API_TXN_OFFSET_COMMIT)
   let d = self.request(
@@ -262,7 +264,7 @@ pub async fn BrokerConnection::txn_offset_commit(
 pub fn encode_end_txn_request(
   transactional_id : String,
   producer_id : Int64,
-  producer_epoch : Int,
+  producer_epoch : Int32,
   committed : Bool,
 ) -> Bytes {
   let body = @buf.Encoder::new()
@@ -278,7 +280,7 @@ pub fn encode_end_txn_request(
 /// Decode an EndTxn v5 response body: the error code and the identity
 /// the coordinator returns — v5 bumps the epoch on every transaction
 /// (KIP-890 part 2) and echoes the new (pid, epoch).
-pub fn decode_end_txn_response(d : @buf.Decoder) -> (EndTxnResult, Int) raise {
+pub fn decode_end_txn_response(d : @buf.Decoder) -> (EndTxnResult, Int32) raise {
   let throttle = d.read_i32()
   let error_code = d.read_i16()
   let producer_id = d.read_i64()
@@ -292,9 +294,9 @@ pub async fn BrokerConnection::end_txn(
   self : BrokerConnection,
   transactional_id : String,
   producer_id : Int64,
-  producer_epoch : Int,
+  producer_epoch : Int32,
   committed : Bool,
-  timeout_ms? : Int = 30000,
+  timeout_ms~ : Int32 = 30000,
 ) -> EndTxnResult {
   let version = self.api_version(API_END_TXN)
   let d = self.request(
@@ -316,8 +318,8 @@ pub async fn BrokerConnection::end_txn(
 async fn BrokerConnection::init_producer_id_txn(
   self : BrokerConnection,
   transactional_id : String,
-  transaction_timeout_ms : Int,
-  timeout_ms : Int,
+  transaction_timeout_ms : Int32,
+  timeout_ms : Int32,
 ) -> InitProducerIdResult {
   let version = self.api_version(API_INIT_PRODUCER_ID)
   let d = self.request(
@@ -342,13 +344,13 @@ async fn BrokerConnection::init_producer_id_txn(
 /// transaction holds the lock (51). Note the protocol's own
 /// "retriable" flag does not apply here — fencing (47/90) is marked
 /// retriable for Produce but is fatal for the transaction manager.
-fn txn_retriable_code(code : Int) -> Bool {
+fn txn_retriable_code(code : Int32) -> Bool {
   code == 14 || code == 15 || code == 16 || code == 51
 }
 
 ///|
 /// Fatal transaction-manager codes: the producer was fenced by a newer
 /// instance or epoch (the caller must not retry into a live fence).
-fn txn_fenced_code(code : Int) -> Bool {
+fn txn_fenced_code(code : Int32) -> Bool {
   code == 47 || code == 90
 }

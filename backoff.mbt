@@ -5,7 +5,7 @@
 ///|
 /// Pure exponential growth: base_ms shifted by `attempt`, capped at max_ms
 /// (and at a shift ceiling so large attempts cannot overflow).
-pub fn backoff_ms(base_ms : Int, max_ms : Int, attempt : Int) -> Int {
+pub fn backoff_ms(base_ms : Int32, max_ms : Int32, attempt : Int32) -> Int32 {
   let attempt = if attempt < 0 {
     0
   } else if attempt > 16 {
@@ -25,15 +25,15 @@ pub fn backoff_ms(base_ms : Int, max_ms : Int, attempt : Int) -> Int {
 /// Stateful backoff schedule: next_ms() grows exponentially per call and
 /// applies ±20% wall-clock jitter so retried clients do not synchronize.
 pub struct Backoff {
-  base_ms : Int
-  max_ms : Int
-  mut attempt : Int
+  base_ms : Int32
+  max_ms : Int32
+  mut attempt : Int32
 } derive(@debug.Debug)
 
 ///|
 pub fn Backoff::new(
-  base_ms? : Int = 100,
-  max_ms? : Int = 1000,
+  base_ms~ : Int32 = 100,
+  max_ms~ : Int32 = 1000,
 ) -> Backoff raise {
   if base_ms <= 0 || max_ms < base_ms {
     raise ProtocolError::ProtocolError(
@@ -45,7 +45,7 @@ pub fn Backoff::new(
 
 ///|
 /// Next delay in milliseconds, advancing the attempt counter.
-pub fn Backoff::next_ms(self : Backoff) -> Int {
+pub fn Backoff::next_ms(self : Backoff) -> Int32 {
   let ms = backoff_ms(self.base_ms, self.max_ms, self.attempt)
   self.attempt = self.attempt + 1
   let jitter = 80 + (@async.now() % 41L).to_int() // 80..120 percent

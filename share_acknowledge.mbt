@@ -11,10 +11,10 @@
 /// empty (None on the wire) for admin-only acknowledgements on older
 /// flows; session_epoch 0 opens, -1 closes a share session.
 pub fn encode_share_acknowledge_request(
-  version : Int,
+  version : Int32,
   group_id : String,
   member_id : String,
-  session_epoch : Int,
+  session_epoch : Int32,
   topics : Array[ShareFetchTopic],
 ) -> Bytes raise {
   if version < 1 || version > 2 {
@@ -57,27 +57,27 @@ pub struct ShareAcknowledgeTopicResult {
 
 ///|
 pub struct ShareAcknowledgePartitionResult {
-  partition : Int
-  error_code : Int
+  partition : Int32
+  error_code : Int32
   error_message : String?
-  leader_id : Int
-  leader_epoch : Int
+  leader_id : Int32
+  leader_epoch : Int32
 } derive(@debug.Debug)
 
 ///|
 pub struct ShareAcknowledgeResult {
-  error_code : Int
+  error_code : Int32
   error_message : String?
-  acquisition_lock_timeout_ms : Int
+  acquisition_lock_timeout_ms : Int32
   topics : Array[ShareAcknowledgeTopicResult]
 } derive(@debug.Debug)
 
 ///|
 /// Decode a ShareAcknowledge v1/v2 response body.
 pub fn decode_share_acknowledge_response(
-  version : Int,
+  version : Int32,
   d : @buf.Decoder,
-) -> (ShareAcknowledgeResult, Int) raise {
+) -> (ShareAcknowledgeResult, Int32) raise {
   if version < 1 || version > 2 {
     raise ProtocolError::ProtocolError(
       "moonkafka implements ShareAcknowledge v1-v2, got v\{version}",
@@ -124,9 +124,9 @@ pub async fn BrokerConnection::share_acknowledge(
   self : BrokerConnection,
   group_id : String,
   member_id : String,
-  session_epoch : Int,
+  session_epoch : Int32,
   topics : Array[ShareFetchTopic],
-  timeout_ms? : Int = 30000,
+  timeout_ms~ : Int32 = 30000,
 ) -> ShareAcknowledgeResult {
   let version = self.api_version(API_SHARE_ACKNOWLEDGE)
   let d = self.request(

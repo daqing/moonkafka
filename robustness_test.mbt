@@ -4,16 +4,16 @@
 
 ///|
 struct Xorshift {
-  mut state : UInt
+  mut state : UInt32
 }
 
 ///|
-fn Xorshift::new(state~ : UInt) -> Xorshift {
+fn Xorshift::new(state~ : UInt32) -> Xorshift {
   { state, }
 }
 
 ///|
-fn Xorshift::next(self : Xorshift) -> UInt {
+fn Xorshift::next(self : Xorshift) -> UInt32 {
   let mut x = self.state
   x = x ^ (x << 13)
   x = x ^ (x >> 7)
@@ -24,7 +24,7 @@ fn Xorshift::next(self : Xorshift) -> UInt {
 
 ///|
 /// A deterministic pseudo-random payload of the given length.
-fn fuzz_bytes(rng : Xorshift, len : Int) -> Bytes {
+fn fuzz_bytes(rng : Xorshift, len : Int32) -> Bytes {
   let arr : Array[Byte] = Array(capacity=len)
   for _ in 0..<len {
     arr.push((rng.next() & 0xFFU).to_byte())
@@ -34,9 +34,9 @@ fn fuzz_bytes(rng : Xorshift, len : Int) -> Bytes {
 
 ///|
 /// First `n` bytes of `data` (all of it when n exceeds the length).
-fn prefix(data : Bytes, n : Int) -> Bytes {
+fn prefix(data : Bytes, n : Int32) -> Bytes {
   let arr : Array[Byte] = []
-  let take = Int::min(n, data.length())
+  let take = Int32::min(n, data.length())
   for i in 0..<take {
     arr.push(data[i])
   }

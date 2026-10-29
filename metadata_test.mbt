@@ -5,7 +5,7 @@
 ///|
 /// A two-broker, one-topic Metadata response body. `top_error` writes the
 /// v13-only top-level error slot.
-fn metadata_body(top_error : Int?) -> Bytes {
+fn metadata_body(top_error : Int32?) -> Bytes {
   let e = @buf.Encoder::new()
   e.write_i32(9) // throttle_time_ms
   e.write_compact_len(2) // two brokers

@@ -73,7 +73,7 @@ fn print_help() -> Unit {
 }
 
 ///|
-fn parse_port(args : Array[String], index : Int) -> Int {
+fn parse_port(args : Array[String], index : Int32) -> Int32 {
   match args.get(index) {
     Some(value) =>
       @string.parse_int(value) catch {

@@ -2,10 +2,10 @@
 // Used to verify RecordBatch v2 checksums.
 
 ///|
-let crc32c_table : FixedArray[UInt] = init_crc32c_table()
+let crc32c_table : FixedArray[UInt32] = init_crc32c_table()
 
 ///|
-fn init_crc32c_table() -> FixedArray[UInt] {
+fn init_crc32c_table() -> FixedArray[UInt32] {
   let table = FixedArray::make(256, 0U)
   for i in 0..<256 {
     let mut crc = i.reinterpret_as_uint()
@@ -19,7 +19,7 @@ fn init_crc32c_table() -> FixedArray[UInt] {
 
 ///|
 /// CRC-32C over data[start:end].
-pub fn crc32c(data : Bytes, start? : Int, end? : Int) -> UInt {
+pub fn crc32c(data : Bytes, start? : Int32, end? : Int32) -> UInt32 {
   let start = start.unwrap_or(0)
   let end = end.unwrap_or(data.length())
   let mut crc = 0xFFFFFFFFU

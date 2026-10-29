@@ -40,10 +40,10 @@ pub(all) struct Assignee {
 pub fn compute_assignment(
   assignor : Assignor,
   members : Array[Assignee],
-  topic_partitions : Map[String, Int],
-  owned? : Map[String, Array[(String, Int)]] = Map([]),
-) -> Map[String, Array[(String, Int)]] {
-  let out : Map[String, Array[(String, Int)]] = Map([])
+  topic_partitions : Map[String, Int32],
+  owned~ : Map[String, Array[(String, Int32)]] = Map([]),
+) -> Map[String, Array[(String, Int32)]] {
+  let out : Map[String, Array[(String, Int32)]] = Map([])
   for assignee in members {
     out[assignee.member_id] = []
   }
@@ -61,8 +61,8 @@ pub fn compute_assignment(
 /// consecutive chunk of the partition range (Java's RangeAssignor).
 fn assign_range(
   members : Array[Assignee],
-  topic_partitions : Map[String, Int],
-  out : Map[String, Array[(String, Int)]],
+  topic_partitions : Map[String, Int32],
+  out : Map[String, Array[(String, Int32)]],
 ) -> Unit {
   let topics : Array[String] = []
   for topic, _ in topic_partitions {
@@ -100,10 +100,10 @@ fn assign_range(
 /// handed to subscribed members in id order (Java's RoundRobinAssignor).
 fn assign_round_robin(
   members : Array[Assignee],
-  topic_partitions : Map[String, Int],
-  out : Map[String, Array[(String, Int)]],
+  topic_partitions : Map[String, Int32],
+  out : Map[String, Array[(String, Int32)]],
 ) -> Unit {
-  let entries : Array[(String, Int)] = []
+  let entries : Array[(String, Int32)] = []
   let topics : Array[String] = []
   for topic, _ in topic_partitions {
     topics.push(topic)
@@ -152,9 +152,9 @@ fn assign_round_robin(
 /// deterministic (id-ordered) tie-breaking instead of its random order.
 fn assign_sticky(
   members : Array[Assignee],
-  topic_partitions : Map[String, Int],
-  owned : Map[String, Array[(String, Int)]],
-  out : Map[String, Array[(String, Int)]],
+  topic_partitions : Map[String, Int32],
+  owned : Map[String, Array[(String, Int32)]],
+  out : Map[String, Array[(String, Int32)]],
 ) -> Unit {
   for assignee in members {
     match owned.get(assignee.member_id) {
@@ -241,9 +241,9 @@ fn assign_sticky(
 /// balances first; our pass runs after the keep+fill instead).
 fn balance_sticky(
   members : Array[Assignee],
-  out : Map[String, Array[(String, Int)]],
+  out : Map[String, Array[(String, Int32)]],
 ) -> Unit {
-  let total : Int = {
+  let total : Int32 = {
     let mut n = 0
     for _, pairs in out {
       n += pairs.length()
@@ -343,9 +343,9 @@ fn balance_sticky(
 ///|
 /// True when (topic, partition) sits in the pair list.
 fn any_pair(
-  pairs : Array[(String, Int)],
+  pairs : Array[(String, Int32)],
   topic : String,
-  partition : Int,
+  partition : Int32,
 ) -> Bool {
   for pair in pairs {
     if pair.0 == topic && pair.1 == partition {

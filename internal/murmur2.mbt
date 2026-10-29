@@ -3,16 +3,16 @@
 // become reinterpret_as_uint shifts here.
 
 ///|
-const MURMUR2_SEED : Int = 0x9747b28c
+const MURMUR2_SEED : Int32 = 0x9747b28c
 
 ///|
-const MURMUR2_M : Int = 0x5bd1e995
+const MURMUR2_M : Int32 = 0x5bd1e995
 
 ///|
 /// Hash `data` exactly like Kafka's default partitioner. The result is a
 /// signed 32-bit value; callers mask off the sign bit before taking modulo
 /// partition count (see Producer::pick_partition).
-pub fn murmur2(data : Bytes) -> Int {
+pub fn murmur2(data : Bytes) -> Int32 {
   let length = data.length()
   let mut h = MURMUR2_SEED ^ length
   let length4 = length / 4
@@ -50,6 +50,6 @@ pub fn murmur2(data : Bytes) -> Int {
 
 ///|
 /// Java `>>>`: logical (unsigned) right shift for Int.
-fn logical_shr(v : Int, shift : Int) -> Int {
+fn logical_shr(v : Int32, shift : Int32) -> Int32 {
   (v.reinterpret_as_uint() >> shift).reinterpret_as_int()
 }

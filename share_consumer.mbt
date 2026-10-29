@@ -30,7 +30,7 @@ pub(all) enum ShareAckType {
 } derive(@debug.Debug, Eq)
 
 ///|
-fn ShareAckType::code(self : ShareAckType) -> Int {
+fn ShareAckType::code(self : ShareAckType) -> Int32 {
   match self {
     ShareAccept => 1
     ShareRelease => 2
@@ -43,7 +43,7 @@ fn ShareAckType::code(self : ShareAckType) -> Int {
 /// One record delivered to this share consumer, with the partition it
 /// came from so the caller can acknowledge it later.
 pub struct ShareRecord {
-  partition : Int
+  partition : Int32
   offset : Int64
   timestamp : Int64
   key : Bytes?
@@ -59,11 +59,11 @@ pub struct ShareConsumerConfig {
   group_id : String
   start_from : StartFrom
   /// Cap on records one poll may acquire (and hold in flight).
-  max_queue_size : Int
+  max_queue_size : Int32
   /// Records at or above this many deliveries are auto-rejected rather
   /// than surfaced (negative disables the cap).
-  delivery_count_limit : Int
-  request_timeout_ms : Int
+  delivery_count_limit : Int32
+  request_timeout_ms : Int32
 } derive(@debug.Debug)
 
 ///|
@@ -71,14 +71,14 @@ pub fn ShareConsumerConfig::new(
   bootstrap_servers : Array[String],
   topic : String,
   group_id : String,
-  start_from? : StartFrom = Earliest,
-  request_timeout_ms? : Int = 30000,
-  security_protocol? : SecurityProtocol = Plaintext,
-  sasl? : SaslConfig? = None,
-  tls? : TlsClientOptions? = None,
-  metadata_max_age_ms? : Int = 300000,
-  max_queue_size? : Int = 100,
-  delivery_count_limit? : Int = 3,
+  start_from~ : StartFrom = Earliest,
+  request_timeout_ms~ : Int32 = 30000,
+  security_protocol~ : SecurityProtocol = Plaintext,
+  sasl~ : SaslConfig? = None,
+  tls~ : TlsClientOptions? = None,
+  metadata_max_age_ms~ : Int32 = 300000,
+  max_queue_size~ : Int32 = 100,
+  delivery_count_limit~ : Int32 = 3,
 ) -> ShareConsumerConfig raise {
   if topic.length() == 0 {
     raise ProtocolError::ProtocolError("topic must not be empty")
@@ -114,7 +114,7 @@ pub fn ShareConsumerConfig::new(
 /// closes) and the partitions the broker has in the session. Rebuilt
 /// (from epoch 0) whenever the broker reports a session error.
 pub struct ShareSession {
-  mut epoch : Int
+  mut epoch : Int32
 } derive(@debug.Debug)
 
 ///|
@@ -141,31 +141,31 @@ pub struct ShareConsumer {
   mut topic_id : Uuid
   group_id : String
   start_from : StartFrom
-  max_queue_size : Int
-  delivery_count_limit : Int
-  request_timeout_ms : Int
-  retries : Int
-  retry_backoff_ms : Int
-  retry_backoff_max_ms : Int
+  max_queue_size : Int32
+  delivery_count_limit : Int32
+  request_timeout_ms : Int32
+  retries : Int32
+  retry_backoff_ms : Int32
+  retry_backoff_max_ms : Int32
   /// The user's task group; hosts the membership loop.
   group : @async.TaskGroup[Unit]
   priv cluster : ClusterClient
   mut partitions : Array[PartitionInfo]
   /// The membership assignment: (topic, partition) pairs the share
   /// coordinator pushed.
-  priv mut assignment : Array[(String, Int)]
+  priv mut assignment : Array[(String, Int32)]
   priv mut member_id : String
-  priv mut member_epoch : Int
+  priv mut member_epoch : Int32
   priv mut member_active : Bool
   priv mut member_spawned : Bool
   priv mut member_error : String?
-  priv mut heartbeat_interval_ms : Int
-  priv mut share_coordinator : Int?
+  priv mut heartbeat_interval_ms : Int32
+  priv mut share_coordinator : Int32?
   /// Per-leader share fetch sessions.
-  priv mut share_sessions : Map[Int, ShareSession]
+  priv mut share_sessions : Map[Int32, ShareSession]
   /// In-flight (acquired, unacknowledged) records, keyed by partition
   /// then offset.
-  priv in_flight : Map[Int, Map[Int64, ShareRecord]]
+  priv in_flight : Map[Int32, Map[Int64, ShareRecord]]
   mut closed : Bool
 }
 
@@ -355,7 +355,7 @@ async fn ShareConsumer::member_loop(self : ShareConsumer) -> Unit {
     }
     // No assignment in the response means no change; keep the current one.
     if result.assignment is Some(entries) {
-      let pairs : Array[(String, Int)] = []
+      let pairs : Array[(String, Int32)] = []
       for entry in entries {
         match self.cluster.topic_name(entry.topic_id) {
           Some(name) =>
@@ -370,7 +370,7 @@ async fn ShareConsumer::member_loop(self : ShareConsumer) -> Unit {
     // Rebuild share sessions when the assignment changes, so the
     // session's partition set follows the assignment.
     self.share_sessions = Map([])
-    let wait = Int::max(1, self.heartbeat_interval_ms / SENDER_TICK_MS)
+    let wait = Int32::max(1, self.heartbeat_interval_ms / SENDER_TICK_MS)
     for _ in 0..<wait {
       if self.closed || !self.member_active {
         break
@@ -417,7 +417,9 @@ fn share_error_detail(message : String?) -> String {
 
 ///|
 /// The topic-partitions the coordinator currently assigns to this member.
-pub fn ShareConsumer::assignment(self : ShareConsumer) -> Array[(String, Int)] {
+pub fn ShareConsumer::assignment(
+  self : ShareConsumer,
+) -> Array[(String, Int32)] {
   self.assignment
 }
 
@@ -445,7 +447,7 @@ pub fn ShareConsumer::close(self : ShareConsumer) -> Unit {
 /// The per-leader connection from the cluster pool.
 async fn ShareConsumer::leader_conn(
   self : ShareConsumer,
-  leader : Int,
+  leader : Int32,
 ) -> BrokerConnection {
   self.cluster.connection(leader)
 }
@@ -455,8 +457,8 @@ async fn ShareConsumer::leader_conn(
 /// single-topic shape: every partition shares the topic's id).
 fn ShareConsumer::wanted_by_leader(
   self : ShareConsumer,
-) -> Map[Int, Array[Int]] {
-  let by_leader : Map[Int, Array[Int]] = Map([])
+) -> Map[Int32, Array[Int32]] {
+  let by_leader : Map[Int32, Array[Int32]] = Map([])
   for pair in self.assignment {
     if pair.0 == self.topic {
       for p in self.partitions {
@@ -477,8 +479,8 @@ fn ShareConsumer::wanted_by_leader(
 /// auto-rejected and never surfaced.
 pub async fn ShareConsumer::poll(
   self : ShareConsumer,
-  max_wait_ms? : Int = 500,
-  max_records? : Int = 100,
+  max_wait_ms~ : Int32 = 500,
+  max_records~ : Int32 = 100,
 ) -> Array[ShareRecord] {
   let by_leader = self.wanted_by_leader()
   let out : Array[ShareRecord] = []
@@ -525,9 +527,9 @@ pub async fn ShareConsumer::poll(
 /// Returns None when the exchange needs a metadata refresh.
 async fn ShareConsumer::acquire_from_leader(
   self : ShareConsumer,
-  leader : Int,
-  partitions : Array[Int],
-  max_wait_ms : Int,
+  leader : Int32,
+  partitions : Array[Int32],
+  max_wait_ms : Int32,
 ) -> Array[ShareRecord]? {
   let conn = self.leader_conn(leader)
   let session = self.share_sessions.get_or_init(leader, fn() {
@@ -600,7 +602,10 @@ async fn ShareConsumer::acquire_from_leader(
 ///|
 /// The delivery-count cap admits a record while the cap is disabled
 /// (negative) or its count is still below the limit.
-fn ShareConsumer::under_delivery_cap(self : ShareConsumer, count : Int) -> Bool {
+fn ShareConsumer::under_delivery_cap(
+  self : ShareConsumer,
+  count : Int32,
+) -> Bool {
   self.delivery_count_limit < 0 || count < self.delivery_count_limit
 }
 
@@ -620,14 +625,14 @@ pub async fn ShareConsumer::acknowledge(
   }
   // Group records by partition, then collapse contiguous offsets into
   // acknowledgement batches of one action each.
-  let by_partition : Map[Int, Array[(Int64, Int)]] = Map([])
+  let by_partition : Map[Int32, Array[(Int64, Int32)]] = Map([])
   for record in records {
     self.discard_in_flight(record.partition, record.offset)
     let list = by_partition.get_or_init(record.partition, fn() { [] })
     list.push((record.offset, action.code()))
   }
   // Route by each partition's leader.
-  let by_leader : Map[Int, Array[ShareFetchTopic]] = Map([])
+  let by_leader : Map[Int32, Array[ShareFetchTopic]] = Map([])
   for partition, entries in by_partition {
     let leader = self.leader_of_partition(partition)
     let topics = by_leader.get_or_init(leader, fn() { [] })
@@ -675,7 +680,7 @@ pub async fn ShareConsumer::acknowledge(
 ///|
 fn ShareConsumer::discard_in_flight(
   self : ShareConsumer,
-  partition : Int,
+  partition : Int32,
   offset : Int64,
 ) -> Unit {
   match self.in_flight.get(partition) {
@@ -687,8 +692,8 @@ fn ShareConsumer::discard_in_flight(
 ///|
 fn ShareConsumer::leader_of_partition(
   self : ShareConsumer,
-  partition : Int,
-) -> Int raise ProtocolError {
+  partition : Int32,
+) -> Int32 raise ProtocolError {
   for p in self.partitions {
     if p.index == partition {
       return p.leader
@@ -703,13 +708,13 @@ fn ShareConsumer::leader_of_partition(
 /// Collapse (offset, action) pairs into contiguous acknowledgement
 /// batches, splitting whenever the action changes or the offsets stop
 /// being consecutive. Pairs are already pushed in ascending offset order.
-fn compress_batches(entries : Array[(Int64, Int)]) -> Array[ShareAckBatch] {
+fn compress_batches(entries : Array[(Int64, Int32)]) -> Array[ShareAckBatch] {
   let out : Array[ShareAckBatch] = []
   let mut i = 0
   while i < entries.length() {
     let (start, action) = entries[i]
     let mut end = start
-    let types : Array[Int] = [action]
+    let types : Array[Int32] = [action]
     let mut j = i + 1
     while j < entries.length() {
       let (offset, next_action) = entries[j]

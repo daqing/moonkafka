@@ -24,20 +24,20 @@ pub const QUOTA_ENTITY_IP : String = "ip"
 
 ///|
 /// Quota filter match types (DescribeClientQuotas MatchType values).
-pub const QUOTA_MATCH_EXACT : Int = 0
+pub const QUOTA_MATCH_EXACT : Int32 = 0
 
 ///|
-pub const QUOTA_MATCH_DEFAULT : Int = 1
+pub const QUOTA_MATCH_DEFAULT : Int32 = 1
 
 ///|
-pub const QUOTA_MATCH_ANY : Int = 2
+pub const QUOTA_MATCH_ANY : Int32 = 2
 
 ///|
 /// SCRAM mechanisms (ScramMechanism.java byte values).
-pub const SCRAM_MECHANISM_SHA_256 : Int = 1
+pub const SCRAM_MECHANISM_SHA_256 : Int32 = 1
 
 ///|
-pub const SCRAM_MECHANISM_SHA_512 : Int = 2
+pub const SCRAM_MECHANISM_SHA_512 : Int32 = 2
 
 ///|
 /// A quota entity: type plus name (null = the default entity, e.g. the
@@ -53,7 +53,7 @@ pub(all) struct QuotaEntity {
 /// default entity too).
 pub(all) struct ClientQuotaFilterComponent {
   entity_type : String
-  match_type : Int
+  match_type : Int32
   /// The name to match, or None for the DEFAULT/ANY match styles.
   matches : String?
 } derive(@debug.Debug)
@@ -84,7 +84,7 @@ pub struct ClientQuotasEntry {
 
 ///|
 pub struct DescribeClientQuotasResult {
-  error_code : Int
+  error_code : Int32
   error_message : String?
   entries : Array[ClientQuotasEntry]
 } derive(@debug.Debug)
@@ -107,7 +107,7 @@ pub(all) struct ClientQuotaAlteration {
 
 ///|
 pub struct AlterClientQuotasResult {
-  error_code : Int
+  error_code : Int32
   error_message : String?
   entity : Array[QuotaEntity]
 } derive(@debug.Debug)
@@ -115,22 +115,22 @@ pub struct AlterClientQuotasResult {
 ///|
 /// Mechanism and iteration count of a stored SCRAM credential.
 pub struct ScramCredentialInfo {
-  mechanism : Int
-  iterations : Int
+  mechanism : Int32
+  iterations : Int32
 } derive(@debug.Debug)
 
 ///|
 /// One user's SCRAM credentials as stored on the broker.
 pub struct DescribedScramCredentials {
   user : String
-  error_code : Int
+  error_code : Int32
   error_message : String?
   credential_infos : Array[ScramCredentialInfo]
 } derive(@debug.Debug)
 
 ///|
 pub struct DescribeUserScramResult {
-  error_code : Int
+  error_code : Int32
   error_message : String?
   results : Array[DescribedScramCredentials]
 } derive(@debug.Debug)
@@ -139,7 +139,7 @@ pub struct DescribeUserScramResult {
 /// Delete one SCRAM credential of a user (one deletion per mechanism).
 pub(all) struct ScramCredentialDeletion {
   name : String
-  mechanism : Int
+  mechanism : Int32
 } derive(@debug.Debug)
 
 ///|
@@ -149,8 +149,8 @@ pub(all) struct ScramCredentialDeletion {
 /// from a plaintext password.
 pub(all) struct ScramCredentialUpsertion {
   name : String
-  mechanism : Int
-  iterations : Int
+  mechanism : Int32
+  iterations : Int32
   salt : Bytes
   salted_password : Bytes
 } derive(@debug.Debug)
@@ -162,9 +162,9 @@ pub(all) struct ScramCredentialUpsertion {
 /// RFC 5802. Brokers accept iteration counts between 4096 and 16384.
 pub fn ScramCredentialUpsertion::from_password(
   name : String,
-  mechanism : Int,
+  mechanism : Int32,
   password : Bytes,
-  iterations? : Int = 4096,
+  iterations~ : Int32 = 4096,
 ) -> ScramCredentialUpsertion raise {
   let sha512 = mechanism == SCRAM_MECHANISM_SHA_512
   guard mechanism == SCRAM_MECHANISM_SHA_256 || sha512 else {
@@ -182,7 +182,7 @@ pub fn ScramCredentialUpsertion::from_password(
 ///|
 pub struct AlterUserScramResult {
   user : String
-  error_code : Int
+  error_code : Int32
   error_message : String?
 } derive(@debug.Debug)
 
@@ -190,7 +190,7 @@ pub struct AlterUserScramResult {
 /// The quota APIs cross the flexible boundary at v1: strings, array
 /// lengths, and tag buffers shape by version (v0 is the legacy
 /// int16/int32 shape without tag buffers).
-fn write_versioned_len(body : @buf.Encoder, n : Int, version : Int) -> Unit {
+fn write_versioned_len(body : @buf.Encoder, n : Int32, version : Int32) -> Unit {
   if version >= 1 {
     body.write_compact_len(n)
   } else {
@@ -202,7 +202,7 @@ fn write_versioned_len(body : @buf.Encoder, n : Int, version : Int) -> Unit {
 fn write_versioned_string(
   body : @buf.Encoder,
   s : String,
-  version : Int,
+  version : Int32,
 ) -> Unit {
   if version >= 1 {
     body.write_compact_string(s)
@@ -217,7 +217,7 @@ fn write_versioned_string(
 fn write_versioned_nullable_string(
   body : @buf.Encoder,
   s : String?,
-  version : Int,
+  version : Int32,
 ) -> Unit {
   if version >= 1 {
     body.write_compact_nullable_string(s)
@@ -227,14 +227,14 @@ fn write_versioned_nullable_string(
 }
 
 ///|
-fn write_versioned_tag(body : @buf.Encoder, version : Int) -> Unit {
+fn write_versioned_tag(body : @buf.Encoder, version : Int32) -> Unit {
   if version >= 1 {
     body.write_tag_buffer()
   }
 }
 
 ///|
-fn read_versioned_len(d : @buf.Decoder, version : Int) -> Int raise {
+fn read_versioned_len(d : @buf.Decoder, version : Int32) -> Int32 raise {
   if version >= 1 {
     d.read_compact_len()
   } else {
@@ -245,7 +245,7 @@ fn read_versioned_len(d : @buf.Decoder, version : Int) -> Int raise {
 ///|
 fn read_versioned_nullable_string(
   d : @buf.Decoder,
-  version : Int,
+  version : Int32,
 ) -> String? raise {
   if version >= 1 {
     d.read_compact_nullable_string()
@@ -260,7 +260,7 @@ fn read_versioned_nullable_string(
 }
 
 ///|
-fn read_versioned_string(d : @buf.Decoder, version : Int) -> String raise {
+fn read_versioned_string(d : @buf.Decoder, version : Int32) -> String raise {
   match read_versioned_nullable_string(d, version) {
     Some(s) => s
     None => raise @buf.DecodeError::Malformed("unexpected null string")
@@ -268,7 +268,7 @@ fn read_versioned_string(d : @buf.Decoder, version : Int) -> String raise {
 }
 
 ///|
-fn skip_versioned_tag(d : @buf.Decoder, version : Int) -> Unit raise {
+fn skip_versioned_tag(d : @buf.Decoder, version : Int32) -> Unit raise {
   if version >= 1 {
     d.skip_tag_buffer()
   }
@@ -284,7 +284,7 @@ fn write_compact_bytes(body : @buf.Encoder, b : Bytes) -> Unit {
 fn encode_quota_entity(
   body : @buf.Encoder,
   entity : Array[QuotaEntity],
-  version : Int,
+  version : Int32,
 ) -> Unit {
   write_versioned_len(body, entity.length(), version)
   for e in entity {
@@ -297,7 +297,7 @@ fn encode_quota_entity(
 ///|
 fn decode_quota_entity(
   d : @buf.Decoder,
-  version : Int,
+  version : Int32,
 ) -> Array[QuotaEntity] raise {
   let entity : Array[QuotaEntity] = []
   let n = read_versioned_len(d, version)
@@ -314,7 +314,7 @@ fn decode_quota_entity(
 /// Encode a DescribeClientQuotas v0-v1 request body.
 pub fn encode_describe_client_quotas_request(
   filter : ClientQuotaFilter,
-  version : Int,
+  version : Int32,
 ) -> Bytes {
   let body = @buf.Encoder::new()
   write_versioned_len(body, filter.components.length(), version)
@@ -334,9 +334,9 @@ pub fn encode_describe_client_quotas_request(
 /// is nullable (the broker sends null on errors); a null decodes as
 /// empty.
 pub fn decode_describe_client_quotas_response(
-  version : Int,
+  version : Int32,
   d : @buf.Decoder,
-) -> (DescribeClientQuotasResult, Int) raise {
+) -> (DescribeClientQuotasResult, Int32) raise {
   let throttle = d.read_i32()
   let error_code = d.read_i16()
   let error_message = read_versioned_nullable_string(d, version)
@@ -363,7 +363,7 @@ pub fn decode_describe_client_quotas_response(
 pub async fn BrokerConnection::describe_client_quotas(
   self : BrokerConnection,
   filter : ClientQuotaFilter,
-  timeout_ms? : Int = 30000,
+  timeout_ms~ : Int32 = 30000,
 ) -> DescribeClientQuotasResult {
   let version = self.api_version(API_DESCRIBE_CLIENT_QUOTAS)
   let d = self.request_raw(
@@ -383,7 +383,7 @@ pub async fn BrokerConnection::describe_client_quotas(
 pub fn encode_alter_client_quotas_request(
   entries : Array[ClientQuotaAlteration],
   validate_only : Bool,
-  version : Int,
+  version : Int32,
 ) -> Bytes {
   let body = @buf.Encoder::new()
   write_versioned_len(body, entries.length(), version)
@@ -407,9 +407,9 @@ pub fn encode_alter_client_quotas_request(
 /// Decode an AlterClientQuotas v0-v1 response body: one result per
 /// entry, echoing its entity.
 pub fn decode_alter_client_quotas_response(
-  version : Int,
+  version : Int32,
   d : @buf.Decoder,
-) -> (Array[AlterClientQuotasResult], Int) raise {
+) -> (Array[AlterClientQuotasResult], Int32) raise {
   let throttle = d.read_i32()
   let out : Array[AlterClientQuotasResult] = []
   let n = read_versioned_len(d, version)
@@ -428,8 +428,8 @@ pub fn decode_alter_client_quotas_response(
 pub async fn BrokerConnection::alter_client_quotas(
   self : BrokerConnection,
   entries : Array[ClientQuotaAlteration],
-  validate_only? : Bool = false,
-  timeout_ms? : Int = 30000,
+  validate_only~ : Bool = false,
+  timeout_ms~ : Int32 = 30000,
 ) -> Array[AlterClientQuotasResult] {
   let version = self.api_version(API_ALTER_CLIENT_QUOTAS)
   let d = self.request_raw(
@@ -468,7 +468,7 @@ pub fn encode_describe_user_scram_request(users : Array[String]?) -> Bytes {
 /// per user, each with its credential infos.
 pub fn decode_describe_user_scram_response(
   d : @buf.Decoder,
-) -> (DescribeUserScramResult, Int) raise {
+) -> (DescribeUserScramResult, Int32) raise {
   let throttle = d.read_i32()
   let error_code = d.read_i16()
   let error_message = d.read_compact_nullable_string()
@@ -502,7 +502,7 @@ pub fn decode_describe_user_scram_response(
 pub async fn BrokerConnection::describe_user_scram(
   self : BrokerConnection,
   users : Array[String]?,
-  timeout_ms? : Int = 30000,
+  timeout_ms~ : Int32 = 30000,
 ) -> DescribeUserScramResult {
   let d = self.request(
     API_DESCRIBE_USER_SCRAM_CREDENTIALS,
@@ -547,7 +547,7 @@ pub fn encode_alter_user_scram_request(
 /// deletion and upsertion.
 pub fn decode_alter_user_scram_response(
   d : @buf.Decoder,
-) -> (Array[AlterUserScramResult], Int) raise {
+) -> (Array[AlterUserScramResult], Int32) raise {
   let throttle = d.read_i32()
   let out : Array[AlterUserScramResult] = []
   let n = d.read_compact_len()
@@ -567,7 +567,7 @@ pub async fn BrokerConnection::alter_user_scram(
   self : BrokerConnection,
   deletions : Array[ScramCredentialDeletion],
   upsertions : Array[ScramCredentialUpsertion],
-  timeout_ms? : Int = 30000,
+  timeout_ms~ : Int32 = 30000,
 ) -> Array[AlterUserScramResult] {
   let d = self.request(
     API_ALTER_USER_SCRAM_CREDENTIALS,
@@ -603,7 +603,7 @@ pub async fn Admin::describe_client_quotas(
 pub async fn Admin::alter_client_quotas(
   self : Admin,
   entries : Array[ClientQuotaAlteration],
-  validate_only? : Bool = false,
+  validate_only~ : Bool = false,
 ) -> Array[AlterClientQuotasResult] {
   self.with_retries(
     fn(results : Array[AlterClientQuotasResult]) {

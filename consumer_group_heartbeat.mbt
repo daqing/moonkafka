@@ -14,7 +14,7 @@
 /// One topic's partitions in a heartbeat assignment (topic-id addressed).
 pub(all) struct HeartbeatTopicPartitions {
   topic_id : Uuid
-  partitions : Array[Int]
+  partitions : Array[Int32]
 } derive(@debug.Debug)
 
 ///|
@@ -23,16 +23,16 @@ pub(all) struct HeartbeatTopicPartitions {
 /// owned-partition list is empty on the epoch-0 join and null (unchanged)
 /// afterwards, so the server drives assignment.
 pub fn encode_consumer_group_heartbeat_request(
-  version : Int,
+  version : Int32,
   group_id : String,
   member_id : String,
-  member_epoch : Int,
-  instance_id? : String? = None,
-  rack_id? : String? = None,
-  rebalance_timeout_ms? : Int = -1,
-  subscribed_topic_names? : Array[String]? = None,
-  subscribed_topic_regex? : String? = None,
-  server_assignor? : String? = None,
+  member_epoch : Int32,
+  instance_id~ : String? = None,
+  rack_id~ : String? = None,
+  rebalance_timeout_ms~ : Int32 = -1,
+  subscribed_topic_names~ : Array[String]? = None,
+  subscribed_topic_regex~ : String? = None,
+  server_assignor~ : String? = None,
 ) -> Bytes raise {
   if version < 0 || version > 1 {
     raise ProtocolError::ProtocolError(
@@ -81,11 +81,11 @@ pub fn encode_consumer_group_heartbeat_request(
 /// need not re-send an unchanged assignment every heartbeat); Some([]) is
 /// an explicit revocation of everything.
 pub struct ConsumerGroupHeartbeatResult {
-  error_code : Int
+  error_code : Int32
   error_message : String?
   member_id : String
-  member_epoch : Int
-  heartbeat_interval_ms : Int
+  member_epoch : Int32
+  heartbeat_interval_ms : Int32
   assignment : Array[HeartbeatTopicPartitions]?
 } derive(@debug.Debug)
 
@@ -93,7 +93,7 @@ pub struct ConsumerGroupHeartbeatResult {
 /// Decode a ConsumerGroupHeartbeat response body.
 pub fn decode_consumer_group_heartbeat_response(
   d : @buf.Decoder,
-) -> (ConsumerGroupHeartbeatResult, Int) raise {
+) -> (ConsumerGroupHeartbeatResult, Int32) raise {
   let throttle = d.read_i32()
   let error_code = d.read_i16()
   let error_message = d.read_compact_nullable_string()
@@ -107,7 +107,7 @@ pub fn decode_consumer_group_heartbeat_response(
     for _ in 0..<topics {
       let topic_id = Uuid::from_bytes(d.read_bytes(16))
       let n = d.read_compact_len()
-      let partitions : Array[Int] = []
+      let partitions : Array[Int32] = []
       for _ in 0..<n {
         partitions.push(d.read_i32())
       }
@@ -139,13 +139,13 @@ pub async fn BrokerConnection::consumer_group_heartbeat(
   self : BrokerConnection,
   group_id : String,
   member_id : String,
-  member_epoch : Int,
-  instance_id? : String? = None,
-  rebalance_timeout_ms? : Int = -1,
-  subscribed_topic_names? : Array[String]? = None,
-  subscribed_topic_regex? : String? = None,
-  server_assignor? : String? = None,
-  timeout_ms? : Int = 30000,
+  member_epoch : Int32,
+  instance_id~ : String? = None,
+  rebalance_timeout_ms~ : Int32 = -1,
+  subscribed_topic_names~ : Array[String]? = None,
+  subscribed_topic_regex~ : String? = None,
+  server_assignor~ : String? = None,
+  timeout_ms~ : Int32 = 30000,
 ) -> ConsumerGroupHeartbeatResult {
   let version = self.api_version(API_CONSUMER_GROUP_HEARTBEAT)
   let d = self.request(

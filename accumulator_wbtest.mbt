@@ -5,9 +5,9 @@
 
 ///|
 fn acc(
-  batch_size~ : Int,
-  buffer_memory~ : Int,
-  linger_ms? : Int = 0,
+  batch_size~ : Int32,
+  buffer_memory~ : Int32,
+  linger_ms~ : Int32 = 0,
 ) -> RecordAccumulator {
   RecordAccumulator::new(batch_size, buffer_memory, linger_ms)
 }

@@ -5,7 +5,7 @@
 
 ///|
 test "share ack types map to the protocol action codes" {
-  let cases : Array[(ShareAckType, Int)] = [
+  let cases : Array[(ShareAckType, Int32)] = [
     (ShareAccept, 1),
     (ShareRelease, 2),
     (ShareReject, 3),

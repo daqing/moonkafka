@@ -18,22 +18,22 @@
 // from a full request.
 
 ///|
-pub const FETCH_SESSION_ID_NOT_FOUND : Int = 70
+pub const FETCH_SESSION_ID_NOT_FOUND : Int32 = 70
 
 ///|
-pub const INVALID_FETCH_SESSION_EPOCH : Int = 71
+pub const INVALID_FETCH_SESSION_EPOCH : Int32 = 71
 
 ///|
 /// Fetch epoch of a sessionless ("full") request.
-pub const FETCH_FULL_EPOCH : Int = 0
+pub const FETCH_FULL_EPOCH : Int32 = 0
 
 ///|
 /// One partition to fetch, as the request carries it.
 pub(all) struct FetchPartitionReq {
-  index : Int
-  leader_epoch : Int
+  index : Int32
+  leader_epoch : Int32
   fetch_offset : Int64
-  max_bytes : Int
+  max_bytes : Int32
 } derive(@debug.Debug)
 
 ///|
@@ -50,15 +50,15 @@ pub(all) struct FetchTopicReq {
 pub(all) struct FetchTopicForgotten {
   name : String
   topic_id : Uuid
-  partitions : Array[Int]
+  partitions : Array[Int32]
 } derive(@debug.Debug)
 
 ///|
 /// The session portion of a fetch request: what to put in the
 /// session_id/session_epoch fields and which partitions to (re)send.
 pub(all) struct FetchSessionReq {
-  session_id : Int
-  session_epoch : Int
+  session_id : Int32
+  session_epoch : Int32
   partitions : Array[FetchPartitionReq]
   forgotten : Array[FetchTopicForgotten]
 } derive(@debug.Debug)
@@ -68,9 +68,9 @@ pub(all) struct FetchSessionReq {
 /// `sent` mirrors what the broker last heard per partition, so the next
 /// incremental request can carry only the changed ones.
 pub struct FetchSession {
-  mut session_id : Int
-  mut next_epoch : Int
-  mut sent : Map[Int, (Int64, Int)]
+  mut session_id : Int32
+  mut next_epoch : Int32
+  mut sent : Map[Int32, (Int64, Int32)]
 } derive(@debug.Debug)
 
 ///|
@@ -93,8 +93,8 @@ pub fn FetchSession::prepare(
   self : FetchSession,
   topic_name : String,
   topic_id : Uuid,
-  wanted : Map[Int, (Int64, Int)],
-  max_bytes : Int,
+  wanted : Map[Int32, (Int64, Int32)],
+  max_bytes : Int32,
 ) -> FetchSessionReq {
   let mut full = !self.established()
   // Epochs are int32; a wrap is as good as eviction (Java does the same).
@@ -169,8 +169,8 @@ pub fn FetchSession::prepare(
 /// or when the broker closes the session (session id 0 in reply).
 pub fn FetchSession::handle_response(
   self : FetchSession,
-  response_session_id : Int,
-  top_error_code : Int,
+  response_session_id : Int32,
+  top_error_code : Int32,
 ) -> Unit {
   if top_error_code == FETCH_SESSION_ID_NOT_FOUND ||
     top_error_code == INVALID_FETCH_SESSION_EPOCH {
@@ -203,14 +203,14 @@ pub fn FetchSession::invalidate(self : FetchSession) -> Unit {
 ///|
 /// Encode a Fetch request body for v12-v16.
 pub fn encode_fetch_request(
-  version : Int,
+  version : Int32,
   topics : Array[FetchTopicReq],
   session~ : FetchSessionReq,
-  max_wait_ms~ : Int,
-  min_bytes? : Int = 1,
-  max_bytes? : Int = 0x7fffffff,
-  isolation_level? : Int = 0,
-  rack_id? : String = "",
+  max_wait_ms~ : Int32,
+  min_bytes~ : Int32 = 1,
+  max_bytes~ : Int32 = 0x7fffffff,
+  isolation_level~ : Int32 = 0,
+  rack_id~ : String = "",
 ) -> Bytes raise {
   if version < 12 || version > 16 {
     raise ProtocolError::ProtocolError(
@@ -266,8 +266,8 @@ pub fn encode_fetch_request(
 
 ///|
 pub struct FetchPartitionResult {
-  partition : Int
-  error_code : Int
+  partition : Int32
+  error_code : Int32
   high_watermark : Int64
   last_stable_offset : Int64
   log_start_offset : Int64
@@ -293,8 +293,8 @@ pub struct FetchTopicResult {
 
 ///|
 pub struct FetchResult {
-  top_error_code : Int
-  session_id : Int
+  top_error_code : Int32
+  session_id : Int32
   topics : Array[FetchTopicResult]
 }
 
@@ -304,9 +304,9 @@ pub struct FetchResult {
 /// NodeEndpoints are skipped. Returns the parsed result plus the throttle
 /// hint in milliseconds.
 pub fn decode_fetch_response(
-  version : Int,
+  version : Int32,
   d : @buf.Decoder,
-) -> (FetchResult, Int) raise {
+) -> (FetchResult, Int32) raise {
   if version < 12 || version > 16 {
     raise ProtocolError::ProtocolError(
       "moonkafka implements Fetch v12-v16, got v\{version}",

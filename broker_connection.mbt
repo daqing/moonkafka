@@ -31,14 +31,17 @@ pub(all) struct TlsClientOptions {
 ///|
 pub fn TlsClientOptions::new(
   server_name : String,
-  verify_certificates? : Bool = true,
-  ca_pem_file? : String? = None,
+  verify_certificates~ : Bool = true,
+  ca_pem_file~ : String? = None,
 ) -> TlsClientOptions {
   { server_name, verify_certificates, ca_pem_file, }
 }
 
 ///|
-pub async fn BrokerStream::read_exactly(self : BrokerStream, n : Int) -> Bytes {
+pub async fn BrokerStream::read_exactly(
+  self : BrokerStream,
+  n : Int32,
+) -> Bytes {
   match self {
     Plain(tcp) => tcp.read_exactly(n)
     Secure(tls) => tls.read_exactly(n)
@@ -72,9 +75,9 @@ pub struct BrokerConnection {
   read_lock : @async.Mutex
   /// Completed response frames (correlation id onward) waiting for their
   /// requester; guarded by read_lock.
-  responses : Map[Int, Bytes]
+  responses : Map[Int32, Bytes]
   /// Last issued correlation id; guarded by write_lock.
-  mut correlation_id : Int
+  mut correlation_id : Int32
   mut closed : Bool
   in_flight : @async.Semaphore
   /// Wall-clock deadline set by the broker's last throttle hint; requests
@@ -90,11 +93,11 @@ pub struct BrokerConnection {
 ///|
 pub async fn BrokerConnection::connect(
   host : String,
-  port : Int,
-  client_id? : String = "moonkafka",
-  max_in_flight? : Int = 5,
-  timeout_ms? : Int = 30000,
-  tls? : TlsClientOptions? = None,
+  port : Int32,
+  client_id~ : String = "moonkafka",
+  max_in_flight~ : Int32 = 5,
+  timeout_ms~ : Int32 = 30000,
+  tls~ : TlsClientOptions? = None,
 ) -> BrokerConnection {
   // The whole dial (TCP connect + optional TLS handshake) is bounded by
   // timeout_ms; a cancelled TLS handshake leaves the socket unusable, so
@@ -140,7 +143,7 @@ pub async fn BrokerConnection::connect(
 /// Record the broker's latest throttle hint, keeping the furthest deadline.
 pub fn BrokerConnection::note_throttle(
   self : BrokerConnection,
-  throttle_ms : Int,
+  throttle_ms : Int32,
 ) -> Unit {
   if throttle_ms > 0 {
     let until = @async.now() + throttle_ms.to_int64()
@@ -174,10 +177,10 @@ pub fn BrokerConnection::close(self : BrokerConnection) -> Unit {
 /// or any transport failure the connection is closed.
 pub async fn BrokerConnection::request(
   self : BrokerConnection,
-  api_key : Int,
-  api_version : Int,
+  api_key : Int32,
+  api_version : Int32,
   body : Bytes,
-  timeout_ms? : Int = 30000,
+  timeout_ms~ : Int32 = 30000,
 ) -> @buf.Decoder {
   self.request_raw(api_key, api_version, body, timeout_ms~, flexible=true)
 }
@@ -187,11 +190,11 @@ pub async fn BrokerConnection::request(
 /// (request header v1, response header v0): SaslHandshake v1 today.
 pub async fn BrokerConnection::request_raw(
   self : BrokerConnection,
-  api_key : Int,
-  api_version : Int,
+  api_key : Int32,
+  api_version : Int32,
   body : Bytes,
-  timeout_ms? : Int = 30000,
-  flexible? : Bool = true,
+  timeout_ms~ : Int32 = 30000,
+  flexible~ : Bool = true,
 ) -> @buf.Decoder {
   if self.closed {
     raise TransportError::ConnectionClosed("connection is closed")
@@ -225,8 +228,8 @@ pub async fn BrokerConnection::request_raw(
 ///|
 async fn BrokerConnection::exchange(
   self : BrokerConnection,
-  api_key : Int,
-  api_version : Int,
+  api_key : Int32,
+  api_version : Int32,
   body : Bytes,
   flexible : Bool,
 ) -> @buf.Decoder {
@@ -242,11 +245,11 @@ async fn BrokerConnection::exchange(
 /// across the wait would serialize pipelined requests again.
 async fn BrokerConnection::issue_request(
   self : BrokerConnection,
-  api_key : Int,
-  api_version : Int,
+  api_key : Int32,
+  api_version : Int32,
   body : Bytes,
   flexible : Bool,
-) -> Int {
+) -> Int32 {
   self.write_lock.acquire()
   defer self.write_lock.release()
   self.correlation_id += 1
@@ -264,8 +267,8 @@ async fn BrokerConnection::issue_request(
 /// is consumed since nothing waits.
 pub async fn BrokerConnection::send_only(
   self : BrokerConnection,
-  api_key : Int,
-  api_version : Int,
+  api_key : Int32,
+  api_version : Int32,
   body : Bytes,
 ) -> Unit {
   self.write_lock.acquire()
@@ -283,8 +286,8 @@ pub async fn BrokerConnection::send_only(
 /// hold the read lock and pooling frames that belong to other requesters.
 async fn BrokerConnection::await_response(
   self : BrokerConnection,
-  corr : Int,
-  api_key : Int,
+  corr : Int32,
+  api_key : Int32,
   flexible : Bool,
 ) -> @buf.Decoder {
   self.read_lock.acquire()
@@ -302,7 +305,10 @@ async fn BrokerConnection::await_response(
 }
 
 ///|
-async fn BrokerConnection::demux(self : BrokerConnection, corr : Int) -> Bytes {
+async fn BrokerConnection::demux(
+  self : BrokerConnection,
+  corr : Int32,
+) -> Bytes {
   for ;; {
     match self.responses.get(corr) {
       Some(frame) => {

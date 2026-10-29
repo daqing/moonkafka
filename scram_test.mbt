@@ -10,7 +10,7 @@ fn hex_to_bytes(hex : String) -> Bytes {
   for c in hex {
     chars.push(c)
   }
-  fn nibble(c : Char) -> Int? {
+  fn nibble(c : Char) -> Int32? {
     let v = c.to_int()
     if v >= 48 && v <= 57 {
       Some(v - 48)

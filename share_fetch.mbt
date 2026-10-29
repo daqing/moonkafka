@@ -20,14 +20,14 @@
 pub(all) struct ShareAckBatch {
   first_offset : Int64
   last_offset : Int64
-  acknowledge_types : Array[Int]
+  acknowledge_types : Array[Int32]
 } derive(@debug.Debug)
 
 ///|
 /// One partition's acknowledgment batches in a share-fetch or
 /// share-acknowledge request.
 pub(all) struct ShareFetchPartition {
-  partition : Int
+  partition : Int32
   acknowledgment_batches : Array[ShareAckBatch]
 } derive(@debug.Debug)
 
@@ -43,7 +43,7 @@ pub(all) struct ShareFetchTopic {
 /// One topic's partitions to drop from the established share session.
 pub(all) struct ShareForgottenTopic {
   topic_id : Uuid
-  partitions : Array[Int]
+  partitions : Array[Int32]
 } derive(@debug.Debug)
 
 ///|
@@ -52,17 +52,17 @@ pub(all) struct ShareForgottenTopic {
 /// single -1 null marker). v2's tagged ShareAcquireMode/IsRenewAck stay
 /// at their defaults (batch-optimized, no renew acks).
 pub fn encode_share_fetch_request(
-  version : Int,
+  version : Int32,
   group_id : String,
   member_id : String,
-  session_epoch : Int,
+  session_epoch : Int32,
   topics : Array[ShareFetchTopic],
   forgotten~ : Array[ShareForgottenTopic],
-  max_wait_ms~ : Int,
-  min_bytes? : Int = 1,
-  max_bytes? : Int = 0x7fffffff,
-  max_records? : Int = 100,
-  batch_size? : Int = 10,
+  max_wait_ms~ : Int32,
+  min_bytes~ : Int32 = 1,
+  max_bytes~ : Int32 = 0x7fffffff,
+  max_records~ : Int32 = 100,
+  batch_size~ : Int32 = 10,
 ) -> Bytes raise {
   if version < 1 || version > 2 {
     raise ProtocolError::ProtocolError(
@@ -127,9 +127,9 @@ fn write_ack_batches(
 /// One share fetch response body. Records decode through the shared
 /// record-batch machinery; acquired ranges carry their delivery count.
 pub struct ShareFetchResult {
-  error_code : Int
+  error_code : Int32
   error_message : String?
-  acquisition_lock_timeout_ms : Int
+  acquisition_lock_timeout_ms : Int32
   topics : Array[ShareFetchTopicResult]
 } derive(@debug.Debug)
 
@@ -141,13 +141,13 @@ pub struct ShareFetchTopicResult {
 
 ///|
 pub struct ShareFetchPartitionResult {
-  partition : Int
-  error_code : Int
+  partition : Int32
+  error_code : Int32
   error_message : String?
-  acknowledge_error_code : Int
+  acknowledge_error_code : Int32
   acknowledge_error_message : String?
-  leader_id : Int
-  leader_epoch : Int
+  leader_id : Int32
+  leader_epoch : Int32
   records : Array[Record]
   batches : Array[DecodedBatch]
   records_complete : Bool
@@ -159,7 +159,7 @@ pub struct ShareFetchPartitionResult {
 pub(all) struct ShareAcquiredRange {
   first_offset : Int64
   last_offset : Int64
-  delivery_count : Int
+  delivery_count : Int32
 } derive(@debug.Debug)
 
 ///|
@@ -167,9 +167,9 @@ pub(all) struct ShareAcquiredRange {
 /// fields and top-level NodeEndpoints are skipped; acquired ranges and
 /// records are decoded.
 pub fn decode_share_fetch_response(
-  version : Int,
+  version : Int32,
   d : @buf.Decoder,
-) -> (ShareFetchResult, Int) raise {
+) -> (ShareFetchResult, Int32) raise {
   if version < 1 || version > 2 {
     raise ProtocolError::ProtocolError(
       "moonkafka implements ShareFetch v1-v2, got v\{version}",
@@ -252,11 +252,11 @@ pub async fn BrokerConnection::share_fetch(
   self : BrokerConnection,
   group_id : String,
   member_id : String,
-  session_epoch : Int,
+  session_epoch : Int32,
   topics : Array[ShareFetchTopic],
-  forgotten? : Array[ShareForgottenTopic] = [],
-  max_wait_ms~ : Int,
-  timeout_ms? : Int = 30000,
+  forgotten~ : Array[ShareForgottenTopic] = [],
+  max_wait_ms~ : Int32,
+  timeout_ms~ : Int32 = 30000,
 ) -> ShareFetchResult {
   let version = self.api_version(API_SHARE_FETCH)
   let d = self.request(

@@ -8,22 +8,22 @@
 ///|
 pub struct Producer {
   topic : String
-  acks : Int
-  timeout_ms : Int
-  retries : Int
-  retry_backoff_ms : Int
-  retry_backoff_max_ms : Int
-  delivery_timeout_ms : Int
+  acks : Int32
+  timeout_ms : Int32
+  retries : Int32
+  retry_backoff_ms : Int32
+  retry_backoff_max_ms : Int32
+  delivery_timeout_ms : Int32
   /// The user's task group; hosts the sender drain loop, which the group
   /// joins on exit (close lets it drain first).
   group : @async.TaskGroup[Unit]
   enable_idempotence : Bool
   /// Idempotence identity, assigned at connect (InitProducerId v5).
   mut producer_id : Int64
-  mut producer_epoch : Int
+  mut producer_epoch : Int32
   /// Next sequence number per partition; stamped into fresh batches,
   /// rewound on terminal failures, reset on epoch bumps.
-  priv sequences : Map[Int, Int]
+  priv sequences : Map[Int32, Int32]
   priv cluster : ClusterClient
   mut topic_id : Uuid
   mut partitions : Array[PartitionInfo]
@@ -37,9 +37,9 @@ pub struct Producer {
   /// failure inside the transaction.
   priv transactional_id : String?
   priv mut in_transaction : Bool
-  priv mut txn_added : Map[Int, Bool]
-  priv mut txn_coordinator : Int?
-  priv mut txn_failed_base : Int
+  priv mut txn_added : Map[Int32, Bool]
+  priv mut txn_coordinator : Int32?
+  priv mut txn_failed_base : Int32
 }
 
 ///|
@@ -50,10 +50,10 @@ pub struct Producer {
 pub async fn Producer::connect(
   group~ : @async.TaskGroup[Unit],
   host~ : String,
-  port~ : Int,
+  port~ : Int32,
   topic~ : String,
-  acks? : Int = 1,
-  timeout_ms? : Int = 30000,
+  acks~ : Int32 = 1,
+  timeout_ms~ : Int32 = 30000,
 ) -> Producer {
   let config = ProducerConfig::new(
     ["\{host}:\{port}"],
@@ -182,7 +182,7 @@ async fn Producer::refresh_metadata(self : Producer) -> Unit {
 fn Producer::pick_partition(
   self : Producer,
   key : Bytes?,
-  override_partition : Int?,
+  override_partition : Int32?,
 ) -> PartitionInfo raise ProtocolError {
   let index = self.router.pick(
     self.partitions.length(),

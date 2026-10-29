@@ -25,7 +25,7 @@ pub fn Encoder::new() -> Encoder {
 /// the hot request/record-batch encoding paths avoid repeated array
 /// growth reallocations. Growth stalls when the estimate is exceeded.
 /// `n` < 0 inserts a default growable capacity (16 bytes).
-pub fn Encoder::with_capacity(n : Int) -> Encoder {
+pub fn Encoder::with_capacity(n : Int32) -> Encoder {
   let capacity = if n < 0 { 16 } else { n }
   { buf: Array(capacity~), }
 }
@@ -46,18 +46,18 @@ pub fn Encoder::write_bool(self : Encoder, v : Bool) -> Unit {
 }
 
 ///|
-pub fn Encoder::write_i8(self : Encoder, v : Int) -> Unit {
+pub fn Encoder::write_i8(self : Encoder, v : Int32) -> Unit {
   self.buf.push(v.to_byte())
 }
 
 ///|
-pub fn Encoder::write_i16(self : Encoder, v : Int) -> Unit {
+pub fn Encoder::write_i16(self : Encoder, v : Int32) -> Unit {
   self.buf.push((v >> 8).to_byte())
   self.buf.push(v.to_byte())
 }
 
 ///|
-pub fn Encoder::write_i32(self : Encoder, v : Int) -> Unit {
+pub fn Encoder::write_i32(self : Encoder, v : Int32) -> Unit {
   for shift in [24, 16, 8, 0] {
     self.buf.push((v >> shift).to_byte())
   }
@@ -88,7 +88,7 @@ pub fn Encoder::write_bytes(self : Encoder, b : Bytes) -> Unit {
 
 ///|
 /// Unsigned LEB128 varint.
-pub fn Encoder::write_uvarint(self : Encoder, v : UInt) -> Unit {
+pub fn Encoder::write_uvarint(self : Encoder, v : UInt32) -> Unit {
   let mut v = v
   while v >= 0x80U {
     self.buf.push((v | 0x80U).to_byte())
@@ -99,7 +99,7 @@ pub fn Encoder::write_uvarint(self : Encoder, v : UInt) -> Unit {
 
 ///|
 /// Zig-zag varint (used inside record batches).
-pub fn Encoder::write_varint(self : Encoder, v : Int) -> Unit {
+pub fn Encoder::write_varint(self : Encoder, v : Int32) -> Unit {
   self.write_uvarint(((v << 1) ^ (v >> 31)).reinterpret_as_uint())
 }
 
@@ -116,7 +116,7 @@ pub fn Encoder::write_varlong(self : Encoder, v : Int64) -> Unit {
 
 ///|
 /// Compact array/bytes length: count + 1 as unsigned varint.
-pub fn Encoder::write_compact_len(self : Encoder, n : Int) -> Unit {
+pub fn Encoder::write_compact_len(self : Encoder, n : Int32) -> Unit {
   self.write_uvarint((n + 1).reinterpret_as_uint())
 }
 
@@ -163,7 +163,7 @@ pub fn Encoder::write_tag_buffer(self : Encoder) -> Unit {
 /// ascending tag order as the protocol requires; tag numbers must be unique.
 pub fn Encoder::write_tagged_fields(
   self : Encoder,
-  tags : Array[(Int, Bytes)],
+  tags : Array[(Int32, Bytes)],
 ) -> Unit {
   let sorted = tags.copy()
   sorted.sort_by(fn(a, b) { a.0.compare(b.0) })
@@ -179,23 +179,23 @@ pub fn Encoder::write_tagged_fields(
 ///|
 pub struct Decoder {
   data : Bytes
-  mut pos : Int
+  mut pos : Int32
 }
 
 ///|
-pub fn Decoder::new(data : Bytes, start? : Int = 0) -> Decoder {
+pub fn Decoder::new(data : Bytes, start~ : Int32 = 0) -> Decoder {
   { data, pos: start, }
 }
 
 ///|
-pub fn Decoder::remaining(self : Decoder) -> Int {
+pub fn Decoder::remaining(self : Decoder) -> Int32 {
   self.data.length() - self.pos
 }
 
 ///|
 /// Bounds check computed by subtraction (never overflows); negative
 /// lengths from malformed input raise instead of rewinding or panicking.
-fn Decoder::need(self : Decoder, n : Int) -> Unit raise DecodeError {
+fn Decoder::need(self : Decoder, n : Int32) -> Unit raise DecodeError {
   if n < 0 || n > self.data.length() - self.pos {
     raise DecodeError::UnexpectedEof
   }
@@ -215,7 +215,7 @@ pub fn Decoder::read_bool(self : Decoder) -> Bool raise DecodeError {
 }
 
 ///|
-pub fn Decoder::read_i8(self : Decoder) -> Int raise DecodeError {
+pub fn Decoder::read_i8(self : Decoder) -> Int32 raise DecodeError {
   let v = self.read_byte().to_int()
   if v >= 128 {
     v - 256
@@ -225,7 +225,7 @@ pub fn Decoder::read_i8(self : Decoder) -> Int raise DecodeError {
 }
 
 ///|
-pub fn Decoder::read_i16(self : Decoder) -> Int raise DecodeError {
+pub fn Decoder::read_i16(self : Decoder) -> Int32 raise DecodeError {
   self.need(2)
   let v = (self.data[self.pos].to_int() << 8) | self.data[self.pos + 1].to_int()
   self.pos += 2
@@ -233,7 +233,7 @@ pub fn Decoder::read_i16(self : Decoder) -> Int raise DecodeError {
 }
 
 ///|
-pub fn Decoder::read_i32(self : Decoder) -> Int raise DecodeError {
+pub fn Decoder::read_i32(self : Decoder) -> Int32 raise DecodeError {
   self.need(4)
   let mut v = 0
   for _ in 0..<4 {
@@ -270,7 +270,7 @@ pub fn Decoder::read_f64(self : Decoder) -> Double raise DecodeError {
 ///|
 /// Skip n bytes. Negative n and overruns raise; bounds are computed by
 /// subtraction so a malformed huge length cannot overflow the check.
-pub fn Decoder::skip(self : Decoder, n : Int) -> Unit raise DecodeError {
+pub fn Decoder::skip(self : Decoder, n : Int32) -> Unit raise DecodeError {
   if n < 0 || n > self.data.length() - self.pos {
     raise DecodeError::UnexpectedEof
   }
@@ -278,7 +278,10 @@ pub fn Decoder::skip(self : Decoder, n : Int) -> Unit raise DecodeError {
 }
 
 ///|
-pub fn Decoder::read_bytes(self : Decoder, n : Int) -> Bytes raise DecodeError {
+pub fn Decoder::read_bytes(
+  self : Decoder,
+  n : Int32,
+) -> Bytes raise DecodeError {
   self.need(n)
   let copy = self.data[self.pos:self.pos + n].to_owned()
   self.pos += n
@@ -294,7 +297,7 @@ pub fn Decoder::read_bytes(self : Decoder, n : Int) -> Bytes raise DecodeError {
 /// while that `Bytes` outlives the decoder.
 pub fn Decoder::read_bytes_view(
   self : Decoder,
-  n : Int,
+  n : Int32,
 ) -> BytesView raise DecodeError {
   self.need(n)
   let view = self.data[self.pos:self.pos + n]
@@ -303,7 +306,7 @@ pub fn Decoder::read_bytes_view(
 }
 
 ///|
-fn Decoder::read_raw_uvarint(self : Decoder) -> UInt raise DecodeError {
+fn Decoder::read_raw_uvarint(self : Decoder) -> UInt32 raise DecodeError {
   let mut result = 0U
   for shift = 0; ; shift = shift + 7 {
     if shift >= 35 {
@@ -320,7 +323,7 @@ fn Decoder::read_raw_uvarint(self : Decoder) -> UInt raise DecodeError {
 
 ///|
 /// Unsigned LEB128 varint.
-pub fn Decoder::read_uvarint(self : Decoder) -> Int raise DecodeError {
+pub fn Decoder::read_uvarint(self : Decoder) -> Int32 raise DecodeError {
   let v = self.read_raw_uvarint()
   if v > 0x7FFFFFFFU {
     raise DecodeError::Malformed("uvarint overflows int32")
@@ -330,7 +333,7 @@ pub fn Decoder::read_uvarint(self : Decoder) -> Int raise DecodeError {
 
 ///|
 /// Zig-zag varint.
-pub fn Decoder::read_varint(self : Decoder) -> Int raise DecodeError {
+pub fn Decoder::read_varint(self : Decoder) -> Int32 raise DecodeError {
   let u = self.read_raw_uvarint()
   ((u >> 1) ^ (0U - (u & 1U))).reinterpret_as_int()
 }
@@ -354,7 +357,7 @@ pub fn Decoder::read_varlong(self : Decoder) -> Int64 raise DecodeError {
 
 ///|
 /// Compact length prefix (value + 1); returns -1 for the null marker.
-pub fn Decoder::read_compact_len(self : Decoder) -> Int raise DecodeError {
+pub fn Decoder::read_compact_len(self : Decoder) -> Int32 raise DecodeError {
   self.read_uvarint() - 1
 }
 

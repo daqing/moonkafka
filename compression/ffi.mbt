@@ -7,41 +7,41 @@
 #borrow(src, dest)
 extern "c" fn gzip_decompress_into(
   src : Bytes,
-  src_len : Int,
+  src_len : Int32,
   dest : FixedArray[Byte],
-  dest_cap : Int,
-) -> Int = "moonkafka_gzip_decompress_into"
+  dest_cap : Int32,
+) -> Int32 = "moonkafka_gzip_decompress_into"
 
 ///|
 /// Deflate into a gzip member. Same return conventions.
 #borrow(src, dest)
 extern "c" fn gzip_compress_into(
   src : Bytes,
-  src_len : Int,
+  src_len : Int32,
   dest : FixedArray[Byte],
-  dest_cap : Int,
-) -> Int = "moonkafka_gzip_compress_into"
+  dest_cap : Int32,
+) -> Int32 = "moonkafka_gzip_compress_into"
 
 ///|
 /// Bound zlib reports for the compressed size, plus gzip framing slack.
-extern "c" fn gzip_compress_bound(src_len : Int) -> Int = "moonkafka_gzip_compress_bound"
+extern "c" fn gzip_compress_bound(src_len : Int32) -> Int32 = "moonkafka_gzip_compress_bound"
 
 ///|
 #borrow(src, dest)
 extern "c" fn zstd_decompress_into(
   src : Bytes,
-  src_len : Int,
+  src_len : Int32,
   dest : FixedArray[Byte],
-  dest_cap : Int,
-) -> Int = "moonkafka_zstd_decompress_into"
+  dest_cap : Int32,
+) -> Int32 = "moonkafka_zstd_decompress_into"
 
 ///|
 /// Frame-declared output size: >= 0 known, -1 unknown, -2 corrupt.
 #borrow(src)
-extern "c" fn zstd_frame_content_size(src : Bytes, src_len : Int) -> Int64 = "moonkafka_zstd_frame_content_size"
+extern "c" fn zstd_frame_content_size(src : Bytes, src_len : Int32) -> Int64 = "moonkafka_zstd_frame_content_size"
 
 ///|
-const GZIP_ATTEMPTS : Int = 24
+const GZIP_ATTEMPTS : Int32 = 24
 
 ///|
 pub fn gzip_decompress(data : Bytes) -> Bytes raise @buf.DecodeError {

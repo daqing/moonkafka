@@ -11,7 +11,7 @@
 // that decompresses to up to 32 KiB of input.
 
 ///|
-fn read_snappy_uvarint(d : @buf.Decoder) -> Int raise @buf.DecodeError {
+fn read_snappy_uvarint(d : @buf.Decoder) -> Int32 raise @buf.DecodeError {
   let mut result = 0
   let mut shift = 0
   while shift <= 28 {
@@ -26,7 +26,7 @@ fn read_snappy_uvarint(d : @buf.Decoder) -> Int raise @buf.DecodeError {
 }
 
 ///|
-fn write_snappy_uvarint(e : @buf.Encoder, n : Int) -> Unit {
+fn write_snappy_uvarint(e : @buf.Encoder, n : Int32) -> Unit {
   let mut n = n
   while n >= 0x80 {
     e.write_byte(((n & 0x7F) | 0x80).to_byte())
@@ -121,8 +121,8 @@ pub fn snappy_encode_block(data : Bytes) -> Bytes {
   // 14-bit hash table of candidate positions; 0 means empty (we offset
   // positions by 1).
   let table_size = 1 << 14
-  let table : Array[Int] = Array::make(table_size, 0)
-  let hash = fn(i : Int) -> Int {
+  let table : Array[Int32] = Array::make(table_size, 0)
+  let hash = fn(i : Int32) -> Int32 {
     let v = (data[i].to_int() << 24) |
       (data[i + 1].to_int() << 16) |
       (data[i + 2].to_int() << 8) |
@@ -183,8 +183,8 @@ pub fn snappy_encode_block(data : Bytes) -> Bytes {
 fn write_snappy_literal(
   e : @buf.Encoder,
   data : Bytes,
-  start : Int,
-  len : Int,
+  start : Int32,
+  len : Int32,
 ) -> Unit {
   let mut pos = start
   let mut remaining = len
@@ -195,9 +195,9 @@ fn write_snappy_literal(
     let (take, escape) = if remaining <= 60 {
       (remaining, 0)
     } else if remaining <= 0xFF {
-      (Int::min(0xFF, remaining), 1)
+      (Int32::min(0xFF, remaining), 1)
     } else {
-      (Int::min(0xFFFF, remaining), 2)
+      (Int32::min(0xFFFF, remaining), 2)
     }
     if escape == 0 {
       e.write_byte((0x00 | ((take - 1) << 2)).to_byte())

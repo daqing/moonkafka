@@ -27,19 +27,19 @@ pub(all) struct Record {
 } derive(@debug.Debug)
 
 ///|
-const RECORD_BATCH_HEADER_SIZE : Int = 61
+const RECORD_BATCH_HEADER_SIZE : Int32 = 61
 
 ///|
-const ATTR_COMPRESSION_MASK : Int = 0x07
+const ATTR_COMPRESSION_MASK : Int32 = 0x07
 
 ///|
-const ATTR_TIMESTAMP_TYPE : Int = 0x08
+const ATTR_TIMESTAMP_TYPE : Int32 = 0x08
 
 ///|
-const ATTR_TRANSACTIONAL : Int = 0x10
+const ATTR_TRANSACTIONAL : Int32 = 0x10
 
 ///|
-const ATTR_CONTROL : Int = 0x20
+const ATTR_CONTROL : Int32 = 0x20
 
 ///|
 /// One decoded record batch with the metadata read_committed filtering
@@ -51,8 +51,8 @@ pub(all) struct DecodedBatch {
   /// the fetcher advances read positions past whole batches with it.
   last_offset : Int64
   producer_id : Int64
-  producer_epoch : Int
-  base_sequence : Int
+  producer_epoch : Int32
+  base_sequence : Int32
   is_control : Bool
   is_transactional : Bool
   truncated : Bool
@@ -187,8 +187,8 @@ fn is_aborted(
 ///|
 fn decode_one_batch(
   data : Bytes,
-  start : Int,
-  end : Int,
+  start : Int32,
+  end : Int32,
 ) -> DecodedBatch raise @buf.DecodeError {
   let magic = {
     let v = data[start + 16].to_int()
@@ -350,21 +350,21 @@ pub struct RecordBatchBuilder {
   base_offset : Int64
   bodies : Array[Bytes]
   /// Sum of the encoded record bodies plus their length varints.
-  mut body_bytes : Int
+  mut body_bytes : Int32
   mut base_timestamp : Int64
   mut max_timestamp : Int64
   mut last_offset : Int64
   /// Idempotence identity stamped by the producer; -1/-1/-1 = none.
   mut producer_id : Int64
-  mut producer_epoch : Int
-  mut base_sequence : Int
+  mut producer_epoch : Int32
+  mut base_sequence : Int32
   /// Marks the batch transactional (attributes bit 4); read_committed
   /// consumers filter it against the aborted-transactions list.
   mut transactional : Bool
 } derive(@debug.Debug)
 
 ///|
-pub fn RecordBatchBuilder::new(base_offset? : Int64 = 0L) -> RecordBatchBuilder {
+pub fn RecordBatchBuilder::new(base_offset~ : Int64 = 0L) -> RecordBatchBuilder {
   {
     base_offset,
     bodies: [],
@@ -386,8 +386,8 @@ pub fn RecordBatchBuilder::new(base_offset? : Int64 = 0L) -> RecordBatchBuilder 
 pub fn RecordBatchBuilder::set_idempotence(
   self : RecordBatchBuilder,
   producer_id : Int64,
-  producer_epoch : Int,
-  base_sequence : Int,
+  producer_epoch : Int32,
+  base_sequence : Int32,
 ) -> Unit {
   self.producer_id = producer_id
   self.producer_epoch = producer_epoch
@@ -406,9 +406,9 @@ pub fn RecordBatchBuilder::set_transactional(self : RecordBatchBuilder) -> Unit 
 pub fn RecordBatchBuilder::append(
   self : RecordBatchBuilder,
   timestamp : Int64,
-  key? : Bytes? = None,
-  value? : Bytes? = None,
-  headers? : Array[(Bytes, Bytes)] = [],
+  key~ : Bytes? = None,
+  value~ : Bytes? = None,
+  headers~ : Array[(Bytes, Bytes)] = [],
 ) -> Unit {
   let encoded = self.encode_record_body(timestamp, key, value, headers)
   if self.base_timestamp < 0L {
@@ -465,24 +465,24 @@ fn RecordBatchBuilder::encode_record_body(
 pub fn RecordBatchBuilder::estimated_append_size(
   self : RecordBatchBuilder,
   timestamp : Int64,
-  key? : Bytes? = None,
-  value? : Bytes? = None,
-  headers? : Array[(Bytes, Bytes)] = [],
-) -> Int {
+  key~ : Bytes? = None,
+  value~ : Bytes? = None,
+  headers~ : Array[(Bytes, Bytes)] = [],
+) -> Int32 {
   let encoded = self.encode_record_body(timestamp, key, value, headers)
   encoded.length() + varint_len(encoded.length())
 }
 
 ///|
 /// Number of records appended so far.
-pub fn RecordBatchBuilder::count(self : RecordBatchBuilder) -> Int {
+pub fn RecordBatchBuilder::count(self : RecordBatchBuilder) -> Int32 {
   self.bodies.length()
 }
 
 ///|
 /// Upper bound on the finalized batch size: fixed header plus record
 /// bodies (header fields other than bodies do not grow with records).
-pub fn RecordBatchBuilder::estimated_size(self : RecordBatchBuilder) -> Int {
+pub fn RecordBatchBuilder::estimated_size(self : RecordBatchBuilder) -> Int32 {
   RECORD_BATCH_HEADER_SIZE + self.body_bytes
 }
 
@@ -544,7 +544,7 @@ pub fn RecordBatchBuilder::to_bytes(self : RecordBatchBuilder) -> Bytes {
 
 ///|
 /// Byte length of a zig-zag varint encoding of n (small sizes only).
-fn varint_len(n : Int) -> Int {
+fn varint_len(n : Int32) -> Int32 {
   let mut v = ((n << 1) ^ (n >> 31)).reinterpret_as_uint()
   let mut len = 1
   while v >= 0x80U {

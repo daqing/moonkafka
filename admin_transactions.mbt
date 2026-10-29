@@ -14,13 +14,13 @@
 /// One active producer for a partition, as DescribeProducers reports it.
 pub struct AdminActiveProducer {
   producer_id : Int64
-  producer_epoch : Int
+  producer_epoch : Int32
   /// The last sequence number the producer sent, or -1.
-  last_sequence : Int
+  last_sequence : Int32
   /// The last timestamp the producer sent (wall-clock ms), or -1.
   last_timestamp : Int64
   /// The epoch of the producer's transaction coordinator.
-  coordinator_epoch : Int
+  coordinator_epoch : Int32
   /// The offset the producer's current transaction started at, or -1 when
   /// it is not in a transaction.
   current_txn_start_offset : Int64
@@ -29,8 +29,8 @@ pub struct AdminActiveProducer {
 ///|
 /// One partition's DescribeProducers result (error codes as values).
 pub struct AdminDescribeProducerPartition {
-  partition_index : Int
-  error_code : Int
+  partition_index : Int32
+  error_code : Int32
   error_message : String?
   active_producers : Array[AdminActiveProducer]
 } derive(@debug.Debug)
@@ -46,7 +46,7 @@ pub struct AdminDescribeProducersTopic {
 /// Encode a DescribeProducers v0 request body: the topics and the
 /// partition indexes to list producers for.
 pub fn encode_describe_producers_request(
-  topics : Array[(String, Array[Int])],
+  topics : Array[(String, Array[Int32])],
 ) -> Bytes {
   let body = @buf.Encoder::new()
   body.write_compact_len(topics.length())
@@ -69,7 +69,7 @@ pub fn encode_describe_producers_request(
 /// producers and per-partition error codes as values.
 pub fn decode_describe_producers_response(
   d : @buf.Decoder,
-) -> (Array[AdminDescribeProducersTopic], Int) raise {
+) -> (Array[AdminDescribeProducersTopic], Int32) raise {
   let throttle = d.read_i32()
   let out : Array[AdminDescribeProducersTopic] = []
   let n = d.read_compact_len()
@@ -118,8 +118,8 @@ pub fn decode_describe_producers_response(
 ///|
 pub async fn BrokerConnection::describe_producers(
   self : BrokerConnection,
-  topics : Array[(String, Array[Int])],
-  timeout_ms? : Int = 30000,
+  topics : Array[(String, Array[Int32])],
+  timeout_ms~ : Int32 = 30000,
 ) -> Array[AdminDescribeProducersTopic] {
   let d = self.request(
     API_DESCRIBE_PRODUCERS,
@@ -141,7 +141,7 @@ pub async fn BrokerConnection::describe_producers(
 /// Partition leaders answer, so the call runs on any broker.
 pub async fn Admin::describe_producers(
   self : Admin,
-  topics : Array[(String, Array[Int])],
+  topics : Array[(String, Array[Int32])],
 ) -> Array[AdminDescribeProducersTopic] {
   self.with_retries(
     fn(results : Array[AdminDescribeProducersTopic]) {
@@ -167,22 +167,22 @@ pub async fn Admin::describe_producers(
 /// DescribeTransactions reports it.
 pub struct AdminTransactionTopic {
   topic : String
-  partitions : Array[Int]
+  partitions : Array[Int32]
 } derive(@debug.Debug)
 
 ///|
 /// One transactional id's DescribeTransactions result (error codes as
 /// values). `topics` is empty once the transaction is no longer active.
 pub struct AdminDescribeTransaction {
-  error_code : Int
+  error_code : Int32
   transactional_id : String
   /// The state name: Empty, Ongoing, PrepareCommit, PrepareAbort,
   /// CompleteCommit, CompleteAbort, or Dead.
   transaction_state : String
-  transaction_timeout_ms : Int
+  transaction_timeout_ms : Int32
   transaction_start_time_ms : Int64
   producer_id : Int64
-  producer_epoch : Int
+  producer_epoch : Int32
   topics : Array[AdminTransactionTopic]
 } derive(@debug.Debug)
 
@@ -208,7 +208,7 @@ pub fn encode_describe_transactions_request(
 /// spans.
 pub fn decode_describe_transactions_response(
   d : @buf.Decoder,
-) -> (Array[AdminDescribeTransaction], Int) raise {
+) -> (Array[AdminDescribeTransaction], Int32) raise {
   let throttle = d.read_i32()
   let out : Array[AdminDescribeTransaction] = []
   let n = d.read_compact_len()
@@ -224,7 +224,7 @@ pub fn decode_describe_transactions_response(
     let tcount = d.read_compact_len()
     for _ in 0..<tcount {
       let topic = d.read_compact_string()
-      let partitions : Array[Int] = []
+      let partitions : Array[Int32] = []
       let pcount = d.read_compact_len()
       for _ in 0..<pcount {
         partitions.push(d.read_i32())
@@ -252,7 +252,7 @@ pub fn decode_describe_transactions_response(
 pub async fn BrokerConnection::describe_transactions(
   self : BrokerConnection,
   transactional_ids : Array[String],
-  timeout_ms? : Int = 30000,
+  timeout_ms~ : Int32 = 30000,
 ) -> Array[AdminDescribeTransaction] {
   let d = self.request(
     API_DESCRIBE_TRANSACTIONS,
@@ -312,7 +312,7 @@ pub struct AdminListedTransaction {
 /// non-zero. `unknown_state_filters` echoes any request filters the
 /// coordinator did not recognize.
 pub struct AdminListTransactionsResult {
-  error_code : Int
+  error_code : Int32
   unknown_state_filters : Array[String]
   transactions : Array[AdminListedTransaction]
 } derive(@debug.Debug)
@@ -323,7 +323,7 @@ pub struct AdminListTransactionsResult {
 /// pattern, so `api_version` decides whether that trailing field is
 /// written.
 pub fn encode_list_transactions_request(
-  api_version : Int,
+  api_version : Int32,
   state_filters : Array[String],
   producer_id_filters : Array[Int64],
   duration_filter : Int64,
@@ -351,7 +351,7 @@ pub fn encode_list_transactions_request(
 /// unknown state filters, and the transactions this broker coordinates.
 pub fn decode_list_transactions_response(
   d : @buf.Decoder,
-) -> (AdminListTransactionsResult, Int) raise {
+) -> (AdminListTransactionsResult, Int32) raise {
   let throttle = d.read_i32()
   let error_code = d.read_i16()
   let unknown : Array[String] = []
@@ -379,7 +379,7 @@ pub async fn BrokerConnection::list_transactions(
   producer_id_filters : Array[Int64],
   duration_filter : Int64,
   transactional_id_pattern : String?,
-  timeout_ms? : Int = 30000,
+  timeout_ms~ : Int32 = 30000,
 ) -> AdminListTransactionsResult {
   let version = self.api_version(API_LIST_TRANSACTIONS)
   let d = self.request(
@@ -407,10 +407,10 @@ pub async fn BrokerConnection::list_transactions(
 /// retry policy. Transport failures raise.
 pub async fn Admin::list_transactions(
   self : Admin,
-  state_filters? : Array[String] = [],
-  producer_id_filters? : Array[Int64] = [],
-  duration_filter? : Int64 = -1L,
-  transactional_id_pattern? : String? = None,
+  state_filters~ : Array[String] = [],
+  producer_id_filters~ : Array[Int64] = [],
+  duration_filter~ : Int64 = -1L,
+  transactional_id_pattern~ : String? = None,
 ) -> AdminListTransactionsResult {
   self.with_retries(
     fn(result : AdminListTransactionsResult) {
